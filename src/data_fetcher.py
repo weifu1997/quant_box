@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 from urllib.parse import urlparse
 from pathlib import Path
 import random
@@ -12,6 +13,8 @@ import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 
+
+logger = logging.getLogger(__name__)
 
 DAILY_FIELDS = [
     "ts_code",
@@ -144,7 +147,9 @@ def fetch_daily_stock(
         except (RuntimeError, ValueError) as exc:
             last_error = exc
             if attempt < retries:
-                time.sleep(2 ** (attempt - 1) + random.uniform(0, 1))
+                wait_seconds = 2 ** (attempt - 1) + random.uniform(0, 1)
+                logger.warning("Retrying %s daily data after error: %s", ts_code, exc)
+                time.sleep(wait_seconds)
     raise ValueError(f"{ts_code} daily data response is invalid after {retries} attempts: {last_error}") from last_error
 
 
@@ -224,6 +229,7 @@ def update_daily_data(
 ) -> dict[str, Path]:
     config = load_config()
     data_cfg = config.get("data", {})
+    duplicate_keep = str(data_cfg.get("duplicate_keep", "first"))
     target_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -253,7 +259,7 @@ def update_daily_data(
         new_df = normalize_daily_frame(new_df, default_ts_code=code)
         if "adj_factor" in new_df.columns:
             new_df = new_df.dropna(subset=["adj_factor"])
-        new_df = new_df.drop_duplicates(["ts_code", "trade_date"], keep="last")
+        new_df = new_df.drop_duplicates(["ts_code", "trade_date"], keep=duplicate_keep)
         new_df.to_csv(path, index=False, encoding="utf-8-sig")
         written[code] = path
     return written

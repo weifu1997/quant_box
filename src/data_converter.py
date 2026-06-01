@@ -36,12 +36,16 @@ def convert_to_qlib_format(
         raise FileNotFoundError(f"No raw stock csv files found in {source_dir}")
 
     calendar_file = config.get("data", {}).get("calendar_file")
+    tradable_file = config.get("data", {}).get("tradable_file")
+    tradable_codes = _load_tradable_codes(tradable_file) if tradable_file else None
     all_dates: set[str] = set()
     prepared: list[tuple[str, pd.DataFrame]] = []
 
     for csv_file in csv_files:
         raw = pd.read_csv(csv_file)
         code = _instrument_from_filename(csv_file)
+        if tradable_codes is not None and code.upper() not in tradable_codes:
+            continue
         df = normalize_daily_frame(raw, default_ts_code=code)
         df = df.sort_values("trade_date")
         if df.empty:
@@ -102,6 +106,15 @@ def convert_to_qlib_format(
         "close_price_file": prices_dir / "close.parquet",
         "ohlcv_price_file": prices_dir / "ohlcv.parquet",
     }
+
+
+def _load_tradable_codes(path_value: str | Path) -> set[str]:
+    path = resolve_path(path_value)
+    df = pd.read_csv(path)
+    col = next((name for name in ["ts_code", "instrument", "code", "con_code"] if name in df.columns), None)
+    if col is None:
+        raise ValueError(f"{path} must contain one of: ts_code, instrument, code, con_code.")
+    return set(df[col].dropna().astype(str).str.upper())
 
 
 def _apply_adjustment(feature_df: pd.DataFrame) -> pd.DataFrame:

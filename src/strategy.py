@@ -74,35 +74,79 @@ def select_stocks(
     previous_set = set(previous)
     allowed_new = max(0, min(max_turnover, top_n))
     rank_map = {code: rank for rank, code in enumerate(ranked)}
-    buffer_limit = top_n + max(0, rank_buffer)
 
-    keep = [code for code in previous if rank_map.get(code, float("inf")) < buffer_limit]
-    keep = sorted(keep, key=lambda code: rank_map.get(code, float("inf")))[:top_n]
-
-    min_keep = max(0, min(len(previous), top_n - allowed_new))
-    if len(keep) < min_keep:
-        fallback = [code for code in previous if code in rank_map and code not in keep]
-        fallback = sorted(fallback, key=lambda code: rank_map.get(code, float("inf")))
-        keep.extend(fallback[: min_keep - len(keep)])
-
-    slots = top_n - len(keep)
-    additions = [code for code in ranked if code not in keep and code not in previous_set][: min(slots, allowed_new)]
-    holdings = keep + additions
+    keep = _pick_keeps(previous, rank_map, top_n, allowed_new, rank_buffer)
+    additions = _pick_additions(ranked, keep, previous_set, top_n, allowed_new)
+    holdings = _dedupe_preserve(keep + additions)
 
     if len(holdings) < top_n:
         holdings.extend([code for code in ranked if code not in holdings][: top_n - len(holdings)])
+        holdings = _dedupe_preserve(holdings)
 
-    new_count = len(set(holdings) - previous_set)
-    if new_count > allowed_new:
-        protected = [code for code in previous if code in ranked and code not in holdings]
-        protected = sorted(protected, key=lambda code: rank_map.get(code, float("inf")))
-        while len(set(holdings) - previous_set) > allowed_new and protected:
-            for idx in range(len(holdings) - 1, -1, -1):
-                if holdings[idx] not in previous_set:
-                    holdings[idx] = protected.pop(0)
-                    break
-
+    holdings = _enforce_turnover_cap(holdings, previous, previous_set, rank_map, allowed_new)
     return sorted(holdings[:top_n], key=lambda code: rank_map.get(code, float("inf")))
+
+
+def _pick_keeps(
+    previous: list[str],
+    rank_map: dict[str, int],
+    top_n: int,
+    allowed_new: int,
+    rank_buffer: int,
+) -> list[str]:
+    buffer_limit = top_n + max(0, rank_buffer)
+    keep = [code for code in previous if rank_map.get(code, float("inf")) < buffer_limit]
+    keep = sorted(_dedupe_preserve(keep), key=lambda code: rank_map.get(code, float("inf")))[:top_n]
+
+    min_keep = max(0, min(len(set(previous)), top_n - allowed_new))
+    if len(keep) < min_keep:
+        fallback = [code for code in previous if code in rank_map and code not in keep]
+        fallback = sorted(_dedupe_preserve(fallback), key=lambda code: rank_map.get(code, float("inf")))
+        keep.extend(fallback[: min_keep - len(keep)])
+    return _dedupe_preserve(keep)
+
+
+def _pick_additions(
+    ranked: list[str],
+    keep: list[str],
+    previous_set: set[str],
+    top_n: int,
+    allowed_new: int,
+) -> list[str]:
+    slots = max(top_n - len(keep), 0)
+    return [code for code in ranked if code not in keep and code not in previous_set][: min(slots, allowed_new)]
+
+
+def _enforce_turnover_cap(
+    holdings: list[str],
+    previous: list[str],
+    previous_set: set[str],
+    rank_map: dict[str, int],
+    allowed_new: int,
+) -> list[str]:
+    protected = [code for code in previous if code in rank_map and code not in holdings]
+    protected = sorted(_dedupe_preserve(protected), key=lambda code: rank_map.get(code, float("inf")))
+    holdings = list(holdings)
+    while len(set(holdings) - previous_set) > allowed_new and protected:
+        for idx in range(len(holdings) - 1, -1, -1):
+            if holdings[idx] not in previous_set:
+                holdings[idx] = protected.pop(0)
+                holdings = _dedupe_preserve(holdings)
+                break
+        else:
+            break
+    return holdings
+
+
+def _dedupe_preserve(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def generate_holdings_by_day(

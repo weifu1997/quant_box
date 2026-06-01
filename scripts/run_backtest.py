@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -14,6 +15,9 @@ from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.strategy import composite_factor, resample_signals
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -54,9 +58,9 @@ def main() -> None:
     result.trades.to_csv(out_dir / "backtest_trades.csv", index=False, encoding="utf-8-sig")
     (out_dir / "backtest_metrics.json").write_text(json.dumps(result.metrics, indent=2), encoding="utf-8")
 
-    print("Backtest finished.")
+    logger.info("Backtest finished.")
     for key, value in result.metrics.items():
-        print(f"{key}: {value:.6f}")
+        logger.info("%s: %.6f", key, value)
 
 
 if __name__ == "__main__":

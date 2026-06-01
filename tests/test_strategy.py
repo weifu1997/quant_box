@@ -33,6 +33,13 @@ class StrategyTests(unittest.TestCase):
         self.assertIn("F", selected)
         self.assertLessEqual(len(set(selected) - set(previous)), 1)
 
+    def test_select_stocks_deduplicates_previous_holdings(self) -> None:
+        scores = pd.Series([10, 9, 8, 7], index=["A", "B", "C", "D"])
+        selected = select_stocks(scores, top_n=3, previous_holdings=["A", "A", "B"], max_turnover=1)
+
+        self.assertEqual(len(selected), len(set(selected)))
+        self.assertEqual(len(selected), 3)
+
     def test_composite_factor_returns_score_series(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A", "B", "C", "D", "E"]],

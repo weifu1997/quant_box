@@ -58,19 +58,56 @@ def run_backtest(
     max_weight = float(max_weight) if max_weight is not None else None
 
     holdings: dict[str, int] = {}
+    entry_prices: dict[str, float] = {}
     last_prices: dict[str, float] = {}
     equity_rows: list[tuple[pd.Timestamp, float]] = []
     holding_rows: list[dict[str, object]] = []
     trade_rows: list[dict[str, object]] = []
 
     previous_date: pd.Timestamp | None = None
+    peak_equity = capital
     for trade_date in price_dates:
         close = _field_on_date(prices, "close", trade_date)
         last_prices.update({str(code): float(price) for code, price in close.dropna().items()})
         tradability = _tradability(prices, trade_date, previous_date, config)
+        capital = _execute_risk_exits(
+            holdings,
+            entry_prices,
+            capital,
+            close,
+            last_prices,
+            tradability,
+            trade_rows,
+            trade_date,
+            commission,
+            stamp_tax,
+            slippage,
+            prices,
+            config,
+        )
+        total_before_signal = _portfolio_value(capital, holdings, close, last_prices)
+        peak_equity = max(peak_equity, total_before_signal)
+        risk_off = _drawdown_breached(total_before_signal, peak_equity, config)
+        if risk_off:
+            capital = _liquidate_portfolio(
+                holdings,
+                entry_prices,
+                capital,
+                close,
+                last_prices,
+                tradability,
+                trade_rows,
+                trade_date,
+                commission,
+                stamp_tax,
+                slippage,
+                prices,
+                config,
+                reason="circuit_breaker",
+            )
 
         signal_date = trade_schedule.get(pd.Timestamp(trade_date))
-        if signal_date is not None:
+        if signal_date is not None and not risk_off:
             daily_scores = score_panel.xs(signal_date, level=0, drop_level=True)
             daily_scores.index = daily_scores.index.astype(str)
             daily_scores = daily_scores[daily_scores.index.isin(tradability["priced"])]
@@ -83,7 +120,8 @@ def run_backtest(
                 rank_buffer=rank_buffer,
             )
             total_before_trade = _portfolio_value(capital, holdings, close, last_prices)
-            target_value = _target_value(total_before_trade, target_holdings, max_weight)
+            exposure_scale = _exposure_scale(equity_rows, config)
+            target_value = _target_value(total_before_trade, target_holdings, max_weight, exposure_scale)
 
             desired_shares = {}
             for stock in target_holdings:
@@ -107,7 +145,19 @@ def run_backtest(
                     holdings[stock] = remaining
                 else:
                     holdings.pop(stock, None)
-                trade_rows.append(_trade(signal_date, trade_date, stock, "SELL", sell_shares, price, proceeds))
+                    entry_prices.pop(stock, None)
+                trade_rows.append(
+                    _trade(
+                        signal_date,
+                        trade_date,
+                        stock,
+                        "SELL",
+                        sell_shares,
+                        price,
+                        proceeds,
+                        capacity=_capacity(prices, trade_date, stock, sell_shares * price, config),
+                    )
+                )
 
             for stock in target_holdings:
                 current = holdings.get(stock, 0)
@@ -126,8 +176,21 @@ def run_backtest(
                 if buy_shares <= 0:
                     continue
                 capital -= cost
+                old_shares = holdings.get(stock, 0)
                 holdings[stock] = holdings.get(stock, 0) + buy_shares
-                trade_rows.append(_trade(signal_date, trade_date, stock, "BUY", buy_shares, price, -cost))
+                entry_prices[stock] = _average_entry_price(entry_prices.get(stock), old_shares, price, buy_shares)
+                trade_rows.append(
+                    _trade(
+                        signal_date,
+                        trade_date,
+                        stock,
+                        "BUY",
+                        buy_shares,
+                        price,
+                        -cost,
+                        capacity=_capacity(prices, trade_date, stock, buy_shares * price, config),
+                    )
+                )
 
         total = _portfolio_value(capital, holdings, close, last_prices)
         equity_rows.append((pd.Timestamp(trade_date), total))
@@ -321,12 +384,12 @@ def _price_for(stock: str, close: pd.Series, last_prices: dict[str, float]) -> f
     return float(last_prices.get(stock, 0.0))
 
 
-def _target_value(total: float, target_holdings: list[str], max_weight: float | None) -> float:
+def _target_value(total: float, target_holdings: list[str], max_weight: float | None, exposure_scale: float = 1.0) -> float:
     if not target_holdings:
         return 0.0
     equal_weight = 1 / len(target_holdings)
     weight = min(equal_weight, max_weight) if max_weight is not None else equal_weight
-    return total * weight
+    return total * weight * exposure_scale
 
 
 def _round_lot(shares: float, stock: str, config: dict) -> int:
@@ -351,8 +414,11 @@ def _trade(
     shares: int,
     price: float,
     cash: float,
+    status: str = "filled",
+    reason: str | None = None,
+    capacity: dict[str, float | bool] | None = None,
 ) -> dict[str, Any]:
-    return {
+    row = {
         "signal_date": signal_date,
         "date": trade_date,
         "instrument": stock,
@@ -360,8 +426,13 @@ def _trade(
         "shares": shares,
         "price": price,
         "cash": cash,
-        "status": "filled",
+        "status": status,
     }
+    if reason is not None:
+        row["reason"] = reason
+    if capacity is not None:
+        row.update(capacity)
+    return row
 
 
 def _blocked_trade(
@@ -393,6 +464,183 @@ def _max_drawdown_duration(equity_curve: pd.Series) -> int:
         current = current + 1 if is_underwater else 0
         longest = max(longest, current)
     return longest
+
+
+def _execute_risk_exits(
+    holdings: dict[str, int],
+    entry_prices: dict[str, float],
+    capital: float,
+    close: pd.Series,
+    last_prices: dict[str, float],
+    tradability: dict[str, set[str]],
+    trade_rows: list[dict[str, object]],
+    trade_date: pd.Timestamp,
+    commission: float,
+    stamp_tax: float,
+    slippage: float,
+    prices: pd.DataFrame,
+    config: dict,
+) -> float:
+    stop_loss = config.get("stop_loss_pct")
+    take_profit = config.get("take_profit_pct")
+    if stop_loss is None and take_profit is None:
+        return capital
+
+    for stock, shares in list(holdings.items()):
+        entry = entry_prices.get(stock)
+        if entry is None or entry <= 0 or shares <= 0:
+            continue
+        price = _price_for(stock, close, last_prices)
+        pnl = price / entry - 1
+        reason = None
+        if stop_loss is not None and pnl <= -abs(float(stop_loss)):
+            reason = "stop_loss"
+        elif take_profit is not None and pnl >= abs(float(take_profit)):
+            reason = "take_profit"
+        if reason is None:
+            continue
+        if stock not in tradability["sellable"]:
+            trade_rows.append(_blocked_trade(pd.NaT, trade_date, stock, "SELL", shares, f"{reason}_not_sellable"))
+            continue
+        capital = _sell_all(
+            holdings,
+            entry_prices,
+            capital,
+            close,
+            last_prices,
+            trade_rows,
+            trade_date,
+            stock,
+            commission,
+            stamp_tax,
+            slippage,
+            prices,
+            config,
+            reason,
+        )
+    return capital
+
+
+def _liquidate_portfolio(
+    holdings: dict[str, int],
+    entry_prices: dict[str, float],
+    capital: float,
+    close: pd.Series,
+    last_prices: dict[str, float],
+    tradability: dict[str, set[str]],
+    trade_rows: list[dict[str, object]],
+    trade_date: pd.Timestamp,
+    commission: float,
+    stamp_tax: float,
+    slippage: float,
+    prices: pd.DataFrame,
+    config: dict,
+    reason: str,
+) -> float:
+    for stock, shares in list(holdings.items()):
+        if shares <= 0:
+            continue
+        if stock not in tradability["sellable"]:
+            trade_rows.append(_blocked_trade(pd.NaT, trade_date, stock, "SELL", shares, f"{reason}_not_sellable"))
+            continue
+        capital = _sell_all(
+            holdings,
+            entry_prices,
+            capital,
+            close,
+            last_prices,
+            trade_rows,
+            trade_date,
+            stock,
+            commission,
+            stamp_tax,
+            slippage,
+            prices,
+            config,
+            reason,
+        )
+    return capital
+
+
+def _sell_all(
+    holdings: dict[str, int],
+    entry_prices: dict[str, float],
+    capital: float,
+    close: pd.Series,
+    last_prices: dict[str, float],
+    trade_rows: list[dict[str, object]],
+    trade_date: pd.Timestamp,
+    stock: str,
+    commission: float,
+    stamp_tax: float,
+    slippage: float,
+    prices: pd.DataFrame,
+    config: dict,
+    reason: str,
+) -> float:
+    shares = holdings.get(stock, 0)
+    price = _price_for(stock, close, last_prices) * (1 - slippage)
+    proceeds = shares * price * (1 - commission - stamp_tax)
+    capital += proceeds
+    holdings.pop(stock, None)
+    entry_prices.pop(stock, None)
+    trade_rows.append(
+        _trade(
+            pd.NaT,
+            trade_date,
+            stock,
+            "SELL",
+            shares,
+            price,
+            proceeds,
+            status="risk_exit",
+            reason=reason,
+            capacity=_capacity(prices, trade_date, stock, shares * price, config),
+        )
+    )
+    return capital
+
+
+def _drawdown_breached(total: float, peak_equity: float, config: dict) -> bool:
+    threshold = config.get("circuit_breaker_drawdown")
+    if threshold is None or peak_equity <= 0:
+        return False
+    drawdown = total / peak_equity - 1
+    return drawdown <= -abs(float(threshold))
+
+
+def _exposure_scale(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> float:
+    target_vol = config.get("target_vol")
+    if target_vol is None:
+        return 1.0
+    window = int(config.get("vol_window", 60))
+    max_leverage = float(config.get("max_leverage", 1.0))
+    if len(equity_rows) <= window:
+        return min(1.0, max_leverage)
+    equity = pd.Series(dict(equity_rows)).sort_index()
+    realized_vol = equity.pct_change().dropna().tail(window).std(ddof=1) * np.sqrt(252)
+    if not realized_vol or pd.isna(realized_vol):
+        return min(1.0, max_leverage)
+    return max(0.0, min(float(target_vol) / float(realized_vol), max_leverage))
+
+
+def _average_entry_price(old_entry: float | None, old_shares: int, price: float, buy_shares: int) -> float:
+    if old_entry is None or old_shares <= 0:
+        return float(price)
+    return float((old_entry * old_shares + price * buy_shares) / (old_shares + buy_shares))
+
+
+def _capacity(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notional: float, config: dict) -> dict[str, float | bool]:
+    amount = _field(prices, "amount")
+    if amount.empty or stock not in amount.columns:
+        return {"capacity_ratio": 0.0, "capacity_warning": False}
+    window = int(config.get("capacity_window", 20))
+    amount_unit = float(config.get("amount_unit", 1000.0))
+    warn_threshold = float(config.get("capacity_warning_threshold", 0.05))
+    history = amount.loc[amount.index <= trade_date, stock].dropna().tail(window)
+    adv = float(history.mean() * amount_unit) if not history.empty else 0.0
+    ratio = float(abs(notional) / adv) if adv > 0 else 0.0
+    return {"capacity_ratio": ratio, "capacity_warning": bool(ratio > warn_threshold)}
 
 
 def _next_price_date(price_dates: pd.Index, signal_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.Timestamp | None:

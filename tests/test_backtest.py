@@ -62,6 +62,61 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue((result.trades["status"] == "blocked").any())
         self.assertEqual(result.equity_curve.iloc[-1], 100000)
 
+    def test_stop_loss_forces_exit(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 9.4]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {"initial_capital": 100000, "top_n": 1, "max_turnover": 1, "stop_loss_pct": 0.05},
+        )
+
+        risk_trades = result.trades[result.trades["status"] == "risk_exit"]
+        self.assertFalse(risk_trades.empty)
+        self.assertEqual(risk_trades.iloc[0]["reason"], "stop_loss")
+
+    def test_capacity_warning_is_recorded(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1.0, 1.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "capacity_warning_threshold": 0.05,
+                "amount_unit": 1000.0,
+            },
+        )
+
+        filled = result.trades[result.trades["status"] == "filled"]
+        self.assertTrue(bool(filled.iloc[0]["capacity_warning"]))
+
 
 if __name__ == "__main__":
     unittest.main()

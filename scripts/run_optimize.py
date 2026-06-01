@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
 from src.optimizer import DEFAULT_GRID, run_parameter_grid, run_walk_forward_optimization
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logger = logging.getLogger(__name__)
 
 
 def _csv_values(value: str, cast):
@@ -86,8 +90,8 @@ def main() -> None:
     output_path = resolve_path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(output_path, index=False, encoding="utf-8-sig")
-    print(f"Optimization results saved to {output_path}")
-    print(results.head(10).to_string(index=False))
+    logger.info("Optimization results saved to %s", output_path)
+    logger.info("Top results:\n%s", results.head(10).to_string(index=False))
 
 
 if __name__ == "__main__":

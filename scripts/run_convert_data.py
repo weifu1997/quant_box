@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -8,12 +9,15 @@ sys.path.insert(0, str(ROOT))
 
 from src.data_converter import convert_to_qlib_format
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logger = logging.getLogger(__name__)
+
 
 def main() -> None:
     result = convert_to_qlib_format()
-    print("Conversion finished.")
+    logger.info("Conversion finished.")
     for key, value in result.items():
-        print(f"{key}: {value}")
+        logger.info("%s: %s", key, value)
 
 
 if __name__ == "__main__":

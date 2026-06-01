@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+import logging
 import sys
 from pathlib import Path
 
@@ -9,6 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.signal_generator import generate_signal, read_previous_holdings, save_signal
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -20,8 +24,8 @@ def main() -> None:
     previous = args.previous_holdings if args.previous_holdings is not None else read_previous_holdings()
     signal_df, holdings = generate_signal(args.date, previous_holdings=previous)
     signal_path, holdings_path = save_signal(signal_df, holdings, args.date)
-    print(f"Signal saved to {signal_path}")
-    print(f"Latest holdings saved to {holdings_path}")
+    logger.info("Signal saved to %s", signal_path)
+    logger.info("Latest holdings saved to %s", holdings_path)
 
 
 if __name__ == "__main__":

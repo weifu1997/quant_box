@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -9,6 +10,9 @@ sys.path.insert(0, str(ROOT))
 
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -21,8 +25,8 @@ def main() -> None:
 
     factors = load_or_compute_factors(args.start_date, args.end_date, force=args.force)
     cache_path = resolve_path(config["factors"]["cache_file"])
-    print(f"Saved factors to {cache_path}")
-    print(f"Shape: {factors.shape}")
+    logger.info("Saved factors to %s", cache_path)
+    logger.info("Shape: %s", factors.shape)
 
 
 if __name__ == "__main__":
