@@ -1,0 +1,38 @@
+# Tushare HTTP proxy settings. Replace http_url/token with your real proxy values.
+tushare:
+  http_url: "http://your-proxy-server:8020/"
+  token: "your_token"
+  timeout: 30
+
+data:
+  start_date: "2015-01-01"
+  end_date: "2025-12-31"
+  universe: "hs300"
+  freq: "daily"
+  raw_dir: "data/raw"
+  constituents_file: "data/raw/hs300_constituents.csv"
+
+qlib:
+  provider_uri: "data/qlib_data"
+  region: "cn"
+  instruments: "csi300"
+
+factors:
+  cache_file: "data/factors/alpha158.parquet"
+
+strategy:
+  top_n: 7
+  max_turnover: 1
+  rank_buffer: 5
+  factor_group: "momentum"
+  rebalance_freq: "daily"
+
+backtest:
+  initial_capital: 1000000
+  commission: 0.0003
+  stamp_tax: 0.001
+  annual_trading_days: 252
+
+outputs:
+  dir: "outputs"
+  holdings_file: "outputs/latest_holdings.csv"

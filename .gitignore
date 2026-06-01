@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+data/raw/*
+!data/raw/.gitkeep
+data/qlib_data/*
+!data/qlib_data/.gitkeep
+data/factors/*
+!data/factors/.gitkeep
+data/prices/*
+!data/prices/.gitkeep
+outputs/*
+!outputs/.gitkeep
