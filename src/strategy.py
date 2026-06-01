@@ -56,7 +56,7 @@ def composite_factor(
         if not selected_cols:
             selected_cols = list(clean.columns)
         selected = clean[selected_cols]
-    return selected.mean(axis=1, skipna=False).rename("score")
+    return _row_mean_with_min_count(selected).rename("score")
 
 
 def _dynamic_ic_weighted_score(
@@ -77,7 +77,7 @@ def _dynamic_ic_weighted_score(
         key = pd.Timestamp(date).normalize()
         weights = dynamic.get(key)
         if weights is None and prior_weights:
-            weights = pd.concat(prior_weights, axis=1).mean(axis=1).dropna()
+            weights = _average_prior_weights(prior_weights)
         if weights is None and fallback is not None:
             weights = fallback
         if weights is None or weights.empty:
@@ -97,6 +97,20 @@ def _dynamic_ic_weighted_score(
     if not score_parts:
         return pd.Series(dtype=float, name="score")
     return pd.concat(score_parts).sort_index().rename("score")
+
+
+def _row_mean_with_min_count(df: pd.DataFrame) -> pd.Series:
+    min_count = max(1, int(np.ceil(df.shape[1] / 2)))
+    means = df.mean(axis=1, skipna=True)
+    return means.where(df.count(axis=1) >= min_count)
+
+
+def _average_prior_weights(prior_weights: list[pd.Series]) -> pd.Series:
+    aligned = pd.concat(prior_weights, axis=1).fillna(0.0)
+    recency = pd.Series(np.arange(1, aligned.shape[1] + 1, dtype=float), index=aligned.columns)
+    averaged = aligned.mul(recency, axis=1).sum(axis=1) / recency.sum()
+    denom = averaged.abs().sum()
+    return averaged / denom if denom > 0 else averaged
 
 
 def select_stocks(

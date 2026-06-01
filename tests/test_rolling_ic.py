@@ -86,6 +86,12 @@ class RollingICTests(unittest.TestCase):
         self.assertEqual(len({"strong", "duplicate"} & set(latest.index)), 1)
         self.assertAlmostEqual(float(latest.abs().sum()), 1.0)
 
+    def test_rolling_weights_require_daily_ic_attrs(self) -> None:
+        rolling_ic = pd.DataFrame({"F1": [0.03, 0.04]}, index=pd.date_range("2024-01-01", periods=2))
+
+        with self.assertRaises(ValueError):
+            make_rolling_ic_weights(rolling_ic, min_periods=1)
+
     def test_composite_factor_accepts_dynamic_weights(self) -> None:
         dates = pd.date_range("2024-01-01", periods=2, freq="D")
         index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])

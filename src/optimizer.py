@@ -135,17 +135,17 @@ def run_walk_forward_optimization(
         dynamic_weights = None
         if factor_group == "ic_weighted":
             if use_rolling_ic:
-                combined_factors = _slice_factor_dates(factor_df, train_start, test_end)
-                combined_prices = price_df.loc[(price_df.index >= train_start) & (price_df.index <= test_end)]
-                rolling_ic = calculate_rolling_ic(combined_factors, combined_prices, window=ic_window, min_periods=ic_min_periods)
-                dynamic_weights = make_rolling_ic_weights(
+                rolling_ic = calculate_rolling_ic(train_factors, train_prices, window=ic_window, min_periods=ic_min_periods)
+                train_dynamic_weights = make_rolling_ic_weights(
                     rolling_ic,
                     top_k=ic_top_k,
                     min_abs_ic=ic_min_abs,
                     min_periods=ic_min_periods,
                     correlation_threshold=ic_corr_threshold,
                 )
-                score_source = combined_factors
+                last_weights = _last_dynamic_weights(train_dynamic_weights)
+                dynamic_weights = {pd.Timestamp(date).normalize(): last_weights for date in pd.to_datetime(test_factors.index.get_level_values(0).unique())}
+                score_source = test_factors
             else:
                 ic_df = calculate_factor_ic(train_factors, train_prices)
                 weights = make_ic_weights(summarize_ic(ic_df), top_k=ic_top_k, min_abs_ic=ic_min_abs)
@@ -185,3 +185,10 @@ def _slice_factor_dates(factor_df: pd.DataFrame, start: pd.Timestamp, end: pd.Ti
 def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
     dates = pd.to_datetime(score_panel.index.get_level_values(0))
     return score_panel[(dates >= start) & (dates <= end)]
+
+
+def _last_dynamic_weights(weights_by_date: dict[pd.Timestamp, pd.Series]) -> pd.Series:
+    if not weights_by_date:
+        return pd.Series(dtype=float)
+    last_date = max(weights_by_date)
+    return weights_by_date[last_date]

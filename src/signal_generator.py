@@ -41,6 +41,10 @@ def generate_signal(
     if factor_group == "ic_weighted":
         ic_cfg = config.get("ic", {})
         price_file = resolve_path(ic_cfg.get("price_file", "data/prices/ohlcv.parquet"))
+        if not price_file.exists() and price_file.name == "ohlcv.parquet":
+            fallback_price_file = price_file.with_name("close.parquet")
+            if fallback_price_file.exists():
+                price_file = fallback_price_file
         if not price_file.exists():
             raise FileNotFoundError(f"Price file not found for rolling IC weights: {price_file}")
         prices = pd.read_parquet(price_file)

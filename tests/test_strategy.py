@@ -72,6 +72,17 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(scores.name, "score")
         self.assertEqual(len(scores), len(index))
 
+    def test_composite_factor_tolerates_partial_missing_values(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"ROC5": [1, 2, 3, 4, 5], "MOM10": [2, 3, None, 5, 6]}, index=index)
+
+        scores = composite_factor(factors, method="momentum")
+
+        self.assertTrue(pd.notna(scores.loc[(pd.Timestamp("2024-01-02"), "C")]))
+
 
 if __name__ == "__main__":
     unittest.main()

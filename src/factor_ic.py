@@ -98,8 +98,10 @@ def make_rolling_ic_weights(
         return {}
 
     daily_ic = rolling_ic_df.attrs.get("daily_ic")
+    if not isinstance(daily_ic, pd.DataFrame):
+        raise ValueError("rolling_ic_df must be produced by calculate_rolling_ic and include attrs['daily_ic'].")
     window = int(rolling_ic_df.attrs.get("window", 252))
-    source = daily_ic.shift(1) if isinstance(daily_ic, pd.DataFrame) else rolling_ic_df
+    source = daily_ic.shift(1)
     rolling_std = source.rolling(window=window, min_periods=min_periods).std(ddof=0)
     rolling_count = source.rolling(window=window, min_periods=min_periods).count()
 
