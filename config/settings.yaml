@@ -20,6 +20,14 @@ qlib:
 factors:
   cache_file: "data/factors/alpha158.parquet"
 
+ic:
+  window: 252
+  min_periods: 60
+  min_abs_ic: 0.02
+  corr_threshold: 0.7
+  top_k: 30
+  price_file: "data/prices/ohlcv.parquet"
+
 strategy:
   top_n: 5
   max_turnover: 3

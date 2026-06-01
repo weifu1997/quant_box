@@ -36,6 +36,11 @@ def main() -> None:
     parser.add_argument("--rank-buffer", default="0,5,10")
     parser.add_argument("--rebalance-freq", default="daily,weekly")
     parser.add_argument("--ic-top-k", type=int, default=30)
+    parser.add_argument("--ic-window", type=int, default=config.get("ic", {}).get("window", 252))
+    parser.add_argument("--ic-min-periods", type=int, default=config.get("ic", {}).get("min_periods", 60))
+    parser.add_argument("--ic-min-abs", type=float, default=config.get("ic", {}).get("min_abs_ic", 0.02))
+    parser.add_argument("--ic-corr-threshold", type=float, default=config.get("ic", {}).get("corr_threshold", 0.7))
+    parser.add_argument("--rolling-ic", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--walk-forward", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--train-years", type=int, default=3)
     parser.add_argument("--test-months", type=int, default=12)
@@ -56,10 +61,10 @@ def main() -> None:
     }
 
     ic_weights = None
-    if "ic_weighted" in grid["factor_group"] and not args.walk_forward:
+    if "ic_weighted" in grid["factor_group"] and not args.walk_forward and not args.rolling_ic:
         ic_df = calculate_factor_ic(factors, prices)
         ic_summary = summarize_ic(ic_df)
-        ic_weights = make_ic_weights(ic_summary, top_k=args.ic_top_k)
+        ic_weights = make_ic_weights(ic_summary, top_k=args.ic_top_k, min_abs_ic=args.ic_min_abs)
         ic_summary_path = resolve_path("outputs/factor_ic_summary.csv")
         ic_summary_path.parent.mkdir(parents=True, exist_ok=True)
         ic_summary.to_csv(ic_summary_path, encoding="utf-8-sig")
@@ -76,6 +81,12 @@ def main() -> None:
             train_years=args.train_years,
             test_months=args.test_months,
             step_months=args.step_months,
+            use_rolling_ic=args.rolling_ic,
+            ic_window=args.ic_window,
+            ic_min_periods=args.ic_min_periods,
+            ic_min_abs=args.ic_min_abs,
+            ic_corr_threshold=args.ic_corr_threshold,
+            ic_top_k=args.ic_top_k,
         )
     else:
         results = run_parameter_grid(
@@ -86,6 +97,12 @@ def main() -> None:
             end_date=args.end_date,
             grid=grid,
             ic_weights=ic_weights,
+            use_rolling_ic=args.rolling_ic,
+            ic_window=args.ic_window,
+            ic_min_periods=args.ic_min_periods,
+            ic_min_abs=args.ic_min_abs,
+            ic_corr_threshold=args.ic_corr_threshold,
+            ic_top_k=args.ic_top_k,
         )
     output_path = resolve_path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

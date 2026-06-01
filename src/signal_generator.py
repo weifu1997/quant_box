@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
+from src.factor_ic import calculate_rolling_ic, make_rolling_ic_weights
 from src.strategy import composite_factor, select_stocks
 
 
@@ -35,7 +36,28 @@ def generate_signal(
         end_date=signal_date,
         cache_file=factor_file or config["factors"]["cache_file"],
     )
-    scores = composite_factor(factors, method=strategy_cfg.get("factor_group", "momentum"))
+    factor_group = strategy_cfg.get("factor_group", "momentum")
+    dynamic_weights = None
+    if factor_group == "ic_weighted":
+        ic_cfg = config.get("ic", {})
+        price_file = resolve_path(ic_cfg.get("price_file", "data/prices/ohlcv.parquet"))
+        if not price_file.exists():
+            raise FileNotFoundError(f"Price file not found for rolling IC weights: {price_file}")
+        prices = pd.read_parquet(price_file)
+        rolling_ic = calculate_rolling_ic(
+            factors,
+            prices,
+            window=int(ic_cfg.get("window", 252)),
+            min_periods=int(ic_cfg.get("min_periods", 60)),
+        )
+        dynamic_weights = make_rolling_ic_weights(
+            rolling_ic,
+            top_k=int(ic_cfg.get("top_k", 30)),
+            min_abs_ic=float(ic_cfg.get("min_abs_ic", 0.02)),
+            min_periods=int(ic_cfg.get("min_periods", 60)),
+            correlation_threshold=float(ic_cfg.get("corr_threshold", 0.7)),
+        )
+    scores = composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights)
     latest_date = pd.Timestamp(scores.index.get_level_values(0).max()).normalize()
     requested_date = pd.Timestamp(signal_date).normalize()
     if latest_date != requested_date:

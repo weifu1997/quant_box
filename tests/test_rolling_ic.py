@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import unittest
+
+import numpy as np
+import pandas as pd
+
+from src.factor_ic import (
+    calculate_factor_ic,
+    calculate_rolling_ic,
+    cluster_correlated_factors,
+    make_rolling_ic_weights,
+)
+from src.strategy import composite_factor
+
+
+def _factor_price_fixture(days: int = 12, instruments: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+    dates = pd.date_range("2024-01-01", periods=days, freq="D")
+    names = [f"S{i}" for i in range(instruments)]
+    factors = []
+    returns = []
+    for i, date in enumerate(dates):
+        base = np.arange(instruments, dtype=float) + i * 0.01
+        factors.extend({"datetime": date, "instrument": name, "F1": value} for name, value in zip(names, base))
+        returns.append((base - base.mean()) / 100)
+    factor_df = pd.DataFrame(factors).set_index(["datetime", "instrument"])
+
+    prices = pd.DataFrame(100.0, index=dates, columns=names)
+    for i in range(days - 1):
+        prices.iloc[i + 1] = prices.iloc[i] * (1 + returns[i])
+    return factor_df, prices
+
+
+class RollingICTests(unittest.TestCase):
+    def test_rolling_ic_uses_prior_window(self) -> None:
+        factors, prices = _factor_price_fixture()
+        daily_ic = calculate_factor_ic(factors, prices, min_obs=3)
+        rolling_ic = calculate_rolling_ic(factors, prices, window=5, min_periods=3, min_obs=3)
+
+        self.assertTrue(pd.isna(rolling_ic.iloc[0]["F1"]))
+        expected = daily_ic.iloc[0:5]["F1"].mean()
+        self.assertAlmostEqual(float(rolling_ic.iloc[5]["F1"]), float(expected))
+
+    def test_rolling_ic_does_not_use_same_day_ic(self) -> None:
+        factors, prices = _factor_price_fixture()
+        changed = factors.copy()
+        date = pd.Timestamp("2024-01-06")
+        changed.loc[(date, slice(None)), "F1"] = list(reversed(changed.loc[(date, slice(None)), "F1"].to_list()))
+
+        original = calculate_rolling_ic(factors, prices, window=5, min_periods=3, min_obs=3)
+        mutated = calculate_rolling_ic(changed, prices, window=5, min_periods=3, min_obs=3)
+
+        self.assertAlmostEqual(float(original.loc[date, "F1"]), float(mutated.loc[date, "F1"]))
+
+    def test_cluster_correlated_factors_keeps_one_representative(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "A": [0.02, 0.03, 0.04, 0.05, 0.06],
+                "B": [0.021, 0.031, 0.041, 0.051, 0.061],
+                "C": [0.06, -0.01, 0.03, -0.02, 0.04],
+            }
+        )
+
+        clusters = cluster_correlated_factors(frame, threshold=0.7)
+
+        self.assertEqual(len({"A", "B"} & set(clusters)), 1)
+
+    def test_rolling_weights_filter_weak_and_correlated_factors(self) -> None:
+        dates = pd.date_range("2024-01-01", periods=8, freq="D")
+        daily_ic = pd.DataFrame(
+            {
+                "strong": [0.03, 0.04, 0.05, 0.04, 0.05, 0.06, 0.05, 0.04],
+                "duplicate": [0.031, 0.041, 0.051, 0.041, 0.051, 0.061, 0.051, 0.041],
+                "weak": [0.001, -0.002, 0.001, 0.0, 0.002, -0.001, 0.0, 0.001],
+            },
+            index=dates,
+        )
+        rolling_ic = daily_ic.shift(1).rolling(window=3, min_periods=3).mean()
+        rolling_ic.attrs["daily_ic"] = daily_ic
+        rolling_ic.attrs["window"] = 3
+
+        weights = make_rolling_ic_weights(rolling_ic, top_k=3, min_abs_ic=0.02, min_periods=3, correlation_threshold=0.7)
+        latest = weights[pd.Timestamp("2024-01-05")]
+
+        self.assertNotIn("weak", latest.index)
+        self.assertEqual(len({"strong", "duplicate"} & set(latest.index)), 1)
+        self.assertAlmostEqual(float(latest.abs().sum()), 1.0)
+
+    def test_composite_factor_accepts_dynamic_weights(self) -> None:
+        dates = pd.date_range("2024-01-01", periods=2, freq="D")
+        index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": range(10), "F2": range(10, 20)}, index=index)
+        weights = {dates[0]: pd.Series({"F1": 1.0}), dates[1]: pd.Series({"F2": 1.0})}
+
+        scores = composite_factor(factors, method="ic_weighted", factor_weights_dynamic=weights)
+
+        self.assertEqual(scores.name, "score")
+        self.assertEqual(len(scores), len(index))
+
+
+if __name__ == "__main__":
+    unittest.main()

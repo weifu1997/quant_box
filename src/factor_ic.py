@@ -5,7 +5,7 @@ import numpy as np
 
 
 def make_forward_returns(price_df: pd.DataFrame, horizon: int = 1) -> pd.Series:
-    prices = price_df.copy()
+    prices = _close_prices(price_df)
     prices.index = pd.to_datetime(prices.index)
     prices.columns = prices.columns.astype(str)
     forward = prices.shift(-horizon) / prices - 1
@@ -42,6 +42,23 @@ def calculate_factor_ic(
     return pd.DataFrame(result).sort_index()
 
 
+def calculate_rolling_ic(
+    factor_df: pd.DataFrame,
+    price_df: pd.DataFrame,
+    horizon: int = 1,
+    method: str = "spearman",
+    window: int = 252,
+    min_periods: int = 60,
+    min_obs: int = 20,
+) -> pd.DataFrame:
+    daily_ic = calculate_factor_ic(factor_df, price_df, horizon=horizon, method=method, min_obs=min_obs)
+    rolling_ic = daily_ic.shift(1).rolling(window=window, min_periods=min_periods).mean()
+    rolling_ic.attrs["daily_ic"] = daily_ic
+    rolling_ic.attrs["window"] = window
+    rolling_ic.attrs["min_periods"] = min_periods
+    return rolling_ic
+
+
 def summarize_ic(ic_df: pd.DataFrame) -> pd.DataFrame:
     mean_ic = ic_df.mean()
     std_ic = ic_df.std(ddof=0)
@@ -61,7 +78,7 @@ def summarize_ic(ic_df: pd.DataFrame) -> pd.DataFrame:
 def make_ic_weights(
     ic_summary: pd.DataFrame,
     top_k: int = 30,
-    min_abs_ic: float = 0.0,
+    min_abs_ic: float = 0.02,
 ) -> pd.Series:
     scores = ic_summary["ic_ir"].copy()
     if min_abs_ic > 0:
@@ -70,8 +87,91 @@ def make_ic_weights(
     return scores.fillna(0)
 
 
+def make_rolling_ic_weights(
+    rolling_ic_df: pd.DataFrame,
+    top_k: int = 30,
+    min_abs_ic: float = 0.02,
+    min_periods: int = 60,
+    correlation_threshold: float = 0.7,
+) -> dict[pd.Timestamp, pd.Series]:
+    if rolling_ic_df.empty:
+        return {}
+
+    daily_ic = rolling_ic_df.attrs.get("daily_ic")
+    window = int(rolling_ic_df.attrs.get("window", 252))
+    source = daily_ic.shift(1) if isinstance(daily_ic, pd.DataFrame) else rolling_ic_df
+    rolling_std = source.rolling(window=window, min_periods=min_periods).std(ddof=0)
+    rolling_count = source.rolling(window=window, min_periods=min_periods).count()
+
+    weights_by_date: dict[pd.Timestamp, pd.Series] = {}
+    for date, mean_ic in rolling_ic_df.iterrows():
+        count = rolling_count.loc[date].reindex(mean_ic.index).fillna(0)
+        std_ic = rolling_std.loc[date].reindex(mean_ic.index)
+        ic_ir = mean_ic / std_ic.replace(0, np.nan)
+        valid = mean_ic.abs().ge(min_abs_ic) & count.ge(min_periods) & ic_ir.notna()
+        if not valid.any():
+            continue
+
+        candidates = ic_ir[valid]
+        history = source.loc[source.index <= date, candidates.index].tail(window).dropna(how="all")
+        cluster_map = cluster_correlated_factors(history, threshold=correlation_threshold)
+        keep = [factor for factor in candidates.index if factor in cluster_map]
+        scores = candidates.loc[keep].reindex(candidates.loc[keep].abs().sort_values(ascending=False).index).head(top_k)
+        denom = scores.abs().sum()
+        if denom > 0:
+            weights_by_date[pd.Timestamp(date).normalize()] = scores.fillna(0) / denom
+    return weights_by_date
+
+
+def cluster_correlated_factors(rolling_ic_df: pd.DataFrame, threshold: float = 0.7) -> dict[str, list[str]]:
+    clean = rolling_ic_df.dropna(axis=1, how="all")
+    clean = clean.loc[:, clean.std(ddof=0).fillna(0) > 0]
+    if clean.empty:
+        return {}
+
+    corr = clean.corr().abs().fillna(0)
+    factors = list(corr.columns)
+    visited: set[str] = set()
+    clusters: list[list[str]] = []
+    for factor in factors:
+        if factor in visited:
+            continue
+        queue = [factor]
+        visited.add(factor)
+        cluster: list[str] = []
+        while queue:
+            current = queue.pop(0)
+            cluster.append(current)
+            neighbors = corr.index[(corr.loc[current] > threshold) & (corr.index != current)].tolist()
+            for neighbor in neighbors:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+        clusters.append(cluster)
+
+    summary = summarize_ic(clean)
+    result: dict[str, list[str]] = {}
+    for cluster in clusters:
+        ranked = summary.reindex(cluster)["ic_ir"].abs().sort_values(ascending=False)
+        representative = str(ranked.index[0]) if not ranked.empty else cluster[0]
+        result[representative] = [factor for factor in cluster if factor != representative]
+    return result
+
+
 def _safe_corr(x: pd.Series, y: pd.Series, method: str, min_obs: int) -> float:
     pair = pd.concat([x, y], axis=1).dropna()
     if len(pair) < min_obs:
         return float("nan")
     return float(pair.iloc[:, 0].corr(pair.iloc[:, 1], method=method))
+
+
+def _close_prices(price_df: pd.DataFrame) -> pd.DataFrame:
+    if isinstance(price_df.columns, pd.MultiIndex):
+        field_level = 0
+        fields = price_df.columns.get_level_values(field_level).astype(str).str.lower()
+        if "close" not in set(fields):
+            raise ValueError("price_df MultiIndex columns must include a close field.")
+        close = price_df.loc[:, fields == "close"].copy()
+        close.columns = close.columns.get_level_values(1).astype(str)
+        return close
+    return price_df.copy()

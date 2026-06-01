@@ -17,6 +17,7 @@ def composite_factor(
     factor_df: pd.DataFrame,
     method: str = "momentum",
     factor_weights: pd.Series | dict[str, float] | None = None,
+    factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
     factor_directions: pd.Series | dict[str, float] | None = None,
 ) -> pd.Series:
     if factor_df.empty:
@@ -34,6 +35,8 @@ def composite_factor(
         clean[common] = clean[common].mul(directions.loc[common], axis=1)
     method = method.lower()
     if method == "ic_weighted":
+        if factor_weights_dynamic is not None:
+            return _dynamic_ic_weighted_score(clean, factor_weights_dynamic, factor_weights)
         if factor_weights is None:
             raise ValueError("factor_weights is required when method='ic_weighted'.")
         weights = pd.Series(factor_weights, dtype=float)
@@ -54,6 +57,46 @@ def composite_factor(
             selected_cols = list(clean.columns)
         selected = clean[selected_cols]
     return selected.mean(axis=1, skipna=False).rename("score")
+
+
+def _dynamic_ic_weighted_score(
+    clean: pd.DataFrame,
+    factor_weights_dynamic: dict[pd.Timestamp, pd.Series],
+    fallback_weights: pd.Series | dict[str, float] | None = None,
+) -> pd.Series:
+    if not isinstance(clean.index, pd.MultiIndex):
+        raise ValueError("dynamic IC weights require MultiIndex factor data.")
+
+    dynamic = {pd.Timestamp(date).normalize(): pd.Series(weights, dtype=float) for date, weights in factor_weights_dynamic.items()}
+    fallback = pd.Series(fallback_weights, dtype=float) if fallback_weights is not None else None
+    date_level = clean.index.names[0] or 0
+    score_parts: list[pd.Series] = []
+    prior_weights: list[pd.Series] = []
+
+    for date, daily in clean.groupby(level=date_level, sort=True):
+        key = pd.Timestamp(date).normalize()
+        weights = dynamic.get(key)
+        if weights is None and prior_weights:
+            weights = pd.concat(prior_weights, axis=1).mean(axis=1).dropna()
+        if weights is None and fallback is not None:
+            weights = fallback
+        if weights is None or weights.empty:
+            score_parts.append(pd.Series(np.nan, index=daily.index, name="score"))
+            continue
+
+        common = [col for col in daily.columns if col in weights.index and weights.loc[col] != 0]
+        if not common:
+            score_parts.append(pd.Series(np.nan, index=daily.index, name="score"))
+            continue
+        aligned_weights = weights.loc[common]
+        score = daily[common].mul(aligned_weights, axis=1).sum(axis=1, min_count=len(common)) / aligned_weights.abs().sum()
+        score_parts.append(score.rename("score"))
+        if key in dynamic:
+            prior_weights.append(dynamic[key])
+
+    if not score_parts:
+        return pd.Series(dtype=float, name="score")
+    return pd.concat(score_parts).sort_index().rename("score")
 
 
 def select_stocks(
