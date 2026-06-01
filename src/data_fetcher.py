@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
+import random
 import time
 from typing import Iterable
 
@@ -22,6 +23,7 @@ DAILY_FIELDS = [
     "vol",
     "amount",
 ]
+ADJ_FACTOR_FIELDS = ["ts_code", "trade_date", "adj_factor"]
 
 
 def _format_tushare_date(value: str | datetime | pd.Timestamp | None) -> str | None:
@@ -129,22 +131,41 @@ def fetch_daily_stock(
     client = client or TushareHttpClient.from_config()
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
-        df = client.call(
-            "daily",
-            params={
+        try:
+            params = {
                 "ts_code": ts_code,
                 "start_date": _format_tushare_date(start_date),
                 "end_date": _format_tushare_date(end_date),
-            },
-            fields=DAILY_FIELDS,
-        )
-        try:
-            return normalize_daily_frame(df, default_ts_code=ts_code)
-        except ValueError as exc:
+            }
+            df = client.call("daily", params=params, fields=DAILY_FIELDS)
+            daily = normalize_daily_frame(df, default_ts_code=ts_code)
+            adj = client.call("adj_factor", params=params, fields=ADJ_FACTOR_FIELDS)
+            return merge_adj_factor(daily, adj, default_ts_code=ts_code)
+        except (RuntimeError, ValueError) as exc:
             last_error = exc
             if attempt < retries:
-                time.sleep(attempt)
+                time.sleep(2 ** (attempt - 1) + random.uniform(0, 1))
     raise ValueError(f"{ts_code} daily data response is invalid after {retries} attempts: {last_error}") from last_error
+
+
+def merge_adj_factor(daily: pd.DataFrame, adj_factor: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
+    daily = normalize_daily_frame(daily, default_ts_code=default_ts_code)
+    adj = adj_factor.rename(columns={"date": "trade_date"}).copy()
+    if "ts_code" not in adj.columns and default_ts_code:
+        adj["ts_code"] = default_ts_code
+    required = set(ADJ_FACTOR_FIELDS)
+    if not required.issubset(adj.columns):
+        missing = sorted(required - set(adj.columns))
+        raise ValueError(f"Adj factor data is missing columns: {missing}")
+    adj = adj[ADJ_FACTOR_FIELDS]
+    adj["trade_date"] = pd.to_datetime(adj["trade_date"].astype(str), errors="coerce")
+    adj["adj_factor"] = pd.to_numeric(adj["adj_factor"], errors="coerce")
+    adj = adj.dropna(subset=["trade_date", "adj_factor"])
+    merged = daily.merge(adj, on=["ts_code", "trade_date"], how="left")
+    if merged["adj_factor"].isna().any():
+        missing_count = int(merged["adj_factor"].isna().sum())
+        raise ValueError(f"Missing adj_factor for {missing_count} daily rows.")
+    return merged
 
 
 def fetch_hs300_stocks(
@@ -189,6 +210,8 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
     renamed["trade_date"] = pd.to_datetime(renamed["trade_date"].astype(str), errors="coerce")
     for col in ["open", "high", "low", "close", "vol", "amount"]:
         renamed[col] = pd.to_numeric(renamed[col], errors="coerce")
+    if "adj_factor" in df.columns:
+        renamed["adj_factor"] = pd.to_numeric(df["adj_factor"], errors="coerce")
     renamed = renamed.dropna(subset=["trade_date", "close"]).sort_values(["ts_code", "trade_date"])
     return renamed.reset_index(drop=True)
 
@@ -212,7 +235,8 @@ def update_daily_data(
     written: dict[str, Path] = {}
     for code in codes:
         path = target_dir / f"{code}.csv"
-        actual_start = _incremental_start(path, start)
+        needs_adj_backfill = _needs_adj_factor_backfill(path)
+        actual_start = start if needs_adj_backfill else _incremental_start(path, start)
         if pd.Timestamp(actual_start) > pd.Timestamp(end):
             written[code] = path
             continue
@@ -223,10 +247,12 @@ def update_daily_data(
             continue
         if new_df.empty:
             continue
-        if path.exists():
+        if path.exists() and not needs_adj_backfill:
             old_df = pd.read_csv(path, parse_dates=["trade_date"])
             new_df = pd.concat([old_df, new_df], ignore_index=True)
         new_df = normalize_daily_frame(new_df, default_ts_code=code)
+        if "adj_factor" in new_df.columns:
+            new_df = new_df.dropna(subset=["adj_factor"])
         new_df = new_df.drop_duplicates(["ts_code", "trade_date"], keep="last")
         new_df.to_csv(path, index=False, encoding="utf-8-sig")
         written[code] = path
@@ -240,6 +266,13 @@ def _incremental_start(path: Path, configured_start: str) -> str:
     if df.empty:
         return configured_start
     return (df["trade_date"].max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _needs_adj_factor_backfill(path: Path) -> bool:
+    if not path.exists():
+        return False
+    columns = pd.read_csv(path, nrows=0).columns
+    return "adj_factor" not in columns
 
 
 def describe_endpoint(url: str) -> str:

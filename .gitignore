@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+config/settings.local.yaml
 data/raw/*
 !data/raw/.gitkeep
 data/qlib_data/*

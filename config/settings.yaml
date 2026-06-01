@@ -1,4 +1,4 @@
-# Tushare HTTP proxy settings. Replace http_url/token with your real proxy values.
+﻿# Tushare HTTP proxy settings. Replace http_url/token with your real proxy values.
 tushare:
   http_url: "http://your-proxy-server:8020/"
   token: "your_token"
@@ -21,11 +21,11 @@ factors:
   cache_file: "data/factors/alpha158.parquet"
 
 strategy:
-  top_n: 7
-  max_turnover: 1
-  rank_buffer: 5
-  factor_group: "momentum"
-  rebalance_freq: "daily"
+  top_n: 5
+  max_turnover: 3
+  rank_buffer: 0
+  factor_group: "volatility"
+  rebalance_freq: "weekly"
 
 backtest:
   initial_capital: 1000000
@@ -36,3 +36,4 @@ backtest:
 outputs:
   dir: "outputs"
   holdings_file: "outputs/latest_holdings.csv"
+

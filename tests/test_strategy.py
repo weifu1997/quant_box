@@ -35,14 +35,14 @@ class StrategyTests(unittest.TestCase):
 
     def test_composite_factor_returns_score_series(self) -> None:
         index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A", "B"]],
+            [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A", "B", "C", "D", "E"]],
             names=["datetime", "instrument"],
         )
         factors = pd.DataFrame(
             {
-                "ROC5": [1.0, 2.0, 3.0, 4.0],
-                "MOM10": [2.0, 3.0, 4.0, 5.0],
-                "OTHER": [100.0, 100.0, 100.0, 100.0],
+                "ROC5": range(1, 11),
+                "MOM10": range(2, 12),
+                "OTHER": [100.0] * 10,
             },
             index=index,
         )
@@ -55,10 +55,10 @@ class StrategyTests(unittest.TestCase):
 
     def test_composite_factor_supports_ic_weighted(self) -> None:
         index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A", "B"]],
+            [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A", "B", "C", "D", "E"]],
             names=["datetime", "instrument"],
         )
-        factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0], "F2": [4.0, 3.0, 2.0, 1.0]}, index=index)
+        factors = pd.DataFrame({"F1": range(1, 11), "F2": range(10, 0, -1)}, index=index)
 
         scores = composite_factor(factors, method="ic_weighted", factor_weights={"F1": 1.0, "F2": -0.5})
 

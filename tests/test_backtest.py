@@ -29,10 +29,38 @@ class BacktestTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(len(result.equity_curve), 2)
+        self.assertEqual(len(result.equity_curve), 3)
         self.assertIn("total_return", result.metrics)
         self.assertFalse(result.trades.empty)
         self.assertEqual(pd.Timestamp(result.trades.iloc[0]["date"]), pd.Timestamp("2024-01-03"))
+
+    def test_limit_up_blocks_buy(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10, 10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 11.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "limit_up_threshold": 0.099,
+            },
+        )
+
+        self.assertTrue((result.trades["status"] == "blocked").any())
+        self.assertEqual(result.equity_curve.iloc[-1], 100000)
 
 
 if __name__ == "__main__":

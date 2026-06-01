@@ -9,6 +9,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "settings.yaml"
+LOCAL_CONFIG_PATH = PROJECT_ROOT / "config" / "settings.local.yaml"
 
 
 def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
@@ -20,6 +21,10 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
 
     with path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
+    if config_path is None and LOCAL_CONFIG_PATH.exists():
+        with LOCAL_CONFIG_PATH.open("r", encoding="utf-8") as f:
+            local_config = yaml.safe_load(f) or {}
+        config = _deep_merge(config, local_config)
     return config
 
 
@@ -36,3 +41,13 @@ def merged_section(*sections: dict[str, Any] | None) -> dict[str, Any]:
         if section:
             merged.update(deepcopy(section))
     return merged
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result

@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
-from src.optimizer import DEFAULT_GRID, run_parameter_grid
+from src.optimizer import DEFAULT_GRID, run_parameter_grid, run_walk_forward_optimization
 
 
 def _csv_values(value: str, cast):
@@ -25,13 +25,17 @@ def main() -> None:
     parser.add_argument("--start-date", default=config["data"]["start_date"])
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
-    parser.add_argument("--price-file", default="data/prices/close.parquet")
+    parser.add_argument("--price-file", default="data/prices/ohlcv.parquet")
     parser.add_argument("--factor-groups", default="momentum,volatility,all,ic_weighted")
     parser.add_argument("--top-n", default="7,10,15")
     parser.add_argument("--max-turnover", default="1,2")
     parser.add_argument("--rank-buffer", default="0,5,10")
     parser.add_argument("--rebalance-freq", default="daily,weekly")
     parser.add_argument("--ic-top-k", type=int, default=30)
+    parser.add_argument("--walk-forward", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--train-years", type=int, default=3)
+    parser.add_argument("--test-months", type=int, default=12)
+    parser.add_argument("--step-months", type=int, default=6)
     parser.add_argument("--output", default="outputs/optimization_results.csv")
     args = parser.parse_args()
 
@@ -48,7 +52,7 @@ def main() -> None:
     }
 
     ic_weights = None
-    if "ic_weighted" in grid["factor_group"]:
+    if "ic_weighted" in grid["factor_group"] and not args.walk_forward:
         ic_df = calculate_factor_ic(factors, prices)
         ic_summary = summarize_ic(ic_df)
         ic_weights = make_ic_weights(ic_summary, top_k=args.ic_top_k)
@@ -57,15 +61,28 @@ def main() -> None:
         ic_summary.to_csv(ic_summary_path, encoding="utf-8-sig")
 
     base_config = {**config["backtest"], **config["strategy"]}
-    results = run_parameter_grid(
-        factors,
-        prices,
-        base_config=base_config,
-        start_date=args.start_date,
-        end_date=args.end_date,
-        grid=grid,
-        ic_weights=ic_weights,
-    )
+    if args.walk_forward:
+        results = run_walk_forward_optimization(
+            factors,
+            prices,
+            base_config=base_config,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            grid=grid,
+            train_years=args.train_years,
+            test_months=args.test_months,
+            step_months=args.step_months,
+        )
+    else:
+        results = run_parameter_grid(
+            factors,
+            prices,
+            base_config=base_config,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            grid=grid,
+            ic_weights=ic_weights,
+        )
     output_path = resolve_path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(output_path, index=False, encoding="utf-8-sig")

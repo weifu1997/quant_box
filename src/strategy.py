@@ -17,6 +17,7 @@ def composite_factor(
     factor_df: pd.DataFrame,
     method: str = "momentum",
     factor_weights: pd.Series | dict[str, float] | None = None,
+    factor_directions: pd.Series | dict[str, float] | None = None,
 ) -> pd.Series:
     if factor_df.empty:
         raise ValueError("factor_df is empty.")
@@ -26,6 +27,11 @@ def composite_factor(
         raise ValueError("factor_df has no numeric factor columns.")
 
     clean = _cross_sectional_zscore(numeric)
+    if factor_directions is not None:
+        directions = pd.Series(factor_directions, dtype=float)
+        common = [col for col in clean.columns if col in directions.index]
+        clean = clean.copy()
+        clean[common] = clean[common].mul(directions.loc[common], axis=1)
     method = method.lower()
     if method == "ic_weighted":
         if factor_weights is None:
@@ -36,7 +42,7 @@ def composite_factor(
             raise ValueError("No overlapping non-zero factor weights for ic_weighted scoring.")
         selected = clean[common]
         aligned_weights = weights.loc[common]
-        score = selected.mul(aligned_weights, axis=1).sum(axis=1) / aligned_weights.abs().sum()
+        score = selected.mul(aligned_weights, axis=1).sum(axis=1, min_count=len(common)) / aligned_weights.abs().sum()
         return score.rename("score")
 
     if method == "all":
@@ -47,7 +53,7 @@ def composite_factor(
         if not selected_cols:
             selected_cols = list(clean.columns)
         selected = clean[selected_cols]
-    return selected.mean(axis=1).rename("score")
+    return selected.mean(axis=1, skipna=False).rename("score")
 
 
 def select_stocks(
@@ -125,19 +131,36 @@ def generate_holdings_by_day(
     return pd.DataFrame(rows)
 
 
-def _cross_sectional_zscore(df: pd.DataFrame) -> pd.DataFrame:
+def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
+    if rebalance_freq == "daily":
+        return score_panel
+    if not isinstance(score_panel.index, pd.MultiIndex):
+        raise ValueError("score_panel must use MultiIndex: datetime/instrument.")
+
+    dates = pd.Index(pd.to_datetime(score_panel.index.get_level_values(0).unique())).sort_values()
+    date_series = pd.Series(dates, index=dates)
+    if rebalance_freq == "weekly":
+        keep_dates = set(date_series.resample("W-FRI").last().dropna())
+    elif rebalance_freq == "monthly":
+        keep_dates = set(date_series.resample("M").last().dropna())
+    else:
+        raise ValueError(f"Unsupported rebalance_freq: {rebalance_freq}")
+    return score_panel[score_panel.index.get_level_values(0).isin(keep_dates)]
+
+
+def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:
     if not isinstance(df.index, pd.MultiIndex):
+        if len(df) < min_obs:
+            return pd.DataFrame(np.nan, index=df.index, columns=df.columns)
         std = df.std(ddof=0).replace(0, pd.NA)
-        return ((df - df.mean()) / std).fillna(0)
+        return ((df - df.mean()) / std).replace([np.inf, -np.inf], np.nan)
 
     date_level = df.index.names[0] or 0
-    centered = df.groupby(level=date_level).transform(lambda s: s - s.mean())
-    scaled = centered.groupby(level=date_level).transform(_scale_nonzero)
-    return scaled.astype(float).where(np.isfinite(scaled.astype(float)), 0).fillna(0)
-
-
-def _scale_nonzero(s: pd.Series) -> pd.Series:
-    std = s.std(ddof=0)
-    if pd.isna(std) or std == 0:
-        return pd.Series(0.0, index=s.index)
-    return s / std
+    grouped = df.groupby(level=date_level)
+    counts = grouped.transform("count")
+    means = grouped.transform("mean")
+    mean_squares = df.pow(2).groupby(level=date_level).transform("mean")
+    stds = np.sqrt((mean_squares - means.pow(2)).clip(lower=0)).replace(0, np.nan)
+    scaled = (df - means) / stds
+    scaled = scaled.where(counts >= min_obs)
+    return scaled.astype(float).replace([np.inf, -np.inf], np.nan)

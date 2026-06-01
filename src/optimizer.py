@@ -7,7 +7,7 @@ import pandas as pd
 
 from src.backtest import run_backtest
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
-from src.strategy import composite_factor
+from src.strategy import composite_factor, resample_signals
 
 
 DEFAULT_GRID = {
@@ -54,18 +54,82 @@ def run_parameter_grid(
     return result_df.sort_values(["sharpe", "annual_return", "max_drawdown"], ascending=[False, False, False])
 
 
-def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
-    if rebalance_freq == "daily":
-        return score_panel
-    if not isinstance(score_panel.index, pd.MultiIndex):
-        raise ValueError("score_panel must use MultiIndex: datetime/instrument.")
+def run_walk_forward_optimization(
+    factor_df: pd.DataFrame,
+    price_df: pd.DataFrame,
+    base_config: dict,
+    start_date: str,
+    end_date: str,
+    grid: dict[str, Iterable] | None = None,
+    train_years: int = 3,
+    test_months: int = 12,
+    step_months: int = 6,
+) -> pd.DataFrame:
+    price_df = price_df.copy()
+    price_df.index = pd.to_datetime(price_df.index)
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    rows: list[dict[str, object]] = []
+    train_start = start
 
-    dates = pd.Index(pd.to_datetime(score_panel.index.get_level_values(0).unique())).sort_values()
-    date_series = pd.Series(dates, index=dates)
-    if rebalance_freq == "weekly":
-        keep_dates = set(date_series.groupby(date_series.dt.to_period("W")).last())
-    elif rebalance_freq == "monthly":
-        keep_dates = set(date_series.groupby(date_series.dt.to_period("M")).last())
-    else:
-        raise ValueError(f"Unsupported rebalance_freq: {rebalance_freq}")
-    return score_panel[score_panel.index.get_level_values(0).isin(keep_dates)]
+    while True:
+        train_end = train_start + pd.DateOffset(years=train_years) - pd.Timedelta(days=1)
+        test_start = train_end + pd.Timedelta(days=1)
+        test_end = min(test_start + pd.DateOffset(months=test_months) - pd.Timedelta(days=1), end)
+        if test_start > end or train_end >= end:
+            break
+
+        train_factors = _slice_factor_dates(factor_df, train_start, train_end)
+        test_factors = _slice_factor_dates(factor_df, test_start, test_end)
+        train_prices = price_df.loc[(price_df.index >= train_start) & (price_df.index <= train_end)]
+        test_prices = price_df.loc[(price_df.index >= test_start) & (price_df.index <= test_end)]
+        if train_factors.empty or test_factors.empty or train_prices.empty or test_prices.empty:
+            train_start += pd.DateOffset(months=step_months)
+            continue
+
+        train_results = run_parameter_grid(
+            train_factors,
+            train_prices,
+            base_config=base_config,
+            start_date=train_start.strftime("%Y-%m-%d"),
+            end_date=train_end.strftime("%Y-%m-%d"),
+            grid=grid,
+        )
+        if train_results.empty:
+            train_start += pd.DateOffset(months=step_months)
+            continue
+
+        params = train_results.iloc[0][list(grid or DEFAULT_GRID)].to_dict()
+        factor_group = str(params["factor_group"])
+        rebalance_freq = str(params.get("rebalance_freq", "daily"))
+        weights = None
+        if factor_group == "ic_weighted":
+            ic_df = calculate_factor_ic(train_factors, train_prices)
+            weights = make_ic_weights(summarize_ic(ic_df))
+        scores = composite_factor(test_factors, method=factor_group, factor_weights=weights)
+        scores = resample_signals(scores, rebalance_freq)
+        result = run_backtest(
+            scores,
+            test_prices,
+            test_start.strftime("%Y-%m-%d"),
+            test_end.strftime("%Y-%m-%d"),
+            {**base_config, **params},
+        )
+        rows.append(
+            {
+                "train_start": train_start,
+                "train_end": train_end,
+                "test_start": test_start,
+                "test_end": test_end,
+                **params,
+                **result.metrics,
+            }
+        )
+        train_start += pd.DateOffset(months=step_months)
+
+    return pd.DataFrame(rows)
+
+
+def _slice_factor_dates(factor_df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    dates = pd.to_datetime(factor_df.index.get_level_values(0))
+    return factor_df[(dates >= start) & (dates <= end)]
