@@ -120,14 +120,14 @@ def _factor_cache_meta_path(cache_path: str | Path | None, config: dict) -> Path
 
 
 def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cache_file: str | Path | None = None) -> bool:
-    if "qlib" not in config:
-        return True
     meta_path = _factor_cache_meta_path(cache_file or config["factors"]["cache_file"], config)
     if not meta_path.exists():
-        return False
+        return "qlib" not in config
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return False
+    if "qlib" not in config:
         return False
 
     expected = _factor_cache_meta_payload(None, start_date, end_date, config)

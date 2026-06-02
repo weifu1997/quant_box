@@ -62,6 +62,16 @@ class MissingAdjFactorClient(FakeTushareClient):
         return pd.DataFrame(rows, columns=["ts_code", "trade_date", "adj_factor"])
 
 
+class EmptyTushareClient(FakeTushareClient):
+    def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        self.calls.append((api_name, (params or {}).copy(), fields))
+        if api_name == "daily":
+            return pd.DataFrame(columns=DAILY_FIELDS)
+        if api_name == "adj_factor":
+            return pd.DataFrame(columns=["ts_code", "trade_date", "adj_factor"])
+        raise AssertionError(f"Unexpected API call: {api_name}")
+
+
 class DataFetcherTests(unittest.TestCase):
     def test_filter_universe_frame_excludes_delisted_before_as_of_date(self) -> None:
         universe = pd.DataFrame(
@@ -315,6 +325,45 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(int(progress["pending_symbols"]), 2)
             self.assertEqual(int(progress["completed_symbols"]), 1)
             self.assertEqual(int(progress["remaining_symbols"]), 1)
+
+    def test_resumable_update_marks_error_when_symbol_is_not_written(self) -> None:
+        client = EmptyTushareClient()
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "daily_batch_size": 100,
+                "update_chunk_size": 1,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.TushareHttpClient.from_config", return_value=client):
+                written = update_daily_data_resumable(
+                    stock_codes=["000001.SZ"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=1,
+                    sleep_seconds=0,
+                    max_chunks=1,
+                )
+
+            progress = pd.read_json(progress_file, typ="series")
+
+            self.assertEqual(written, {})
+            self.assertEqual(progress["status"], "error")
+            self.assertEqual(int(progress["failed_symbols"]), 1)
+            self.assertIn("not_written", progress["last_error"])
 
 
 if __name__ == "__main__":

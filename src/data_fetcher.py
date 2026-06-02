@@ -763,26 +763,6 @@ def update_daily_data_resumable(
         )
         for code in batch_codes:
             code_start = _symbol_start_date(start, list_dates.get(code))
-            _write_update_progress(
-                progress_path,
-                {
-                    "status": "running",
-                    "started_at": started_at,
-                    "updated_at": datetime.now().isoformat(timespec="seconds"),
-                    "target_symbols": len(codes),
-                    "initial_existing": len(initial_existing & set(codes)),
-                    "pending_symbols": len(pending_codes),
-                    "chunk_size": chunk_size,
-                    "sleep_seconds": sleep_seconds,
-                    "completed_symbols": len(_existing_stock_codes(target_dir) & set(pending_codes)),
-                    "failed_symbols": len(failed),
-                    "remaining_symbols": max(len(pending_codes) - len(_existing_stock_codes(target_dir) & set(pending_codes)), 0),
-                    "last_chunk": batch_codes,
-                    "current_symbol": code,
-                    "current_start_date": code_start,
-                    "last_error": chunk_error,
-                },
-            )
             try:
                 per_symbol_written = update_daily_data(
                     stock_codes=[code],
@@ -792,6 +772,8 @@ def update_daily_data_resumable(
                 )
                 written.update(per_symbol_written)
                 if code not in _existing_stock_codes(target_dir):
+                    chunk_error = f"{code}: not_written"
+                    last_error = chunk_error
                     failed[code] = "not_written"
             except Exception as exc:
                 chunk_error = str(exc)
@@ -831,7 +813,10 @@ def update_daily_data_resumable(
     existing_final = _existing_stock_codes(target_dir)
     completed_final = len(existing_final & set(pending_codes))
     remaining_final = max(len(pending_codes) - completed_final, 0)
-    status = "complete" if remaining_final == 0 else "partial"
+    status = "error" if failed else ("complete" if remaining_final == 0 else "partial")
+    if failed and not last_error:
+        first_code, first_reason = next(iter(failed.items()))
+        last_error = f"{first_code}: {first_reason}"
     _write_update_progress(
         progress_path,
         {

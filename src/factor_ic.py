@@ -30,16 +30,14 @@ def calculate_factor_ic(
     if aligned.empty:
         raise ValueError("No overlapping factor and forward-return data.")
 
+    factor_cols = list(factors.columns)
     date_level = aligned.index.names[0] or 0
-    result = {}
-    for col in factors.columns:
-        series = aligned[[col, "forward_return"]].dropna()
-        if series.empty:
-            continue
-        result[col] = series.groupby(level=date_level).apply(
-            lambda group: _safe_corr(group[col], group["forward_return"], method=method, min_obs=min_obs)
-        )
-    return pd.DataFrame(result).sort_index()
+    corr = aligned[[*factor_cols, "forward_return"]].groupby(level=date_level).corr(method=method)
+    ic = corr["forward_return"].unstack(level=-1).reindex(columns=factor_cols)
+
+    pair_counts = aligned[factor_cols].notna().groupby(level=date_level).sum()
+    ic = ic.where(pair_counts.reindex_like(ic).ge(min_obs))
+    return ic.sort_index()
 
 
 def calculate_rolling_ic(

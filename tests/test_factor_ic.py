@@ -28,6 +28,29 @@ class FactorICTests(unittest.TestCase):
         self.assertIn("F1", ic.columns)
         self.assertIn("F1", weights.index)
 
+    def test_calculate_factor_ic_respects_min_obs_after_vectorized_corr(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([dates, ["a", "b", "c"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {
+                "F1": [1, 2, 3, 2, 3, 4, 3, 4, 5],
+                "F2": [3, 2, 1, 4, 3, 2, 5, 4, 3],
+            },
+            index=index,
+        )
+        prices = pd.DataFrame(
+            {
+                "a": [10.0, 10.5, 11.0],
+                "b": [10.0, 11.0, 12.0],
+                "c": [10.0, 12.0, 14.0],
+            },
+            index=dates,
+        )
+
+        ic = calculate_factor_ic(factors, prices, min_obs=4)
+
+        self.assertTrue(ic[["F1", "F2"]].isna().all().all())
+
 
 if __name__ == "__main__":
     unittest.main()

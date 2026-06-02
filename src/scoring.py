@@ -120,7 +120,7 @@ def _weights_cache_meta(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dic
 
 def _frame_signature(frame: pd.DataFrame) -> dict[str, object]:
     if frame.empty:
-        return {"rows": 0, "columns": [], "start": "", "end": "", "symbols": []}
+        return {"rows": 0, "columns": [], "start": "", "end": "", "symbols": [], "sample_hash": 0}
     if isinstance(frame.index, pd.MultiIndex):
         dates = pd.to_datetime(frame.index.get_level_values(0)).normalize()
         symbols = sorted(set(frame.index.get_level_values(1).astype(str).str.upper()))
@@ -136,4 +136,19 @@ def _frame_signature(frame: pd.DataFrame) -> dict[str, object]:
         "start": str(dates.min().date()),
         "end": str(dates.max().date()),
         "symbols": symbols,
+        "sample_hash": _sample_frame_hash(frame),
     }
+
+
+def _sample_frame_hash(frame: pd.DataFrame, max_samples: int = 512) -> int:
+    if frame.empty:
+        return 0
+    if len(frame) <= max_samples:
+        sample = frame
+    else:
+        positions = sorted({round(index * (len(frame) - 1) / (max_samples - 1)) for index in range(max_samples)})
+        sample = frame.iloc[positions]
+    stable = sample.copy()
+    stable.columns = [str(col) for col in stable.columns]
+    hashed = pd.util.hash_pandas_object(stable, index=True)
+    return int(hashed.sum() % (2**63 - 1))
