@@ -1,21 +1,22 @@
 ﻿# Tushare HTTP proxy settings. Replace http_url/token with your real proxy values.
 tushare:
-  http_url: "http://your-proxy-server:8020/"
-  token: "your_token"
+  http_url: "${TUSHARE_HTTP_URL}"
+  token: "${TUSHARE_TOKEN}"
   timeout: 30
 
 data:
   start_date: "2015-01-01"
   end_date: "2025-12-31"
-  universe: "hs300"
+  universe: "mainboard_a"
   freq: "daily"
   raw_dir: "data/raw"
-  constituents_file: "data/raw/hs300_constituents.csv"
+  constituents_file: "data/raw/mainboard_a_stocks.csv"
+  exclude_st: true
 
 qlib:
   provider_uri: "data/qlib_data"
   region: "cn"
-  instruments: "csi300"
+  instruments: "mainboard_a"
 
 factors:
   cache_file: "data/factors/alpha158.parquet"
@@ -40,6 +41,13 @@ backtest:
   commission: 0.0003
   stamp_tax: 0.001
   annual_trading_days: 252
+  trade_price_field: "open"
+  valuation_price_field: "close"
+  slippage: 0.001
+  max_participation_rate: 0.05
+  capacity_window: 20
+  capacity_warning_threshold: 0.05
+  amount_unit: 1000.0
 
 outputs:
   dir: "outputs"

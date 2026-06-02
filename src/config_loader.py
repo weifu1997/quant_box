@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +16,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "data": {
         "start_date": "2015-01-01",
         "end_date": "2025-12-31",
-        "universe": "hs300",
+        "universe": "mainboard_a",
         "freq": "daily",
         "raw_dir": "data/raw",
-        "constituents_file": "data/raw/hs300_constituents.csv",
+        "constituents_file": "data/raw/mainboard_a_stocks.csv",
+        "exclude_st": True,
     },
-    "qlib": {"provider_uri": "data/qlib_data", "region": "cn", "instruments": "csi300", "missing_value": -1.0},
+    "qlib": {"provider_uri": "data/qlib_data", "region": "cn", "instruments": "mainboard_a", "missing_value": -1.0},
     "factors": {"cache_file": "data/factors/alpha158.parquet"},
     "ic": {
         "window": 252,
@@ -31,7 +33,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "price_file": "data/prices/ohlcv.parquet",
     },
     "strategy": {"top_n": 7, "max_turnover": 1, "rank_buffer": 5, "factor_group": "momentum", "rebalance_freq": "daily"},
-    "backtest": {"initial_capital": 1_000_000, "commission": 0.0003, "stamp_tax": 0.001, "annual_trading_days": 252},
+    "backtest": {
+        "initial_capital": 1_000_000,
+        "commission": 0.0003,
+        "stamp_tax": 0.001,
+        "annual_trading_days": 252,
+        "trade_price_field": "open",
+        "valuation_price_field": "close",
+        "slippage": 0.001,
+        "max_participation_rate": 0.05,
+        "capacity_window": 20,
+        "capacity_warning_threshold": 0.05,
+        "amount_unit": 1000.0,
+    },
     "outputs": {"dir": "outputs", "holdings_file": "outputs/latest_holdings.csv"},
 }
 
@@ -51,7 +65,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
         with LOCAL_CONFIG_PATH.open("r", encoding="utf-8") as f:
             local_config = yaml.safe_load(f) or {}
         config = _deep_merge(config, local_config)
-    return config
+    return _expand_env_values(config)
 
 
 def resolve_path(value: str | Path) -> Path:
@@ -77,3 +91,13 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             result[key] = deepcopy(value)
     return result
+
+
+def _expand_env_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _expand_env_values(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_values(item) for item in value]
+    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+        return os.getenv(value[2:-1], "")
+    return value

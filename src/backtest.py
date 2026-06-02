@@ -51,6 +51,8 @@ def run_backtest(
     commission = float(config.get("commission", 0.0003))
     stamp_tax = float(config.get("stamp_tax", 0.001))
     slippage = float(config.get("slippage", 0.0))
+    trade_price_field = str(config.get("trade_price_field", "close")).lower()
+    valuation_price_field = str(config.get("valuation_price_field", "close")).lower()
     top_n = int(config.get("top_n", 7))
     max_turnover = int(config.get("max_turnover", 1))
     rank_buffer = int(config.get("rank_buffer", 0))
@@ -67,7 +69,8 @@ def run_backtest(
     previous_date: pd.Timestamp | None = None
     peak_equity = capital
     for trade_date in price_dates:
-        close = _field_on_date(prices, "close", trade_date)
+        close = _price_row(prices, valuation_price_field, trade_date)
+        trade_prices = _price_row(prices, trade_price_field, trade_date)
         last_prices.update({str(code): float(price) for code, price in close.dropna().items()})
         tradability = _tradability(prices, trade_date, previous_date, config)
         capital = _execute_risk_exits(
@@ -125,7 +128,7 @@ def run_backtest(
 
             desired_shares = {}
             for stock in target_holdings:
-                price = _price_for(stock, close, last_prices)
+                price = _price_for(stock, trade_prices, last_prices)
                 desired_shares[stock] = _round_lot(target_value / price if price > 0 else 0, stock, config)
 
             for stock in list(holdings):
@@ -137,8 +140,17 @@ def run_backtest(
                 if stock not in tradability["sellable"]:
                     trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "SELL", sell_shares, "not_sellable"))
                     continue
-                price = _price_for(stock, close, last_prices) * (1 - slippage)
-                proceeds = sell_shares * price * (1 - commission - stamp_tax)
+                price = _price_for(stock, trade_prices, last_prices) * (1 - slippage)
+                capacity = _capacity(prices, trade_date, stock, sell_shares * price, config)
+                filled_shares, status, reason = _apply_capacity_limit(sell_shares, price, stock, prices, trade_date, config)
+                if filled_shares <= 0:
+                    trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "SELL", sell_shares, "capacity_limited"))
+                    continue
+                sell_shares = filled_shares
+                gross = sell_shares * price
+                commission_cost = gross * commission
+                tax_cost = gross * stamp_tax
+                proceeds = gross - commission_cost - tax_cost
                 capital += proceeds
                 remaining = current - sell_shares
                 if remaining > 0:
@@ -155,7 +167,12 @@ def run_backtest(
                         sell_shares,
                         price,
                         proceeds,
-                        capacity=_capacity(prices, trade_date, stock, sell_shares * price, config),
+                        status=status,
+                        reason=reason,
+                        commission_cost=commission_cost,
+                        tax_cost=tax_cost,
+                        slippage_cost=sell_shares * _price_for(stock, trade_prices, last_prices) * slippage,
+                        capacity=capacity,
                     )
                 )
 
@@ -168,11 +185,20 @@ def run_backtest(
                 if stock not in tradability["buyable"]:
                     trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "BUY", buy_shares, "not_buyable"))
                     continue
-                price = _price_for(stock, close, last_prices) * (1 + slippage)
-                cost = buy_shares * price * (1 + commission)
+                price = _price_for(stock, trade_prices, last_prices) * (1 + slippage)
+                capacity = _capacity(prices, trade_date, stock, buy_shares * price, config)
+                buy_shares, status, reason = _apply_capacity_limit(buy_shares, price, stock, prices, trade_date, config)
+                if buy_shares <= 0:
+                    trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "BUY", desired - current, "capacity_limited"))
+                    continue
+                gross = buy_shares * price
+                commission_cost = gross * commission
+                cost = gross + commission_cost
                 if cost > capital:
                     buy_shares = _round_lot(capital / (price * (1 + commission)), stock, config)
-                    cost = buy_shares * price * (1 + commission)
+                    gross = buy_shares * price
+                    commission_cost = gross * commission
+                    cost = gross + commission_cost
                 if buy_shares <= 0:
                     continue
                 capital -= cost
@@ -188,7 +214,12 @@ def run_backtest(
                         buy_shares,
                         price,
                         -cost,
-                        capacity=_capacity(prices, trade_date, stock, buy_shares * price, config),
+                        status=status,
+                        reason=reason,
+                        commission_cost=commission_cost,
+                        tax_cost=0.0,
+                        slippage_cost=buy_shares * _price_for(stock, trade_prices, last_prices) * slippage,
+                        capacity=capacity,
                     )
                 )
 
@@ -341,6 +372,13 @@ def _field_on_date(prices: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.S
     return row.astype(float)
 
 
+def _price_row(prices: pd.DataFrame, preferred_field: str, date: pd.Timestamp) -> pd.Series:
+    row = _field_on_date(prices, preferred_field, date)
+    if not row.empty:
+        return row
+    return _field_on_date(prices, "close", date)
+
+
 def _tradability(
     prices: pd.DataFrame,
     trade_date: pd.Timestamp,
@@ -416,6 +454,9 @@ def _trade(
     cash: float,
     status: str = "filled",
     reason: str | None = None,
+    commission_cost: float = 0.0,
+    tax_cost: float = 0.0,
+    slippage_cost: float = 0.0,
     capacity: dict[str, float | bool] | None = None,
 ) -> dict[str, Any]:
     row = {
@@ -427,6 +468,9 @@ def _trade(
         "price": price,
         "cash": cash,
         "status": status,
+        "commission_cost": float(commission_cost),
+        "tax_cost": float(tax_cost),
+        "slippage_cost": float(slippage_cost),
     }
     if reason is not None:
         row["reason"] = reason
@@ -453,6 +497,9 @@ def _blocked_trade(
         "cash": 0.0,
         "status": "blocked",
         "reason": reason,
+        "commission_cost": 0.0,
+        "tax_cost": 0.0,
+        "slippage_cost": 0.0,
     }
 
 
@@ -641,6 +688,36 @@ def _capacity(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notion
     adv = float(history.mean() * amount_unit) if not history.empty else 0.0
     ratio = float(abs(notional) / adv) if adv > 0 else 0.0
     return {"capacity_ratio": ratio, "capacity_warning": bool(ratio > warn_threshold)}
+
+
+def _apply_capacity_limit(
+    requested_shares: int,
+    price: float,
+    stock: str,
+    prices: pd.DataFrame,
+    trade_date: pd.Timestamp,
+    config: dict,
+) -> tuple[int, str, str | None]:
+    participation = config.get("max_participation_rate")
+    if participation is None:
+        return requested_shares, "filled", None
+    participation = float(participation)
+    if participation <= 0 or requested_shares <= 0 or price <= 0:
+        return requested_shares, "filled", None
+
+    amount = _field(prices, "amount")
+    if amount.empty or stock not in amount.columns or trade_date not in amount.index:
+        return requested_shares, "filled", None
+    amount_unit = float(config.get("amount_unit", 1000.0))
+    max_notional = float(amount.loc[trade_date, stock]) * amount_unit * participation
+    if not np.isfinite(max_notional) or max_notional <= 0:
+        return 0, "blocked", "capacity_limited"
+
+    max_shares = _round_lot(max_notional / price, stock, config)
+    filled = min(requested_shares, max_shares)
+    if filled < requested_shares:
+        return filled, "partial" if filled > 0 else "blocked", "capacity_limited"
+    return requested_shares, "filled", None
 
 
 def _next_price_date(price_dates: pd.Index, signal_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.Timestamp | None:

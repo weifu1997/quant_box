@@ -10,7 +10,7 @@ from src.data_fetcher import normalize_daily_frame
 
 
 FEATURE_COLUMNS = ["date", "open", "high", "low", "close", "volume", "amount", "vwap"]
-PRICE_COLUMNS = ["open", "high", "low", "close"]
+PRICE_COLUMNS = ["open", "high", "low", "close", "vwap"]
 PANEL_COLUMNS = ["open", "high", "low", "close", "volume", "amount", "vwap"]
 
 
@@ -30,8 +30,10 @@ def convert_to_qlib_format(
     feature_dir.mkdir(parents=True, exist_ok=True)
     instrument_dir.mkdir(parents=True, exist_ok=True)
 
+    universe_file = Path(config["data"].get("constituents_file", "")).name
     csv_files = sorted(source_dir.glob("*.csv"))
-    csv_files = [path for path in csv_files if path.name != "hs300_constituents.csv"]
+    metadata_files = {name for name in [universe_file, "hs300_constituents.csv", "mainboard_a_stocks.csv"] if name}
+    csv_files = [path for path in csv_files if path.name not in metadata_files]
     if not csv_files:
         raise FileNotFoundError(f"No raw stock csv files found in {source_dir}")
 
@@ -70,27 +72,22 @@ def convert_to_qlib_format(
         end = df["trade_date"].max().strftime("%Y-%m-%d")
         instruments.append((code, start, end))
 
-        feature_df = df.rename(columns={"trade_date": "date", "vol": "volume"})
-        feature_df = _apply_adjustment(feature_df)
-        feature_df["vwap"] = np.where(
-            feature_df["volume"].astype(float) > 0,
-            feature_df["amount"].astype(float) * 10 / feature_df["volume"].astype(float),
-            np.nan,
-        )
-        feature_df = feature_df[FEATURE_COLUMNS]
+        raw_feature_df = _prepare_feature_frame(df, adjusted=False)
+        feature_df = _prepare_feature_frame(df, adjusted=True)
         stock_dir = feature_dir / code.lower()
         stock_dir.mkdir(parents=True, exist_ok=True)
         feature_df.to_parquet(stock_dir / "day.parquet", index=False)
         _write_qlib_bin_features(stock_dir, feature_df, calendar, calendar_index, missing_value=missing_value)
 
-        close = feature_df.set_index("date")["close"].rename(code.lower())
+        close = raw_feature_df.set_index("date")["close"].rename(code.lower())
         close_frames.append(close)
-        panel = feature_df.set_index("date")[PANEL_COLUMNS].copy()
+        panel = raw_feature_df.set_index("date")[PANEL_COLUMNS].copy()
         panel.columns = pd.MultiIndex.from_product([panel.columns, [code.lower()]], names=["field", "instrument"])
         panel_frames.append(panel)
 
+    instrument_name = str(config.get("qlib", {}).get("instruments", "all"))
     _write_instruments(instrument_dir / "all.txt", instruments)
-    _write_instruments(instrument_dir / "csi300.txt", instruments)
+    _write_instruments(instrument_dir / f"{instrument_name}.txt", instruments)
 
     prices_dir = resolve_path("data/prices")
     prices_dir.mkdir(parents=True, exist_ok=True)
@@ -105,7 +102,19 @@ def convert_to_qlib_format(
         "provider_uri": target_dir,
         "close_price_file": prices_dir / "close.parquet",
         "ohlcv_price_file": prices_dir / "ohlcv.parquet",
-    }
+}
+
+
+def _prepare_feature_frame(df: pd.DataFrame, adjusted: bool) -> pd.DataFrame:
+    feature_df = df.rename(columns={"trade_date": "date", "vol": "volume"}).copy()
+    feature_df["vwap"] = np.where(
+        feature_df["volume"].astype(float) > 0,
+        feature_df["amount"].astype(float) * 10 / feature_df["volume"].astype(float),
+        np.nan,
+    )
+    if adjusted:
+        feature_df = _apply_adjustment(feature_df)
+    return feature_df[FEATURE_COLUMNS]
 
 
 def _load_tradable_codes(path_value: str | Path) -> set[str]:

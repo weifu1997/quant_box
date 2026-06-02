@@ -54,7 +54,7 @@ def composite_factor(
         keywords = FACTOR_GROUP_KEYWORDS.get(method, (method,))
         selected_cols = [col for col in clean.columns if any(key in str(col).lower() for key in keywords)]
         if not selected_cols:
-            selected_cols = list(clean.columns)
+            raise ValueError(f"No factor columns matched factor_group='{method}'.")
         selected = clean[selected_cols]
     return _row_mean_with_min_count(selected).rename("score")
 

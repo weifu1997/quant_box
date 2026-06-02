@@ -27,6 +27,19 @@ DAILY_FIELDS = [
     "amount",
 ]
 ADJ_FACTOR_FIELDS = ["ts_code", "trade_date", "adj_factor"]
+STOCK_BASIC_FIELDS = [
+    "ts_code",
+    "symbol",
+    "name",
+    "area",
+    "industry",
+    "market",
+    "exchange",
+    "list_status",
+    "list_date",
+    "delist_date",
+]
+MAINBOARD_PREFIXES = ("000", "001", "002", "003", "600", "601", "603", "605")
 
 
 def _format_tushare_date(value: str | datetime | pd.Timestamp | None) -> str | None:
@@ -201,6 +214,106 @@ def fetch_hs300_stocks(
     return sorted(df["con_code"].dropna().astype(str).unique().tolist())
 
 
+def fetch_stock_universe(
+    universe: str | None = None,
+    date: str | datetime | None = None,
+    client: TushareHttpClient | None = None,
+    local_file: str | Path | None = None,
+    save_metadata: bool = True,
+) -> list[str]:
+    config = load_config()
+    data_cfg = config.get("data", {})
+    universe = (universe or data_cfg.get("universe", "mainboard_a")).lower()
+    local_path = resolve_path(local_file or data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
+
+    if local_path.exists():
+        df = pd.read_csv(local_path)
+    elif universe in {"hs300", "csi300"}:
+        return fetch_hs300_stocks(date=date, client=client, local_file=local_file)
+    else:
+        client = client or TushareHttpClient.from_config(config)
+        df = _fetch_stock_basic_history(client)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        if save_metadata:
+            df.to_csv(local_path, index=False, encoding="utf-8-sig")
+
+    filtered = filter_universe_frame(
+        df,
+        universe=universe,
+        as_of_date=date or data_cfg.get("end_date"),
+        exclude_st=bool(data_cfg.get("exclude_st", True)),
+    )
+    code_col = _code_column(filtered)
+    return sorted(filtered[code_col].dropna().astype(str).unique().tolist())
+
+
+def _fetch_stock_basic_history(client: TushareHttpClient) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    for status in ["L", "D"]:
+        df = client.call(
+            "stock_basic",
+            params={"list_status": status},
+            fields=STOCK_BASIC_FIELDS,
+        )
+        if not df.empty:
+            frames.append(df)
+    if not frames:
+        raise RuntimeError("No stock_basic rows returned for A-share universe.")
+    return pd.concat(frames, ignore_index=True).drop_duplicates("ts_code", keep="first")
+
+
+def filter_universe_frame(
+    df: pd.DataFrame,
+    universe: str,
+    as_of_date: str | datetime | None = None,
+    exclude_st: bool = True,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+    result = df.copy()
+    code_col = _code_column(result)
+    result[code_col] = result[code_col].astype(str).str.upper()
+
+    if universe in {"mainboard_a", "a_mainboard", "mainboard"}:
+        result = result[result[code_col].map(_is_mainboard_code)]
+    elif universe in {"all_a", "a_share", "ashare"}:
+        result = result[result[code_col].str.endswith((".SH", ".SZ"))]
+    elif universe in {"hs300", "csi300"}:
+        return result
+    else:
+        raise ValueError(f"Unsupported universe: {universe}")
+
+    if exclude_st and "name" in result.columns:
+        names = result["name"].fillna("").astype(str).str.upper()
+        result = result[~names.str.contains("ST", regex=False)]
+
+    if as_of_date is not None:
+        as_of = pd.Timestamp(as_of_date)
+        if "list_date" in result.columns:
+            listed = pd.to_datetime(result["list_date"].astype(str), errors="coerce")
+            result = result[listed.isna() | (listed <= as_of)]
+        if "delist_date" in result.columns:
+            delisted = pd.to_datetime(result["delist_date"].astype(str), errors="coerce")
+            result = result[delisted.isna() | (delisted > as_of)]
+        if "list_status" in result.columns:
+            status = result["list_status"].fillna("L").astype(str)
+            result = result[(status == "L") | ("delist_date" in result.columns)]
+    return result
+
+
+def _code_column(df: pd.DataFrame) -> str:
+    for col in ["ts_code", "con_code", "instrument", "code"]:
+        if col in df.columns:
+            return col
+    raise ValueError("Universe file must contain one of: ts_code, con_code, instrument, code.")
+
+
+def _is_mainboard_code(code: str) -> bool:
+    symbol = code.split(".", 1)[0]
+    exchange_ok = code.endswith((".SH", ".SZ"))
+    return exchange_ok and symbol.startswith(MAINBOARD_PREFIXES)
+
+
 def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
     renamed = df.rename(columns={"volume": "vol", "date": "trade_date"}).copy()
     if "ts_code" not in renamed.columns and default_ts_code:
@@ -235,7 +348,7 @@ def update_daily_data(
 
     start = start_date or data_cfg["start_date"]
     end = end_date or data_cfg["end_date"]
-    codes = list(stock_codes) if stock_codes is not None else fetch_hs300_stocks()
+    codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe()
     client = TushareHttpClient.from_config(config)
 
     written: dict[str, Path] = {}
