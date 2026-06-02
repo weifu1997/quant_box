@@ -26,18 +26,42 @@ def calculate_factor_ic(
 
     returns = make_forward_returns(price_df, horizon=horizon)
     factors = factor_df.select_dtypes("number")
-    aligned = factors.join(returns, how="inner").dropna(subset=["forward_return"])
-    if aligned.empty:
-        raise ValueError("No overlapping factor and forward-return data.")
-
     factor_cols = list(factors.columns)
-    date_level = aligned.index.names[0] or 0
-    corr = aligned[[*factor_cols, "forward_return"]].groupby(level=date_level).corr(method=method)
-    ic = corr["forward_return"].unstack(level=-1).reindex(columns=factor_cols)
+    date_level = factors.index.names[0] or 0
+    method_name = method.lower()
 
-    pair_counts = aligned[factor_cols].notna().groupby(level=date_level).sum()
-    ic = ic.where(pair_counts.reindex_like(ic).ge(min_obs))
-    return ic.sort_index()
+    rows: list[pd.Series] = []
+    return_dates = set(pd.to_datetime(returns.index.get_level_values(0)).normalize())
+    for date, daily_factors in factors.groupby(level=date_level, sort=True):
+        date_key = pd.Timestamp(date).normalize()
+        if date_key not in return_dates:
+            continue
+        try:
+            daily_returns = returns.xs(date_key, level=0, drop_level=True)
+        except KeyError:
+            continue
+        daily = daily_factors.droplevel(date_level).copy()
+        daily.index = daily.index.astype(str)
+        daily_returns.index = daily_returns.index.astype(str)
+        aligned = daily.join(daily_returns, how="inner").dropna(subset=["forward_return"])
+        if aligned.empty:
+            continue
+        if method_name in {"pearson", "spearman"}:
+            row = _daily_target_factor_corr(aligned[factor_cols], aligned["forward_return"], method_name, min_obs)
+        else:
+            row = pd.Series(
+                {
+                    factor: _safe_corr(aligned[factor], aligned["forward_return"], method_name, min_obs)
+                    for factor in factor_cols
+                },
+                dtype=float,
+            )
+        row.name = date_key
+        rows.append(row.reindex(factor_cols))
+
+    if not rows:
+        raise ValueError("No overlapping factor and forward-return data.")
+    return pd.DataFrame(rows).reindex(columns=factor_cols).sort_index()
 
 
 def calculate_rolling_ic(
@@ -132,6 +156,37 @@ def make_rolling_ic_weights(
             weights_by_date[pd.Timestamp(date).normalize()] = stable_weights
             previous_weights = stable_weights
     return weights_by_date
+
+
+def _daily_target_factor_corr(factors: pd.DataFrame, target: pd.Series, method: str, min_obs: int) -> pd.Series:
+    x = factors.astype(float)
+    y = target.astype(float)
+    valid = x.notna()
+    valid = valid.where(y.notna(), False)
+    if not bool(valid.any().any()):
+        return pd.Series(np.nan, index=factors.columns, dtype=float)
+
+    if method == "spearman":
+        y_frame = pd.DataFrame(np.broadcast_to(y.to_numpy()[:, None], x.shape), index=x.index, columns=x.columns)
+        x_values = x.where(valid).rank(axis=0, method="average")
+        y_values = y_frame.where(valid).rank(axis=0, method="average")
+    else:
+        x_values = x.where(valid)
+        y_values = pd.DataFrame(np.broadcast_to(y.to_numpy()[:, None], x.shape), index=x.index, columns=x.columns).where(valid)
+
+    count = valid.sum(axis=0)
+    sum_x = x_values.sum(axis=0, skipna=True)
+    sum_y = y_values.sum(axis=0, skipna=True)
+    sum_x2 = x_values.pow(2).sum(axis=0, skipna=True)
+    sum_y2 = y_values.pow(2).sum(axis=0, skipna=True)
+    sum_xy = x_values.mul(y_values).sum(axis=0, skipna=True)
+
+    cov = sum_xy - (sum_x * sum_y / count.replace(0, np.nan))
+    var_x = sum_x2 - sum_x.pow(2) / count.replace(0, np.nan)
+    var_y = sum_y2 - sum_y.pow(2) / count.replace(0, np.nan)
+    denom = np.sqrt(var_x.clip(lower=0) * var_y.clip(lower=0))
+    corr = cov / denom.replace(0, np.nan)
+    return corr.where(count.ge(min_obs)).replace([np.inf, -np.inf], np.nan).reindex(factors.columns)
 
 
 def cluster_correlated_factors(rolling_ic_df: pd.DataFrame, threshold: float = 0.7) -> dict[str, list[str]]:

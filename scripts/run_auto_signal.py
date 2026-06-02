@@ -21,7 +21,7 @@ from src.auto_tuning import (
     select_stable_params,
     summarize_parameter_validation,
 )
-from src.backtest import run_backtest
+from src.backtest import BacktestResult, run_backtest
 from src.config_loader import load_config, resolve_path
 from src.data_converter import convert_to_qlib_format
 from src.data_fetcher import update_daily_data_resumable
@@ -50,6 +50,7 @@ def main() -> None:
     parser.add_argument("--skip-convert", action="store_true", help="Skip raw-to-price conversion.")
     parser.add_argument("--skip-factor", action="store_true", help="Reuse existing factor cache without recomputation.")
     parser.add_argument("--skip-optimize", action="store_true", help="Use current config strategy instead of automatic tuning.")
+    parser.add_argument("--skip-backtest", action="store_true", help="Generate signal without running the full historical backtest.")
     parser.add_argument("--allow-unhealthy", action="store_true", help="Continue even if data health checks fail.")
     parser.add_argument("--allow-low-quality", action="store_true", help="Continue even if selected parameters fail quality gates.")
     parser.add_argument("--no-archive", action="store_true", help="Do not copy run artifacts into outputs/history.")
@@ -197,27 +198,38 @@ def main() -> None:
         artifacts.append(quality_path)
         quality_gate = parameter_quality.is_acceptable or args.allow_low_quality
 
-        _stage(status, out_dir, "backtest", "running")
         logger.info("Selected strategy params: %s", selected_params)
-        scores = build_strategy_scores(factors, selected_config, price_df=prices)
-        scores = resample_signals(scores, selected_config["strategy"].get("rebalance_freq", "daily"))
-        result = run_backtest(
-            scores,
-            prices,
-            args.start_date,
-            end_date,
-            {**selected_config["backtest"], **selected_config["strategy"]},
-        )
         equity_path = out_dir / "auto_backtest_equity.csv"
         holdings_bt_path = out_dir / "auto_backtest_holdings.csv"
         trades_path = out_dir / "auto_backtest_trades.csv"
         metrics_path = out_dir / "auto_backtest_metrics.json"
-        result.equity_curve.to_csv(equity_path, encoding="utf-8-sig")
-        result.holdings.to_csv(holdings_bt_path, index=False, encoding="utf-8-sig")
-        result.trades.to_csv(trades_path, index=False, encoding="utf-8-sig")
+        if args.skip_backtest:
+            _stage(status, out_dir, "backtest", "skipped")
+            result = BacktestResult(
+                equity_curve=pd.Series(dtype=float, name="equity"),
+                holdings=pd.DataFrame(),
+                trades=pd.DataFrame(),
+                metrics={"backtest_skipped": True},
+            )
+        else:
+            _stage(status, out_dir, "backtest", "running")
+            scores = build_strategy_scores(factors, selected_config, price_df=prices)
+            scores = resample_signals(scores, selected_config["strategy"].get("rebalance_freq", "daily"))
+            result = run_backtest(
+                scores,
+                prices,
+                args.start_date,
+                end_date,
+                {**selected_config["backtest"], **selected_config["strategy"]},
+            )
+            result.equity_curve.to_csv(equity_path, encoding="utf-8-sig")
+            result.holdings.to_csv(holdings_bt_path, index=False, encoding="utf-8-sig")
+            result.trades.to_csv(trades_path, index=False, encoding="utf-8-sig")
+            _stage(status, out_dir, "backtest", "complete")
         _write_json(metrics_path, result.metrics)
-        artifacts.extend([equity_path, holdings_bt_path, trades_path, metrics_path])
-        _stage(status, out_dir, "backtest", "complete")
+        artifacts.append(metrics_path)
+        if not args.skip_backtest:
+            artifacts.extend([equity_path, holdings_bt_path, trades_path])
 
         _stage(status, out_dir, "generate_signal", "running")
         previous = read_previous_holdings(selected_config["outputs"]["holdings_file"])

@@ -6,7 +6,7 @@ import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
-from src.scoring import build_strategy_scores
+from src.scoring import build_latest_strategy_scores
 from src.strategy import select_stocks
 from src.trading_calendar import resolve_target_date_value
 
@@ -45,7 +45,8 @@ def generate_signal(
             end_date=factor_end_date,
             cache_file=factor_file or config["factors"]["cache_file"],
         )
-    scores = build_strategy_scores(factors, config)
+    score_date = "latest" if use_latest_date else factor_end_date
+    scores = build_latest_strategy_scores(factors, config, signal_date=score_date)
     latest_date = pd.Timestamp(scores.index.get_level_values(0).max()).normalize()
     if use_latest_date:
         signal_date = latest_date.strftime("%Y-%m-%d")

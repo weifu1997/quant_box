@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.scoring import build_strategy_scores
+from src.scoring import build_latest_strategy_scores, build_strategy_scores
 
 
 class ScoringTests(unittest.TestCase):
@@ -186,6 +186,45 @@ class ScoringTests(unittest.TestCase):
                 build_strategy_scores(changed_factors, config, price_df=prices)
 
         self.assertEqual(make_weights.call_count, 2)
+
+    def test_build_latest_strategy_scores_uses_target_date_only_for_output(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {
+                "F1": list(range(15)),
+                "F2": list(range(15, 0, -1)),
+            },
+            index=index,
+        )
+        prices = pd.DataFrame(
+            {
+                "A": [10.0, 10.1, 10.2, 10.3],
+                "B": [10.0, 10.2, 10.3, 10.5],
+                "C": [10.0, 10.3, 10.4, 10.6],
+                "D": [10.0, 10.4, 10.5, 10.8],
+                "E": [10.0, 10.5, 10.7, 11.0],
+            },
+            index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]),
+        )
+        config = {
+            "strategy": {"factor_group": "ic_weighted"},
+            "ic": {
+                "top_k": 1,
+                "min_abs_ic": 0.0,
+                "min_obs": 1,
+                "min_periods": 1,
+                "window": 2,
+                "latest_weight_lookback_sessions": 3,
+            },
+        }
+
+        with patch("src.scoring.calculate_rolling_ic") as rolling_ic:
+            scores = build_latest_strategy_scores(factors, config, signal_date="2024-01-04", price_df=prices)
+
+        self.assertEqual(set(scores.index.get_level_values(0)), {pd.Timestamp("2024-01-04")})
+        self.assertEqual(scores.name, "score")
+        rolling_ic.assert_not_called()
 
 
 if __name__ == "__main__":

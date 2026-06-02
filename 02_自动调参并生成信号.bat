@@ -9,13 +9,12 @@ if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.ex
 set CHUNK_SIZE=15
 set SLEEP_SECONDS=10
 
-echo Running automatic data refresh, parameter tuning, backtest and latest signal...
+echo Running daily data refresh and latest manual trading signal...
 echo Chunk size: %CHUNK_SIZE%
 echo Sleep seconds: %SLEEP_SECONDS%
 echo Outputs:
 echo   outputs\auto_run_status.json
 echo   outputs\data_health_report.json
-echo   outputs\auto_parameter_summary.csv
 echo   outputs\auto_selected_params.json
 echo   outputs\auto_parameter_quality.json
 echo   outputs\auto_backtest_metrics.json
@@ -27,8 +26,10 @@ echo   outputs\signal_*.csv
 echo   outputs\candidate_signal_*.csv
 echo   outputs\latest_holdings.csv
 echo.
+echo Note: walk-forward parameter optimization is the separate heavy research step in 08_参数优化.bat.
+echo.
 
-"%PYTHON%" scripts\run_auto_signal.py --chunk-size %CHUNK_SIZE% --sleep-seconds %SLEEP_SECONDS% %*
+"%PYTHON%" scripts\run_auto_signal.py --skip-optimize --skip-backtest --chunk-size %CHUNK_SIZE% --sleep-seconds %SLEEP_SECONDS% %*
 set EXIT_CODE=%errorlevel%
 
 echo.

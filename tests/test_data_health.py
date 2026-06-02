@@ -35,6 +35,7 @@ class DataHealthTests(unittest.TestCase):
 
             self.assertTrue(report.is_healthy)
             self.assertEqual(report.raw_target_coverage, 1.0)
+            self.assertEqual(report.raw_latest_target_coverage, 1.0)
             self.assertEqual(report.price_target_coverage, 1.0)
             self.assertEqual(report.factor_target_coverage, 1.0)
 
@@ -62,9 +63,37 @@ class DataHealthTests(unittest.TestCase):
             report = build_data_health_report(config, price_df=prices, factor_df=factors)
 
             self.assertFalse(report.is_healthy)
-            self.assertIn("raw_latest_before_end:2024-01-02<2024-01-03", report.issues)
+            self.assertIn("raw_latest_coverage_below_threshold:0.5000<1.0000", report.issues)
             self.assertIn("price_latest_before_end:2024-01-02<2024-01-03", report.issues)
             self.assertIn("factor_latest_before_end:2024-01-02<2024-01-03", report.issues)
+
+    def test_build_data_health_report_allows_sparse_stale_raw_symbols_above_threshold(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "600519.SH"],
+                    "name": ["A", "B"],
+                    "list_status": ["L", "L"],
+                    "list_date": ["20200101", "20200101"],
+                }
+            ).to_csv(universe_file, index=False)
+            _raw(raw_dir / "000001.SZ.csv", "000001.SZ", "2024-01-03")
+            _raw(raw_dir / "600519.SH.csv", "600519.SH", "2024-01-02")
+
+            config = _config(raw_dir, universe_file)
+            config["quality"]["min_raw_coverage"] = 0.5
+            prices = _prices("2024-01-03", ["000001.SZ", "600519.SH"])
+            factors = _factors("2024-01-03", ["000001.SZ", "600519.SH"])
+
+            report = build_data_health_report(config, price_df=prices, factor_df=factors)
+
+            self.assertTrue(report.is_healthy)
+            self.assertEqual(report.raw_latest_target_symbols, 1)
+            self.assertEqual(report.raw_latest_target_coverage, 0.5)
 
 
 def _config(raw_dir: Path, universe_file: Path) -> dict:

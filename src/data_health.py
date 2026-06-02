@@ -23,7 +23,9 @@ class DataHealthReport:
     price_target_symbols: int
     factor_symbols: int
     factor_target_symbols: int
+    raw_latest_target_symbols: int
     raw_target_coverage: float
+    raw_latest_target_coverage: float
     price_target_coverage: float
     factor_target_coverage: float
     raw_latest_date: str
@@ -64,7 +66,8 @@ def build_data_health_report(
     price_target = price_symbols & target_symbols if target_symbols else price_symbols
     factor_target = factor_symbols & target_symbols if target_symbols else factor_symbols
 
-    raw_latest = _raw_latest_date(raw_dir, raw_target)
+    raw_latest_by_symbol = _raw_latest_dates(raw_dir, raw_target)
+    raw_latest = min(raw_latest_by_symbol.values()) if raw_latest_by_symbol else None
     price_latest = latest_trade_date(price_df=prices) if prices is not None else None
     factor_latest = _factor_latest_date(factors)
 
@@ -74,6 +77,9 @@ def build_data_health_report(
     require_latest = bool(quality_cfg.get("require_latest_end_date", True))
 
     raw_coverage = _ratio(len(raw_target), len(target_symbols))
+    requested_ts = pd.Timestamp(requested_end)
+    raw_latest_target_symbols = sum(1 for value in raw_latest_by_symbol.values() if value >= requested_ts)
+    raw_latest_target_coverage = _ratio(raw_latest_target_symbols, len(target_symbols))
     price_coverage = _ratio(len(price_target), len(target_symbols))
     factor_coverage = _ratio(len(factor_target), len(target_symbols))
     issues: list[str] = []
@@ -86,9 +92,8 @@ def build_data_health_report(
     if factor_coverage < min_factor:
         issues.append(f"factor_coverage_below_threshold:{factor_coverage:.4f}<{min_factor:.4f}")
     if require_latest:
-        requested_ts = pd.Timestamp(requested_end)
-        if raw_latest is None or raw_latest < requested_ts:
-            issues.append(f"raw_latest_before_end:{_date_text(raw_latest)}<{requested_end}")
+        if raw_latest_target_coverage < min_raw:
+            issues.append(f"raw_latest_coverage_below_threshold:{raw_latest_target_coverage:.4f}<{min_raw:.4f}")
         if price_latest is None or price_latest < requested_ts:
             issues.append(f"price_latest_before_end:{_date_text(price_latest)}<{requested_end}")
         if factor_latest is None or factor_latest < requested_ts:
@@ -104,7 +109,9 @@ def build_data_health_report(
         price_target_symbols=len(price_target),
         factor_symbols=len(factor_symbols),
         factor_target_symbols=len(factor_target),
+        raw_latest_target_symbols=raw_latest_target_symbols,
         raw_target_coverage=raw_coverage,
+        raw_latest_target_coverage=raw_latest_target_coverage,
         price_target_coverage=price_coverage,
         factor_target_coverage=factor_coverage,
         raw_latest_date=_date_text(raw_latest),
@@ -155,8 +162,8 @@ def _raw_symbols(raw_dir: Path) -> set[str]:
     return {path.stem.upper() for path in raw_dir.glob("*.csv") if _is_stock_csv(path)}
 
 
-def _raw_latest_date(raw_dir: Path, symbols: set[str]) -> pd.Timestamp | None:
-    latest_dates: list[pd.Timestamp] = []
+def _raw_latest_dates(raw_dir: Path, symbols: set[str]) -> dict[str, pd.Timestamp]:
+    latest_dates: dict[str, pd.Timestamp] = {}
     for symbol in symbols:
         path = raw_dir / f"{symbol}.csv"
         if not path.exists():
@@ -170,8 +177,8 @@ def _raw_latest_date(raw_dir: Path, symbols: set[str]) -> pd.Timestamp | None:
         current = pd.to_datetime(dates["trade_date"], errors="coerce").max()
         if pd.isna(current):
             continue
-        latest_dates.append(pd.Timestamp(current).normalize())
-    return min(latest_dates) if latest_dates else None
+        latest_dates[symbol] = pd.Timestamp(current).normalize()
+    return latest_dates
 
 
 def _read_parquet_if_exists(path: Path) -> pd.DataFrame | None:

@@ -51,6 +51,41 @@ class FactorICTests(unittest.TestCase):
 
         self.assertTrue(ic[["F1", "F2"]].isna().all().all())
 
+    def test_calculate_factor_ic_matches_pairwise_spearman_with_missing_values(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        instruments = ["a", "b", "c", "d"]
+        index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {
+                "F1": [1.0, 2.0, 3.0, 4.0, 2.0, None, 4.0, 5.0],
+                "F2": [4.0, 3.0, None, 1.0, 1.0, 2.0, 3.0, 4.0],
+            },
+            index=index,
+        )
+        prices = pd.DataFrame(
+            {
+                "a": [10.0, 10.1, 10.0],
+                "b": [10.0, 10.4, 10.7],
+                "c": [10.0, 10.2, 10.5],
+                "d": [10.0, 10.8, 11.2],
+            },
+            index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]),
+        )
+
+        ic = calculate_factor_ic(factors, prices, method="spearman", min_obs=3)
+
+        for factor in ["F1", "F2"]:
+            for date in dates:
+                daily = factors.xs(date, level="datetime")[[factor]].copy()
+                daily["forward_return"] = prices.shift(-1).div(prices).sub(1).loc[date]
+                pair = daily.dropna()
+                expected = pair[factor].corr(pair["forward_return"], method="spearman") if len(pair) >= 3 else float("nan")
+                actual = ic.loc[date, factor]
+                if pd.isna(expected):
+                    self.assertTrue(pd.isna(actual))
+                else:
+                    self.assertAlmostEqual(float(actual), float(expected))
+
 
 if __name__ == "__main__":
     unittest.main()
