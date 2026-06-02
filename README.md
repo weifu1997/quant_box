@@ -1,100 +1,275 @@
 # quant_box
 
-本项目实现“tushare HTTP 代理 + Qlib Alpha158 因子 + 简单排序选股”的无训练版量化流程。它不包含 LightGBM 训练，核心流程是：更新沪深300日线数据、转换本地数据、计算 Alpha158 因子、用合成因子排序选股、执行轻量回测并生成每日调仓信号。
+`quant_box` 是一个面向 A 股主板股票的本地量化研究与手动交易信号项目。它不直接接入券商 API，也不做自动下单；核心目标是通过本地数据、Qlib Alpha158 因子、IC 加权选股、真实化回测和每日信号文件，辅助你进行手动交易决策。
 
-## 目录
+项目当前支持：
 
-- `config/settings.yaml`：tushare 代理、数据路径、策略参数和回测参数。
-- `src/data_fetcher.py`：通过 tushare HTTP 代理获取日线和沪深300成分股。
-- `src/data_converter.py`：把原始 CSV 转换成 Qlib 原生 `.bin` provider 数据，同时生成 parquet 缓存和价格矩阵。
-- `src/factor_calculator.py`：调用 Qlib Alpha158 并缓存因子。
-- `src/strategy.py`：合成因子、排序选股、每日最多换 1 只等约束。
-- `src/backtest.py`：轻量级本地回测和绩效指标。
-- `src/signal_generator.py`：生成每日调仓信号与最新持仓。
-- `scripts/`：命令行入口。
+- 通过 Tushare HTTP 代理补齐 A 股主板日线数据
+- 将原始 CSV 转换为 Qlib provider 数据和本地价格面板
+- 计算并缓存 Alpha158 因子
+- 使用 rolling IC 动态权重生成综合因子分数
+- 运行考虑滑点、手续费、最低佣金、过户费、容量限制、涨跌停、长期停牌折价退出的回测
+- 生成最新调仓信号和最新持仓文件
+- 运行 walk-forward 参数优化
+- Windows 双击 `.bat` 一键启动常用流程
 
-## 准备
+## 目录结构
 
-建议使用 Python 3.8 到 3.11。Qlib 在 Windows 上安装可能受版本影响，如果安装失败，优先使用 Python 3.8 环境。
+```text
+quant_box/
+  config/
+    settings.yaml              默认配置，可提交
+    settings.local.yaml        本地私密配置，不提交
+  data/
+    raw/                       原始日线 CSV，本地缓存，不提交
+    qlib_data/                 Qlib provider 数据，不提交
+    factors/                   因子和 IC 权重缓存，不提交
+    prices/                    回测价格面板，不提交
+  outputs/                     回测、优化、信号、进度输出，不提交
+  scripts/                     命令行入口
+  src/                         核心代码
+  tests/                       自动化测试
+  *.bat                        Windows 一键脚本
+```
+
+## 新电脑快速开始
+
+先拉取项目：
+
+```powershell
+git clone https://github.com/weifu1997/quant_box.git
+cd quant_box
+```
+
+然后双击：
+
+```text
+00_安装依赖环境.bat
+```
+
+这个脚本会自动执行：
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-然后编辑 `config/settings.yaml`：
+如果 `python` 命令不可用，脚本会自动尝试 `py -3`。
 
-- `tushare.http_url`：你的第三方 tushare HTTP 代理地址。
-- `tushare.token`：代理需要 token 时填写。
-- `data.start_date` / `data.end_date`：数据区间。
-- `strategy.top_n`：默认持有 7 只。
-- `strategy.max_turnover`：默认每日最多换 1 只。
+## 配置 Tushare 代理
 
-如果代理不能直接返回沪深300成分股，请把本地成分股文件放在 `data/raw/hs300_constituents.csv`，至少包含 `ts_code` 或 `con_code` 列。
+不要把真实 URL 和 token 写进 `config/settings.yaml` 后提交。建议新建：
 
-## 运行
+```text
+config/settings.local.yaml
+```
 
-更新日线数据：
+示例：
+
+```yaml
+tushare:
+  http_url: "http://你的代理地址:端口/"
+  token: "你的token"
+```
+
+`config/settings.local.yaml` 已经在 `.gitignore` 中，不会被提交。
+
+也可以使用环境变量：
 
 ```powershell
-python scripts/run_update_data.py
+setx TUSHARE_HTTP_URL "你的代理地址"
+setx TUSHARE_TOKEN "你的token"
 ```
 
-只更新指定股票：
+检查配置是否能被读取，双击：
+
+```text
+01_检查Tushare配置.bat
+```
+
+这个检查不会发网络请求，也不会打印 token。
+
+## 一键脚本
+
+推荐按编号使用：
+
+| 脚本 | 作用 |
+| --- | --- |
+| `00_安装依赖环境.bat` | 新电脑首次安装 `.venv` 和依赖 |
+| `01_检查Tushare配置.bat` | 检查 Tushare HTTP 代理配置是否可读取 |
+| `02_补齐股票数据_持续.bat` | 持续补齐缺失主板股票日线数据 |
+| `03_查看补齐进度.bat` | 查看本地 raw CSV 数量和补齐进度 JSON |
+| `04_转换数据.bat` | 将 `data/raw/*.csv` 转为 Qlib 数据和价格面板 |
+| `05_计算因子.bat` | 计算或读取 Alpha158 因子缓存 |
+| `06_运行回测.bat` | 运行当前配置下的回测 |
+| `07_生成最新信号.bat` | 基于最新因子生成手动交易信号 |
+| `08_参数优化.bat` | 运行 walk-forward 参数优化 |
+| `09_运行测试.bat` | 运行自动化测试 |
+| `10_全流程_补数据到信号.bat` | 从补数据到生成信号的一键全流程 |
+
+最常用的是：
+
+```text
+02_补齐股票数据_持续.bat
+03_查看补齐进度.bat
+04_转换数据.bat
+05_计算因子.bat
+06_运行回测.bat
+07_生成最新信号.bat
+```
+
+## 补齐股票数据
+
+双击：
+
+```text
+02_补齐股票数据_持续.bat
+```
+
+默认参数：
 
 ```powershell
-python scripts/run_update_data.py --codes 000001.SZ 600519.SH
+--chunk-size 50 --sleep-seconds 60
 ```
 
-转换本地数据：
+含义：
+
+- 每批补 50 只缺失股票
+- 批间等待 60 秒
+- 自动记录进度到 `outputs/data_update_progress.json`
+- 中断后再次双击，会继续补缺失股票，不会从头开始
+
+命令行等价写法：
 
 ```powershell
-python scripts/run_convert_data.py
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 50 --sleep-seconds 60
 ```
 
-计算并缓存 Alpha158：
+只跑一批确认状态：
 
 ```powershell
-python scripts/run_calc_factors.py
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 50 --sleep-seconds 60 --max-chunks 1
 ```
 
-运行回测：
+查看本地 CSV 数量：
 
 ```powershell
-python scripts/run_backtest.py
+(Get-ChildItem data\raw -Filter *.csv).Count
 ```
 
-运行参数优化：
+查看进度：
 
 ```powershell
-python scripts/run_optimize.py
+Get-Content outputs\data_update_progress.json
 ```
 
-生成每日信号：
+## 数据处理与回测流程
+
+数据补齐后，按顺序双击：
+
+```text
+04_转换数据.bat
+05_计算因子.bat
+06_运行回测.bat
+07_生成最新信号.bat
+```
+
+对应命令行：
 
 ```powershell
-python scripts/run_daily_signal.py --date 2026-06-01
+.\.venv\Scripts\python.exe scripts\run_convert_data.py
+.\.venv\Scripts\python.exe scripts\run_calc_factors.py
+.\.venv\Scripts\python.exe scripts\run_backtest.py
+.\.venv\Scripts\python.exe scripts\run_daily_signal.py --date latest
 ```
 
-一键执行完整流程：
+完整一键流程：
+
+```text
+10_全流程_补数据到信号.bat
+```
+
+注意：全流程会先补数据。如果当前缺失股票很多，这一步会耗时较久。
+
+## 输出文件
+
+常见输出：
+
+```text
+data/raw/*.csv                         原始日线数据
+data/qlib_data/                        Qlib provider 数据
+data/prices/close.parquet              收盘价面板
+data/prices/ohlcv.parquet              OHLCV 价格面板
+data/factors/alpha158.parquet          Alpha158 因子缓存
+data/factors/alpha158.parquet.meta.json 因子缓存元数据
+data/factors/rolling_ic_weights.pkl    rolling IC 权重缓存
+outputs/backtest_equity.csv            回测净值
+outputs/backtest_holdings.csv          回测持仓
+outputs/backtest_trades.csv            回测成交
+outputs/backtest_metrics.json          回测指标
+outputs/optimization_results.csv       参数优化结果
+outputs/signal_YYYY-MM-DD.csv          每日信号
+outputs/latest_holdings.csv            最新持仓
+outputs/data_update_progress.json      数据补齐进度
+```
+
+## 策略与回测要点
+
+当前默认配置位于 `config/settings.yaml`：
+
+- 股票池：A 股主板 `mainboard_a`
+- 因子组：`ic_weighted`
+- 调仓频率：weekly
+- 默认持仓数：5
+- 单次最大换手：1
+- 排名缓冲：10
+- 成本：佣金、最低佣金、印花税、过户费、滑点
+- 容量限制：使用交易日前历史 ADV，避免看当日成交额
+- 涨跌停：优先用 high/low 判断触板
+- 止盈止损：优先用 high/low 触发，并按止损价/止盈价或跳空开盘价成交
+- 长期缺价/停牌：按配置折价退出，避免回测净值长期使用陈旧价格
+
+## 测试
+
+双击：
+
+```text
+09_运行测试.bat
+```
+
+或命令行：
 
 ```powershell
-.\run_all.bat
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-## 输出
+## 换电脑迁移数据
 
-- `data/raw/*.csv`：原始日线数据。
-- `data/qlib_data/`：转换后的 Qlib provider 数据目录，包含 `calendars`、`instruments` 和 `.bin` 特征文件。
-- `data/factors/alpha158.parquet`：Alpha158 因子缓存。
-- `data/prices/close.parquet`：回测使用的收盘价矩阵。
-- `outputs/backtest_*.csv` / `outputs/backtest_metrics.json`：回测结果。
-- `outputs/optimization_results.csv`：参数搜索结果。
-- `outputs/factor_ic_summary.csv`：因子 IC 统计。
-- `outputs/signal_YYYY-MM-DD.csv`：当日调仓信号。
-- `outputs/latest_holdings.csv`：最新持仓。
+GitHub 会保存代码、默认配置、脚本和测试，但不会保存：
 
-## 注意
+- `.venv`
+- `config/settings.local.yaml`
+- `data/`
+- `outputs/`
 
-当前转换器会写出 Qlib 0.9.7 可读取的日频 `.bin` 特征文件，包括 `open`、`high`、`low`、`close`、`volume`、`amount` 和 `vwap`。如果未来升级 Qlib 后 provider 格式变化，再根据新版本调整转换器。
+如果想快速恢复旧电脑状态，可以手动复制旧电脑的：
+
+```text
+config/settings.local.yaml
+data/
+outputs/
+```
+
+如果不复制数据，就在新电脑上重新双击：
+
+```text
+00_安装依赖环境.bat
+02_补齐股票数据_持续.bat
+```
+
+## 注意事项
+
+- 本项目只生成手动交易信号，不负责自动下单。
+- 不要提交 `config/settings.local.yaml`。
+- 如果数据补齐窗口长时间没有新增文件，先双击 `03_查看补齐进度.bat` 看 `current_symbol`、`last_error` 和 raw CSV 数量。
+- 大批量补齐数据是小时级任务，建议保持小批次可恢复模式运行。
