@@ -420,7 +420,8 @@ def fetch_hs300_stocks(
     local_file: str | Path | None = None,
 ) -> list[str]:
     config = load_config()
-    local_path = resolve_path(local_file or config["data"]["constituents_file"])
+    data_cfg = config.get("data", {})
+    local_path = resolve_path(local_file or data_cfg.get("hs300_constituents_file", "data/raw/hs300_constituents.csv"))
     if local_path.exists():
         df = pd.read_csv(local_path)
         code_col = "ts_code" if "ts_code" in df.columns else "con_code"
@@ -452,12 +453,13 @@ def fetch_stock_universe(
     config = load_config()
     data_cfg = config.get("data", {})
     universe = (universe or data_cfg.get("universe", "mainboard_a")).lower()
-    local_path = resolve_path(local_file or data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
 
+    if universe in {"hs300", "csi300"}:
+        return fetch_hs300_stocks(date=date, client=client, local_file=local_file)
+
+    local_path = resolve_path(local_file or data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
     if local_path.exists():
         df = pd.read_csv(local_path)
-    elif universe in {"hs300", "csi300"}:
-        return fetch_hs300_stocks(date=date, client=client, local_file=local_file)
     else:
         client = client or TushareHttpClient.from_config(config)
         df = _fetch_stock_basic_history(client)

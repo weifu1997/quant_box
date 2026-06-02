@@ -687,7 +687,8 @@ def _execute_stale_price_exits(
             "stale_price_exit",
             execution_price=base_price,
         )
-        stale_unpriced_days.pop(stock, None)
+        if stock not in holdings:
+            stale_unpriced_days.pop(stock, None)
     return capital
 
 
@@ -758,30 +759,41 @@ def _sell_all(
     shares = holdings.get(stock, 0)
     base_price = execution_price if execution_price is not None else _risk_exit_market_price(stock, close, last_prices, trade_date, prices, config)
     price = float(base_price) * (1 - slippage)
-    gross = shares * price
+    filled_shares, status, capacity_reason = _apply_capacity_limit(shares, price, stock, prices, trade_date, config)
+    if filled_shares <= 0:
+        trade_rows.append(
+            _blocked_trade(pd.NaT, trade_date, stock, "SELL", shares, f"{reason}_{capacity_reason or 'capacity_limited'}")
+        )
+        return capital
+
+    gross = filled_shares * price
     commission_cost = _commission_cost(gross, commission, min_commission)
     tax_cost = gross * stamp_tax
     transfer_fee_cost = _transfer_fee_cost(gross, transfer_fee)
     proceeds = gross - commission_cost - tax_cost - transfer_fee_cost
     capital += proceeds
-    holdings.pop(stock, None)
-    entry_prices.pop(stock, None)
+    remaining = shares - filled_shares
+    if remaining > 0:
+        holdings[stock] = remaining
+    else:
+        holdings.pop(stock, None)
+        entry_prices.pop(stock, None)
     trade_rows.append(
         _trade(
             pd.NaT,
             trade_date,
             stock,
             "SELL",
-            shares,
+            filled_shares,
             price,
             proceeds,
-            status="risk_exit",
-            reason=reason,
+            status="risk_exit" if status == "filled" else status,
+            reason=reason if capacity_reason is None else f"{reason}_{capacity_reason}",
             commission_cost=commission_cost,
             tax_cost=tax_cost,
             transfer_fee_cost=transfer_fee_cost,
-            slippage_cost=shares * float(base_price) * slippage,
-            capacity=_capacity(prices, trade_date, stock, shares * price, config),
+            slippage_cost=filled_shares * float(base_price) * slippage,
+            capacity=_capacity(prices, trade_date, stock, filled_shares * price, config),
         )
     )
     return capital

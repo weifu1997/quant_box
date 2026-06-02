@@ -227,8 +227,13 @@ def generate_holdings_by_day(
             max_turnover=max_turnover,
             rank_buffer=rank_buffer,
         )
+        if not holdings:
+            previous = holdings
+            continue
         rows.extend({"date": pd.Timestamp(date), "instrument": code, "weight": 1 / len(holdings)} for code in holdings)
         previous = holdings
+    if not rows:
+        return pd.DataFrame(columns=["date", "instrument", "weight"])
     return pd.DataFrame(rows)
 
 

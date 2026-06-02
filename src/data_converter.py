@@ -19,30 +19,41 @@ def convert_to_qlib_format(
     qlib_dir: str | Path | None = None,
 ) -> dict[str, int | Path]:
     config = load_config()
-    source_dir = resolve_path(raw_dir or config["data"].get("raw_dir", "data/raw"))
+    data_cfg = config.get("data", {})
+    source_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
     target_dir = resolve_path(qlib_dir or config["qlib"]["provider_uri"])
     missing_value = float(config.get("qlib", {}).get("missing_value", -1.0))
     calendar_dir = target_dir / "calendars"
     feature_dir = target_dir / "features"
     instrument_dir = target_dir / "instruments"
+    prices_dir = resolve_path("data/prices")
 
     calendar_dir.mkdir(parents=True, exist_ok=True)
     feature_dir.mkdir(parents=True, exist_ok=True)
     instrument_dir.mkdir(parents=True, exist_ok=True)
+    prices_dir.mkdir(parents=True, exist_ok=True)
 
-    universe_file = Path(config["data"].get("constituents_file", "")).name
+    universe_file = Path(data_cfg.get("constituents_file", "")).name
+    hs300_universe_file = Path(data_cfg.get("hs300_constituents_file", "")).name
     csv_files = sorted(source_dir.glob("*.csv"))
     metadata_files = {
         name
-        for name in [universe_file, "hs300_constituents.csv", "mainboard_a_stocks.csv", "failed_fetches.csv"]
+        for name in [
+            universe_file,
+            hs300_universe_file,
+            "hs300_constituents.csv",
+            "mainboard_a_stocks.csv",
+            "failed_fetches.csv",
+        ]
         if name
     }
     csv_files = [path for path in csv_files if path.name not in metadata_files]
     if not csv_files:
+        _remove_price_outputs(prices_dir)
         raise FileNotFoundError(f"No raw stock csv files found in {source_dir}")
 
-    calendar_file = config.get("data", {}).get("calendar_file")
-    tradable_file = config.get("data", {}).get("tradable_file")
+    calendar_file = data_cfg.get("calendar_file")
+    tradable_file = data_cfg.get("tradable_file")
     tradable_codes = _load_tradable_codes(tradable_file) if tradable_file else None
     all_dates: set[str] = set()
     prepared: list[tuple[str, pd.DataFrame]] = []
@@ -59,6 +70,10 @@ def convert_to_qlib_format(
 
         all_dates.update(df["trade_date"].dt.strftime("%Y-%m-%d"))
         prepared.append((code, df))
+
+    if not prepared:
+        _remove_price_outputs(prices_dir)
+        raise ValueError("No valid stock data remained after filtering raw CSV files.")
 
     if calendar_file:
         calendar_path = resolve_path(calendar_file)
@@ -93,8 +108,6 @@ def convert_to_qlib_format(
     _write_instruments(instrument_dir / "all.txt", instruments)
     _write_instruments(instrument_dir / f"{instrument_name}.txt", instruments)
 
-    prices_dir = resolve_path("data/prices")
-    prices_dir.mkdir(parents=True, exist_ok=True)
     if close_frames:
         pd.concat(close_frames, axis=1).sort_index().to_parquet(prices_dir / "close.parquet")
     if panel_frames:
@@ -155,6 +168,13 @@ def _instrument_from_filename(path: Path) -> str:
 def _write_instruments(path: Path, instruments: list[tuple[str, str, str]]) -> None:
     rows = [f"{code.lower()}\t{start}\t{end}" for code, start, end in instruments]
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def _remove_price_outputs(prices_dir: Path) -> None:
+    for name in ["close.parquet", "ohlcv.parquet"]:
+        path = prices_dir / name
+        if path.exists():
+            path.unlink()
 
 
 def _write_qlib_bin_features(

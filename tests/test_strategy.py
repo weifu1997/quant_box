@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.strategy import composite_factor, resample_signals, select_stocks
+from src.strategy import composite_factor, generate_holdings_by_day, resample_signals, select_stocks
 
 
 class StrategyTests(unittest.TestCase):
@@ -39,6 +39,18 @@ class StrategyTests(unittest.TestCase):
 
         self.assertEqual(len(selected), len(set(selected)))
         self.assertEqual(len(selected), 3)
+
+    def test_generate_holdings_by_day_returns_empty_frame_when_no_scores_are_selectable(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A", "B"]],
+            names=["datetime", "instrument"],
+        )
+        scores = pd.Series([None, None, None, None], index=index, name="score", dtype="float64")
+
+        holdings = generate_holdings_by_day(scores, top_n=2, max_turnover=1)
+
+        self.assertTrue(holdings.empty)
+        self.assertEqual(holdings.columns.tolist(), ["date", "instrument", "weight"])
 
     def test_composite_factor_returns_score_series(self) -> None:
         index = pd.MultiIndex.from_product(

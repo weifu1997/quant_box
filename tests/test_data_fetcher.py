@@ -7,7 +7,14 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.data_fetcher import DAILY_FIELDS, fetch_daily_stocks, filter_universe_frame, update_daily_data, update_daily_data_resumable
+from src.data_fetcher import (
+    DAILY_FIELDS,
+    fetch_daily_stocks,
+    fetch_stock_universe,
+    filter_universe_frame,
+    update_daily_data,
+    update_daily_data_resumable,
+)
 
 
 class FakeTushareClient:
@@ -73,6 +80,37 @@ class EmptyTushareClient(FakeTushareClient):
 
 
 class DataFetcherTests(unittest.TestCase):
+    def test_hs300_universe_uses_hs300_constituents_not_mainboard_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mainboard_file = root / "mainboard_a_stocks.csv"
+            hs300_file = root / "hs300_constituents.csv"
+            pd.DataFrame(
+                [
+                    {"ts_code": "000001.SZ", "name": "MAINBOARD_A"},
+                    {"ts_code": "000002.SZ", "name": "MAINBOARD_B"},
+                ]
+            ).to_csv(mainboard_file, index=False)
+            pd.DataFrame(
+                [
+                    {"con_code": "600000.SH"},
+                    {"con_code": "000300.SZ"},
+                ]
+            ).to_csv(hs300_file, index=False)
+            config = {
+                "data": {
+                    "universe": "hs300",
+                    "constituents_file": str(mainboard_file),
+                    "hs300_constituents_file": str(hs300_file),
+                    "end_date": "2024-01-03",
+                }
+            }
+
+            with patch("src.data_fetcher.load_config", return_value=config):
+                codes = fetch_stock_universe()
+
+            self.assertEqual(codes, ["000300.SZ", "600000.SH"])
+
     def test_filter_universe_frame_excludes_delisted_before_as_of_date(self) -> None:
         universe = pd.DataFrame(
             [

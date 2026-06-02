@@ -125,6 +125,48 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(risk_trades.empty)
         self.assertEqual(risk_trades.iloc[0]["reason"], "stop_loss")
 
+    def test_stop_loss_exit_respects_capacity_limit_and_keeps_remaining_shares(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "open": pd.DataFrame({"A": [10.0, 10.0, 9.6]}, index=dates),
+                "high": pd.DataFrame({"A": [10.0, 10.2, 9.7]}, index=dates),
+                "low": pd.DataFrame({"A": [10.0, 9.9, 9.4]}, index=dates),
+                "close": pd.DataFrame({"A": [10.0, 10.0, 9.4]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 100.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "trade_price_field": "open",
+                "stop_loss_pct": 0.05,
+                "max_participation_rate": 0.1,
+                "amount_unit": 1000.0,
+                "capacity_window": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+            },
+        )
+
+        sell = result.trades[(result.trades["side"] == "SELL") & (result.trades["reason"] == "stop_loss_capacity_limited")].iloc[0]
+        self.assertEqual(sell["status"], "partial")
+        self.assertEqual(int(sell["shares"]), 1000)
+        final_holding = result.holdings[result.holdings["date"] == dates[-1]].iloc[0]
+        self.assertEqual(int(final_holding["shares"]), 9000)
+
     def test_stop_loss_uses_intraday_trigger_not_close_fill(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
