@@ -21,7 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "raw_dir": "data/raw",
         "constituents_file": "data/raw/mainboard_a_stocks.csv",
         "daily_batch_size": 20,
-        "daily_window_days": 250,
+        "daily_window_days": 500,
         "max_new_symbols_per_run": None,
         "update_chunk_size": 20,
         "update_sleep_seconds": 90,
