@@ -30,10 +30,12 @@ def generate_signal(
     config = load_config()
     data_cfg = config["data"]
     strategy_cfg = config["strategy"]
+    use_latest_date = str(signal_date).lower() == "latest"
+    factor_end_date = data_cfg["end_date"] if use_latest_date else signal_date
 
     factors = load_or_compute_factors(
         start_date=data_cfg["start_date"],
-        end_date=signal_date,
+        end_date=factor_end_date,
         cache_file=factor_file or config["factors"]["cache_file"],
     )
     factor_group = strategy_cfg.get("factor_group", "momentum")
@@ -63,9 +65,12 @@ def generate_signal(
         )
     scores = composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights)
     latest_date = pd.Timestamp(scores.index.get_level_values(0).max()).normalize()
-    requested_date = pd.Timestamp(signal_date).normalize()
-    if latest_date != requested_date:
-        raise ValueError(f"Factor cache latest date {latest_date.date()} does not match signal_date {requested_date.date()}.")
+    if use_latest_date:
+        signal_date = latest_date.strftime("%Y-%m-%d")
+    else:
+        requested_date = pd.Timestamp(signal_date).normalize()
+        if latest_date != requested_date:
+            raise ValueError(f"Factor cache latest date {latest_date.date()} does not match signal_date {requested_date.date()}.")
     latest_scores = scores.xs(latest_date, level=0, drop_level=True)
     previous_holdings = previous_holdings if previous_holdings is not None else read_previous_holdings()
     holdings = select_stocks(

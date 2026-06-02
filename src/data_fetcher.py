@@ -166,19 +166,246 @@ def fetch_daily_stock(
     raise ValueError(f"{ts_code} daily data response is invalid after {retries} attempts: {last_error}") from last_error
 
 
-def merge_adj_factor(daily: pd.DataFrame, adj_factor: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
-    daily = normalize_daily_frame(daily, default_ts_code=default_ts_code)
+def fetch_daily_stocks(
+    ts_codes: Iterable[str],
+    start_date: str | datetime,
+    end_date: str | datetime,
+    client: TushareHttpClient | None = None,
+    retries: int = 3,
+    batch_size: int = 100,
+    window_days: int | None = None,
+    skip_failed: bool = True,
+) -> pd.DataFrame:
+    codes = [str(code) for code in dict.fromkeys(ts_codes)]
+    if not codes:
+        return pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
+    if len(codes) == 1 or batch_size <= 1:
+        frames = []
+        failed_codes: list[str] = []
+        for code in codes:
+            try:
+                frames.append(fetch_daily_stock(code, start_date, end_date, client=client, retries=retries))
+            except (RuntimeError, ValueError) as exc:
+                if not skip_failed:
+                    raise
+                failed_codes.append(code)
+                logger.error("Skipping %s after daily fetch failure: %s", code, exc)
+        result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
+        result.attrs["failed_codes"] = failed_codes
+        return result
+
+    client = client or TushareHttpClient.from_config()
+    frames: list[pd.DataFrame] = []
+    all_failed_codes: set[str] = set()
+    for batch in _batched(codes, batch_size):
+        batch_frames: list[pd.DataFrame] = []
+        failed_codes: set[str] = set()
+        for window_start, window_end in _date_windows(start_date, end_date, window_days):
+            window_df = _fetch_daily_stock_batch(
+                batch,
+                window_start,
+                window_end,
+                client=client,
+                retries=retries,
+                skip_failed=skip_failed,
+            )
+            failed_codes.update(window_df.attrs.get("failed_codes", []))
+            batch_frames.append(window_df)
+        if batch_frames:
+            batch_df = pd.concat(batch_frames, ignore_index=True)
+            if failed_codes:
+                batch_df = batch_df[~batch_df["ts_code"].isin(failed_codes)].copy() if not batch_df.empty else batch_df
+            all_failed_codes.update(failed_codes)
+            frames.append(batch_df)
+    if not frames:
+        result = pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
+        result.attrs["failed_codes"] = sorted(all_failed_codes)
+        return result
+    result = pd.concat(frames, ignore_index=True)
+    result = result.drop_duplicates(["ts_code", "trade_date"], keep="last")
+    result.attrs["failed_codes"] = sorted(all_failed_codes)
+    return result
+
+
+def _fetch_daily_stock_batch(
+    ts_codes: list[str],
+    start_date: str | datetime,
+    end_date: str | datetime,
+    client: TushareHttpClient,
+    retries: int = 3,
+    skip_failed: bool = True,
+) -> pd.DataFrame:
+    params = {
+        "ts_code": ",".join(ts_codes),
+        "start_date": _format_tushare_date(start_date),
+        "end_date": _format_tushare_date(end_date),
+    }
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            df = client.call("daily", params=params, fields=DAILY_FIELDS)
+            daily = normalize_daily_frame(df)
+            adj = _fetch_adj_factor_batch(ts_codes, start_date, end_date, client=client)
+            adj = _complete_missing_adj_factors(daily, adj, start_date, end_date, client=client, retries=retries, skip_failed=skip_failed)
+            if skip_failed:
+                daily, adj, failed_codes = _drop_incomplete_adj_symbols(daily, adj)
+                if failed_codes:
+                    logger.error(
+                        "Skipping %d symbols with incomplete adj_factor coverage in batch: %s",
+                        len(failed_codes),
+                        ",".join(failed_codes[:10]),
+                    )
+                if daily.empty:
+                    result = pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
+                    result.attrs["failed_codes"] = failed_codes
+                    return result
+            result = merge_adj_factor(daily, adj)
+            result.attrs["failed_codes"] = failed_codes if skip_failed else []
+            return result
+        except (RuntimeError, ValueError) as exc:
+            last_error = exc
+            if skip_failed and _is_tushare_connection_error(exc):
+                break
+            if attempt < retries:
+                wait_seconds = 2 ** (attempt - 1) + random.uniform(0, 1)
+                logger.warning("Retrying %d-stock daily batch after error: %s", len(ts_codes), exc)
+                time.sleep(wait_seconds)
+    logger.warning("Falling back to per-stock daily fetch for %d symbols after batch error: %s", len(ts_codes), last_error)
+    frames = []
+    failed_codes: list[str] = []
+    fallback_retries = 1 if last_error is not None and _is_tushare_connection_error(last_error) else retries
+    for code in ts_codes:
+        try:
+            frames.append(fetch_daily_stock(code, start_date, end_date, client=client, retries=fallback_retries))
+        except (RuntimeError, ValueError) as exc:
+            if not skip_failed:
+                raise
+            failed_codes.append(code)
+            logger.error("Skipping %s after per-stock fallback failure: %s", code, exc)
+    result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
+    result.attrs["failed_codes"] = failed_codes
+    return result
+
+
+def _is_tushare_connection_error(exc: Exception) -> bool:
+    return "Failed to connect to tushare HTTP proxy" in str(exc)
+
+
+def _fetch_adj_factor_batch(
+    ts_codes: list[str],
+    start_date: str | datetime,
+    end_date: str | datetime,
+    client: TushareHttpClient,
+) -> pd.DataFrame:
+    params = {
+        "ts_code": ",".join(ts_codes),
+        "start_date": _format_tushare_date(start_date),
+        "end_date": _format_tushare_date(end_date),
+    }
+    try:
+        adj = client.call("adj_factor", params=params, fields=ADJ_FACTOR_FIELDS)
+        if not adj.empty:
+            return adj
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("Falling back to per-stock adj_factor fetch for %d symbols: %s", len(ts_codes), exc)
+
+    frames = []
+    for code in ts_codes:
+        per_stock_params = {**params, "ts_code": code}
+        adj = client.call("adj_factor", params=per_stock_params, fields=ADJ_FACTOR_FIELDS)
+        if not adj.empty:
+            frames.append(adj)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=ADJ_FACTOR_FIELDS)
+
+
+def _complete_missing_adj_factors(
+    daily: pd.DataFrame,
+    adj: pd.DataFrame,
+    start_date: str | datetime,
+    end_date: str | datetime,
+    client: TushareHttpClient,
+    retries: int,
+    skip_failed: bool,
+) -> pd.DataFrame:
+    if daily.empty:
+        return adj
+    daily_norm = normalize_daily_frame(daily)
+    adj_norm = _normalize_adj_factor_frame(adj)
+    expected = daily_norm[["ts_code", "trade_date"]].drop_duplicates()
+    available = adj_norm[["ts_code", "trade_date", "adj_factor"]].drop_duplicates(["ts_code", "trade_date"])
+    coverage = expected.merge(available, on=["ts_code", "trade_date"], how="left")
+    missing_codes = sorted(coverage.loc[coverage["adj_factor"].isna(), "ts_code"].dropna().astype(str).unique())
+    if not missing_codes:
+        return adj_norm
+
+    logger.warning(
+        "Fetching incomplete adj_factor coverage for %d/%d symbols.",
+        len(missing_codes),
+        daily_norm["ts_code"].nunique(),
+    )
+    frames = [adj_norm] if not adj_norm.empty else []
+    for code in missing_codes:
+        try:
+            params = {
+                "ts_code": code,
+                "start_date": _format_tushare_date(start_date),
+                "end_date": _format_tushare_date(end_date),
+            }
+            piece = client.call("adj_factor", params=params, fields=ADJ_FACTOR_FIELDS)
+            if not piece.empty:
+                frames.append(_normalize_adj_factor_frame(piece, default_ts_code=code))
+        except (RuntimeError, ValueError) as exc:
+            if not skip_failed:
+                raise
+            logger.error("Skipping %s adj_factor completion after failure: %s", code, exc)
+    if not frames:
+        return pd.DataFrame(columns=ADJ_FACTOR_FIELDS)
+    return pd.concat(frames, ignore_index=True).drop_duplicates(["ts_code", "trade_date"], keep="last")
+
+
+def _drop_incomplete_adj_symbols(daily: pd.DataFrame, adj_factor: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    daily_norm = normalize_daily_frame(daily)
+    adj_norm = _normalize_adj_factor_frame(adj_factor)
+    if daily_norm.empty:
+        return daily_norm, adj_norm, []
+
+    expected = daily_norm[["ts_code", "trade_date"]].drop_duplicates()
+    available = adj_norm[["ts_code", "trade_date", "adj_factor"]].drop_duplicates(["ts_code", "trade_date"])
+    coverage = expected.merge(available, on=["ts_code", "trade_date"], how="left")
+    failed_codes = sorted(coverage.loc[coverage["adj_factor"].isna(), "ts_code"].dropna().astype(str).unique())
+    if not failed_codes:
+        return daily_norm, adj_norm, []
+
+    failed_set = set(failed_codes)
+    daily_clean = daily_norm[~daily_norm["ts_code"].isin(failed_set)].copy()
+    adj_clean = adj_norm[~adj_norm["ts_code"].isin(failed_set)].copy()
+    return daily_clean, adj_clean, failed_codes
+
+
+def _normalize_adj_factor_frame(adj_factor: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
     adj = adj_factor.rename(columns={"date": "trade_date"}).copy()
     if "ts_code" not in adj.columns and default_ts_code:
         adj["ts_code"] = default_ts_code
     required = set(ADJ_FACTOR_FIELDS)
     if not required.issubset(adj.columns):
+        if adj.empty:
+            return pd.DataFrame(columns=ADJ_FACTOR_FIELDS)
         missing = sorted(required - set(adj.columns))
         raise ValueError(f"Adj factor data is missing columns: {missing}")
     adj = adj[ADJ_FACTOR_FIELDS]
     adj["trade_date"] = pd.to_datetime(adj["trade_date"].astype(str), errors="coerce")
     adj["adj_factor"] = pd.to_numeric(adj["adj_factor"], errors="coerce")
     adj = adj.dropna(subset=["trade_date", "adj_factor"])
+    return adj.drop_duplicates(["ts_code", "trade_date"], keep="last").reset_index(drop=True)
+
+
+def merge_adj_factor(daily: pd.DataFrame, adj_factor: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
+    daily = normalize_daily_frame(daily, default_ts_code=default_ts_code)
+    if daily.empty:
+        result = daily.copy()
+        result["adj_factor"] = pd.Series(dtype="float64")
+        return result
+    adj = _normalize_adj_factor_frame(adj_factor, default_ts_code=default_ts_code)
     merged = daily.merge(adj, on=["ts_code", "trade_date"], how="left")
     if merged["adj_factor"].isna().any():
         missing_count = int(merged["adj_factor"].isna().sum())
@@ -290,10 +517,10 @@ def filter_universe_frame(
     if as_of_date is not None:
         as_of = pd.Timestamp(as_of_date)
         if "list_date" in result.columns:
-            listed = pd.to_datetime(result["list_date"].astype(str), errors="coerce")
+            listed = pd.to_datetime(result["list_date"].astype(str), format="%Y%m%d", errors="coerce")
             result = result[listed.isna() | (listed <= as_of)]
         if "delist_date" in result.columns:
-            delisted = pd.to_datetime(result["delist_date"].astype(str), errors="coerce")
+            delisted = pd.to_datetime(result["delist_date"].astype(str), format="%Y%m%d", errors="coerce")
             result = result[delisted.isna() | (delisted > as_of)]
         if "list_status" in result.columns:
             status = result["list_status"].fillna("L").astype(str)
@@ -350,8 +577,15 @@ def update_daily_data(
     end = end_date or data_cfg["end_date"]
     codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe()
     client = TushareHttpClient.from_config(config)
+    batch_size = int(data_cfg.get("daily_batch_size", 100))
+    window_days = int(data_cfg.get("daily_window_days", 60))
+    max_new_symbols = data_cfg.get("max_new_symbols_per_run")
+    max_new_symbols = int(max_new_symbols) if max_new_symbols is not None else None
+    retries = int(data_cfg.get("retries", 3))
 
     written: dict[str, Path] = {}
+    failed: dict[str, str] = {}
+    pending: dict[str, tuple[Path, str, bool]] = {}
     for code in codes:
         path = target_dir / f"{code}.csv"
         needs_adj_backfill = _needs_adj_factor_backfill(path)
@@ -359,23 +593,103 @@ def update_daily_data(
         if pd.Timestamp(actual_start) > pd.Timestamp(end):
             written[code] = path
             continue
+        pending[code] = (path, actual_start, needs_adj_backfill)
+    pending = _limit_new_symbols_per_run(pending, max_new_symbols=max_new_symbols)
+    if pending:
+        logger.info("Updating %d pending stock files.", len(pending))
 
-        new_df = fetch_daily_stock(code, actual_start, end, client=client)
-        if new_df.empty and path.exists():
-            written[code] = path
-            continue
-        if new_df.empty:
-            continue
-        if path.exists() and not needs_adj_backfill:
-            old_df = pd.read_csv(path, parse_dates=["trade_date"])
-            new_df = pd.concat([old_df, new_df], ignore_index=True)
-        new_df = normalize_daily_frame(new_df, default_ts_code=code)
-        if "adj_factor" in new_df.columns:
-            new_df = new_df.dropna(subset=["adj_factor"])
-        new_df = new_df.drop_duplicates(["ts_code", "trade_date"], keep=duplicate_keep)
-        new_df.to_csv(path, index=False, encoding="utf-8-sig")
-        written[code] = path
+    for actual_start, grouped_codes in _group_codes_by_start(pending).items():
+        for batch_codes in _batched(grouped_codes, batch_size):
+            batch_df = fetch_daily_stocks(
+                batch_codes,
+                actual_start,
+                end,
+                client=client,
+                retries=retries,
+                batch_size=batch_size,
+                window_days=window_days,
+                skip_failed=True,
+            )
+            batch_failed = set(batch_df.attrs.get("failed_codes", []))
+            for code in batch_codes:
+                path, _actual_start, needs_adj_backfill = pending[code]
+                if code in batch_failed:
+                    failed[code] = "empty_or_failed_fetch"
+                    continue
+                if batch_df.empty:
+                    new_df = pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
+                else:
+                    new_df = batch_df[batch_df["ts_code"] == code].copy()
+                if new_df.empty and path.exists():
+                    written[code] = path
+                    continue
+                if new_df.empty:
+                    failed[code] = "empty_or_failed_fetch"
+                    continue
+                if path.exists() and not needs_adj_backfill:
+                    old_df = pd.read_csv(path, parse_dates=["trade_date"])
+                    new_df = pd.concat([old_df, new_df], ignore_index=True)
+                new_df = normalize_daily_frame(new_df, default_ts_code=code)
+                if "adj_factor" in new_df.columns:
+                    new_df = new_df.dropna(subset=["adj_factor"])
+                new_df = new_df.drop_duplicates(["ts_code", "trade_date"], keep=duplicate_keep)
+                new_df.to_csv(path, index=False, encoding="utf-8-sig")
+                written[code] = path
+            logger.info("Updated %d/%d pending stock files.", len(written), len(pending))
+    if failed:
+        failed_path = target_dir / "failed_fetches.csv"
+        pd.DataFrame({"ts_code": list(failed), "reason": list(failed.values())}).to_csv(
+            failed_path, index=False, encoding="utf-8-sig"
+        )
+        logger.warning("Skipped %d symbols during data update. See %s", len(failed), failed_path)
     return written
+
+
+def _group_codes_by_start(pending: dict[str, tuple[Path, str, bool]]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for code, (_path, actual_start, _needs_adj_backfill) in pending.items():
+        grouped.setdefault(actual_start, []).append(code)
+    return grouped
+
+
+def _limit_new_symbols_per_run(
+    pending: dict[str, tuple[Path, str, bool]],
+    max_new_symbols: int | None,
+) -> dict[str, tuple[Path, str, bool]]:
+    if max_new_symbols is None or max_new_symbols < 0:
+        return pending
+    existing = {code: item for code, item in pending.items() if item[0].exists()}
+    new_items = {code: item for code, item in pending.items() if not item[0].exists()}
+    if len(new_items) <= max_new_symbols:
+        return pending
+    selected_new = dict(list(new_items.items())[:max_new_symbols])
+    skipped = len(new_items) - len(selected_new)
+    logger.info("Deferring %d new stock files to later runs.", skipped)
+    return {**existing, **selected_new}
+
+
+def _batched(values: list[str], batch_size: int) -> Iterable[list[str]]:
+    for index in range(0, len(values), batch_size):
+        yield values[index : index + batch_size]
+
+
+def _date_windows(
+    start_date: str | datetime,
+    end_date: str | datetime,
+    window_days: int | None,
+) -> Iterable[tuple[str, str]]:
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    if window_days is None or window_days <= 0 or start > end:
+        yield start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+        return
+
+    current = start
+    step = pd.Timedelta(days=window_days - 1)
+    while current <= end:
+        window_end = min(current + step, end)
+        yield current.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d")
+        current = window_end + pd.Timedelta(days=1)
 
 
 def _incremental_start(path: Path, configured_start: str) -> str:

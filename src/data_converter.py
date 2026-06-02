@@ -32,7 +32,11 @@ def convert_to_qlib_format(
 
     universe_file = Path(config["data"].get("constituents_file", "")).name
     csv_files = sorted(source_dir.glob("*.csv"))
-    metadata_files = {name for name in [universe_file, "hs300_constituents.csv", "mainboard_a_stocks.csv"] if name}
+    metadata_files = {
+        name
+        for name in [universe_file, "hs300_constituents.csv", "mainboard_a_stocks.csv", "failed_fetches.csv"]
+        if name
+    }
     csv_files = [path for path in csv_files if path.name not in metadata_files]
     if not csv_files:
         raise FileNotFoundError(f"No raw stock csv files found in {source_dir}")

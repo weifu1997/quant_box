@@ -6,11 +6,15 @@ tushare:
 
 data:
   start_date: "2015-01-01"
-  end_date: "2025-12-31"
+  end_date: "2026-06-02"
   universe: "mainboard_a"
   freq: "daily"
   raw_dir: "data/raw"
   constituents_file: "data/raw/mainboard_a_stocks.csv"
+  daily_batch_size: 20
+  daily_window_days: 60
+  max_new_symbols_per_run: 100
+  retries: 3
   exclude_st: true
 
 qlib:
