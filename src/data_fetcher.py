@@ -724,6 +724,7 @@ def update_daily_data_resumable(
     list_dates = _load_universe_list_dates(config)
     written: dict[str, Path] = {}
     failed: dict[str, str] = {}
+    processed_codes: set[str] = set()
     last_error = ""
     started_at = datetime.now().isoformat(timespec="seconds")
     logger.info(
@@ -779,6 +780,8 @@ def update_daily_data_resumable(
                 for code in grouped_codes:
                     failed[code] = chunk_error
                 logger.error("Code group failed in chunk %d (%s): %s", chunks_run, ",".join(grouped_codes[:5]), exc)
+            finally:
+                processed_codes.update(grouped_codes)
 
             existing_now = _existing_stock_codes(target_dir)
             for code in grouped_codes:
@@ -787,8 +790,12 @@ def update_daily_data_resumable(
                     last_error = chunk_error
                     failed[code] = "not_written"
 
-            completed = len(existing_now & set(pending_codes))
-            remaining = max(len(pending_codes) - completed, 0)
+            if include_existing:
+                completed = len(processed_codes - set(failed))
+                remaining = max(len(pending_codes) - len(processed_codes), 0)
+            else:
+                completed = len(existing_now & set(pending_codes))
+                remaining = max(len(pending_codes) - completed, 0)
             _write_update_progress(
                 progress_path,
                 {
@@ -816,8 +823,12 @@ def update_daily_data_resumable(
             time.sleep(sleep_seconds)
 
     existing_final = _existing_stock_codes(target_dir)
-    completed_final = len(existing_final & set(pending_codes))
-    remaining_final = max(len(pending_codes) - completed_final, 0)
+    if include_existing:
+        completed_final = len(processed_codes - set(failed))
+        remaining_final = max(len(pending_codes) - len(processed_codes), 0)
+    else:
+        completed_final = len(existing_final & set(pending_codes))
+        remaining_final = max(len(pending_codes) - completed_final, 0)
     status = "error" if failed else ("complete" if remaining_final == 0 else "partial")
     if failed and not last_error:
         first_code, first_reason = next(iter(failed.items()))

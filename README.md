@@ -97,58 +97,56 @@ setx TUSHARE_TOKEN "你的token"
 | --- | --- |
 | `00_安装依赖环境.bat` | 新电脑首次安装 `.venv` 和依赖 |
 | `01_检查Tushare配置.bat` | 检查 Tushare HTTP 代理配置是否可读取 |
-| `02_补齐股票数据_持续.bat` | 持续补齐缺失主板股票日线数据 |
-| `03_查看补齐进度.bat` | 查看本地 raw CSV 数量和补齐进度 JSON |
-| `04_转换数据.bat` | 将 `data/raw/*.csv` 转为 Qlib 数据和价格面板 |
-| `05_计算因子.bat` | 计算或读取 Alpha158 因子缓存 |
-| `06_运行回测.bat` | 运行当前配置下的回测 |
-| `07_生成最新信号.bat` | 基于最新因子生成手动交易信号 |
+| `02_自动调参并生成信号.bat` | 日常主入口：更新数据、转换、重算因子、自动选参、回测并生成最新信号 |
+| `03_运行测试.bat` | 运行自动化测试 |
+| `04_补齐股票数据_持续.bat` | 分步工具：持续补齐缺失主板股票日线数据 |
+| `05_查看补齐进度.bat` | 分步工具：查看本地 raw CSV 数量和补齐进度 JSON |
+| `06_转换数据.bat` | 分步工具：将 `data/raw/*.csv` 转为 Qlib 数据和价格面板 |
+| `07_计算因子.bat` | 分步工具：计算或读取 Alpha158 因子缓存 |
 | `08_参数优化.bat` | 运行 walk-forward 参数优化 |
-| `09_运行测试.bat` | 运行自动化测试 |
-| `10_全流程_补数据到信号.bat` | 从补数据到生成信号的一键全流程 |
+| `09_运行回测.bat` | 分步工具：运行当前配置下的回测 |
+| `10_生成最新信号.bat` | 分步工具：基于最新因子生成手动交易信号 |
+| `11_旧版全流程_补数据到信号.bat` | 旧版全流程：补数据到信号，但不自动采用调参结果 |
 
 最常用的是：
 
 ```text
-02_补齐股票数据_持续.bat
-03_查看补齐进度.bat
-04_转换数据.bat
-05_计算因子.bat
-06_运行回测.bat
-07_生成最新信号.bat
+02_自动调参并生成信号.bat
 ```
+
+如果代码更新后或运行异常，再双击 `03_运行测试.bat`。如果需要排查某一步，再使用 `04` 到 `10` 的分步工具。
 
 ## 补齐股票数据
 
 双击：
 
 ```text
-02_补齐股票数据_持续.bat
+04_补齐股票数据_持续.bat
 ```
 
 默认参数：
 
 ```powershell
---chunk-size 50 --sleep-seconds 60
+--chunk-size 15 --sleep-seconds 10
 ```
 
 含义：
 
-- 每批补 50 只缺失股票
-- 批间等待 60 秒
+- 每批补 15 只缺失股票
+- 批间等待 10 秒
 - 自动记录进度到 `outputs/data_update_progress.json`
 - 中断后再次双击，会继续补缺失股票，不会从头开始
 
 命令行等价写法：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 50 --sleep-seconds 60
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 10
 ```
 
 只跑一批确认状态：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 50 --sleep-seconds 60 --max-chunks 1
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 10 --max-chunks 1
 ```
 
 查看本地 CSV 数量：
@@ -168,10 +166,11 @@ Get-Content outputs\data_update_progress.json
 数据补齐后，按顺序双击：
 
 ```text
-04_转换数据.bat
-05_计算因子.bat
-06_运行回测.bat
-07_生成最新信号.bat
+06_转换数据.bat
+07_计算因子.bat
+08_参数优化.bat
+09_运行回测.bat
+10_生成最新信号.bat
 ```
 
 对应命令行：
@@ -186,10 +185,10 @@ Get-Content outputs\data_update_progress.json
 完整一键流程：
 
 ```text
-10_全流程_补数据到信号.bat
+02_自动调参并生成信号.bat
 ```
 
-注意：全流程会先补数据。如果当前缺失股票很多，这一步会耗时较久。
+注意：自动流程会先更新已有股票并补齐缺失股票，再转换数据、重算因子、自动选参、回测和生成信号。如果当前缺失股票很多，这一步会耗时较久。
 
 ## 输出文件
 
@@ -208,6 +207,10 @@ outputs/backtest_holdings.csv          回测持仓
 outputs/backtest_trades.csv            回测成交
 outputs/backtest_metrics.json          回测指标
 outputs/optimization_results.csv       参数优化结果
+outputs/auto_parameter_summary.csv     自动选参汇总
+outputs/auto_selected_params.json      自动选中的策略参数
+outputs/auto_backtest_metrics.json     自动选参后的回测指标
+outputs/auto_signal_report.json        自动信号报告
 outputs/signal_YYYY-MM-DD.csv          每日信号
 outputs/latest_holdings.csv            最新持仓
 outputs/data_update_progress.json      数据补齐进度
@@ -234,7 +237,7 @@ outputs/data_update_progress.json      数据补齐进度
 双击：
 
 ```text
-09_运行测试.bat
+03_运行测试.bat
 ```
 
 或命令行：
@@ -264,12 +267,12 @@ outputs/
 
 ```text
 00_安装依赖环境.bat
-02_补齐股票数据_持续.bat
+02_自动调参并生成信号.bat
 ```
 
 ## 注意事项
 
 - 本项目只生成手动交易信号，不负责自动下单。
 - 不要提交 `config/settings.local.yaml`。
-- 如果数据补齐窗口长时间没有新增文件，先双击 `03_查看补齐进度.bat` 看 `current_symbol`、`last_error` 和 raw CSV 数量。
+- 如果数据补齐窗口长时间没有新增文件，先双击 `05_查看补齐进度.bat` 看 `current_symbol`、`last_error` 和 raw CSV 数量。
 - 大批量补齐数据是小时级任务，建议保持小批次可恢复模式运行。

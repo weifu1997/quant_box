@@ -451,6 +451,53 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(progress["status"], "complete")
             self.assertEqual(int(progress["completed_symbols"]), 3)
 
+    def test_resumable_update_include_existing_tracks_processed_symbols(self) -> None:
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "update_chunk_size": 1,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+        calls: list[list[str]] = []
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            for code in ["000001.SZ", "600519.SH"]:
+                (raw_dir / f"{code}.csv").write_text("", encoding="utf-8")
+
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None):
+                codes = list(stock_codes)
+                calls.append(codes)
+                return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data):
+                written = update_daily_data_resumable(
+                    stock_codes=["000001.SZ", "600519.SH"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=1,
+                    sleep_seconds=0,
+                    max_chunks=1,
+                    include_existing=True,
+                )
+
+            progress = pd.read_json(progress_file, typ="series")
+
+            self.assertEqual(calls, [["000001.SZ"]])
+            self.assertEqual(set(written), {"000001.SZ"})
+            self.assertEqual(progress["status"], "partial")
+            self.assertEqual(int(progress["completed_symbols"]), 1)
+            self.assertEqual(int(progress["remaining_symbols"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

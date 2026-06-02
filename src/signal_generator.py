@@ -26,8 +26,9 @@ def generate_signal(
     signal_date: str,
     previous_holdings: list[str] | None = None,
     factor_file: str | Path | None = None,
+    config: dict | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
-    config = load_config()
+    config = config or load_config()
     data_cfg = config["data"]
     strategy_cfg = config["strategy"]
     use_latest_date = str(signal_date).lower() == "latest"
@@ -66,8 +67,8 @@ def generate_signal(
     return pd.DataFrame(rows), holdings
 
 
-def save_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str) -> tuple[Path, Path]:
-    config = load_config()
+def save_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str, config: dict | None = None) -> tuple[Path, Path]:
+    config = config or load_config()
     out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
     out_dir.mkdir(parents=True, exist_ok=True)
     signal_path = out_dir / f"signal_{signal_date}.csv"
