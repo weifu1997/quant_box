@@ -143,6 +143,8 @@ def _apply_adjustment(feature_df: pd.DataFrame) -> pd.DataFrame:
     multiplier = adjusted["adj_factor"].astype(float) / latest_factor
     for col in PRICE_COLUMNS:
         adjusted[col] = adjusted[col].astype(float) * multiplier
+    if "volume" in adjusted.columns:
+        adjusted["volume"] = adjusted["volume"].astype(float) / multiplier
     return adjusted
 
 

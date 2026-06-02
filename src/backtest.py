@@ -50,6 +50,8 @@ def run_backtest(
     capital = float(config.get("initial_capital", 1_000_000))
     commission = float(config.get("commission", 0.0003))
     stamp_tax = float(config.get("stamp_tax", 0.001))
+    transfer_fee = float(config.get("transfer_fee", 0.0))
+    min_commission = float(config.get("min_commission_per_order", 0.0))
     slippage = float(config.get("slippage", 0.0))
     trade_price_field = str(config.get("trade_price_field", "close")).lower()
     valuation_price_field = str(config.get("valuation_price_field", "close")).lower()
@@ -62,6 +64,7 @@ def run_backtest(
     holdings: dict[str, int] = {}
     entry_prices: dict[str, float] = {}
     last_prices: dict[str, float] = {}
+    stale_unpriced_days: dict[str, int] = {}
     equity_rows: list[tuple[pd.Timestamp, float]] = []
     holding_rows: list[dict[str, object]] = []
     trade_rows: list[dict[str, object]] = []
@@ -73,6 +76,24 @@ def run_backtest(
         trade_prices = _price_row(prices, trade_price_field, trade_date)
         last_prices.update({str(code): float(price) for code, price in close.dropna().items()})
         tradability = _tradability(prices, trade_date, previous_date, config)
+        capital = _execute_stale_price_exits(
+            holdings,
+            entry_prices,
+            stale_unpriced_days,
+            capital,
+            close,
+            last_prices,
+            tradability,
+            trade_rows,
+            trade_date,
+            commission,
+            stamp_tax,
+            transfer_fee,
+            min_commission,
+            slippage,
+            prices,
+            config,
+        )
         capital = _execute_risk_exits(
             holdings,
             entry_prices,
@@ -84,6 +105,8 @@ def run_backtest(
             trade_date,
             commission,
             stamp_tax,
+            transfer_fee,
+            min_commission,
             slippage,
             prices,
             config,
@@ -103,6 +126,8 @@ def run_backtest(
                 trade_date,
                 commission,
                 stamp_tax,
+                transfer_fee,
+                min_commission,
                 slippage,
                 prices,
                 config,
@@ -148,9 +173,10 @@ def run_backtest(
                     continue
                 sell_shares = filled_shares
                 gross = sell_shares * price
-                commission_cost = gross * commission
+                commission_cost = _commission_cost(gross, commission, min_commission)
                 tax_cost = gross * stamp_tax
-                proceeds = gross - commission_cost - tax_cost
+                transfer_fee_cost = _transfer_fee_cost(gross, transfer_fee)
+                proceeds = gross - commission_cost - tax_cost - transfer_fee_cost
                 capital += proceeds
                 remaining = current - sell_shares
                 if remaining > 0:
@@ -171,6 +197,7 @@ def run_backtest(
                         reason=reason,
                         commission_cost=commission_cost,
                         tax_cost=tax_cost,
+                        transfer_fee_cost=transfer_fee_cost,
                         slippage_cost=sell_shares * _price_for(stock, trade_prices, last_prices) * slippage,
                         capacity=capacity,
                     )
@@ -192,13 +219,15 @@ def run_backtest(
                     trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "BUY", desired - current, "capacity_limited"))
                     continue
                 gross = buy_shares * price
-                commission_cost = gross * commission
-                cost = gross + commission_cost
+                commission_cost = _commission_cost(gross, commission, min_commission)
+                transfer_fee_cost = _transfer_fee_cost(gross, transfer_fee)
+                cost = gross + commission_cost + transfer_fee_cost
                 if cost > capital:
-                    buy_shares = _round_lot(capital / (price * (1 + commission)), stock, config)
+                    buy_shares = _round_lot(_shares_affordable(capital, price, commission, min_commission, transfer_fee), stock, config)
                     gross = buy_shares * price
-                    commission_cost = gross * commission
-                    cost = gross + commission_cost
+                    commission_cost = _commission_cost(gross, commission, min_commission) if buy_shares > 0 else 0.0
+                    transfer_fee_cost = _transfer_fee_cost(gross, transfer_fee) if buy_shares > 0 else 0.0
+                    cost = gross + commission_cost + transfer_fee_cost
                 if buy_shares <= 0:
                     continue
                 capital -= cost
@@ -218,6 +247,7 @@ def run_backtest(
                         reason=reason,
                         commission_cost=commission_cost,
                         tax_cost=0.0,
+                        transfer_fee_cost=transfer_fee_cost,
                         slippage_cost=buy_shares * _price_for(stock, trade_prices, last_prices) * slippage,
                         capacity=capacity,
                     )
@@ -270,6 +300,7 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
             "annual_turnover": 0.0,
             "commission_cost": 0.0,
             "tax_cost": 0.0,
+            "transfer_fee_cost": 0.0,
             "slippage_cost": 0.0,
             "trade_cost": 0.0,
             "trade_cost_ratio": 0.0,
@@ -297,8 +328,9 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
     annual_turnover = float(sells / max(periods / annual_days, 1 / annual_days) / top_n * 2)
     commission_cost = _trade_cost_sum(trades, "commission_cost")
     tax_cost = _trade_cost_sum(trades, "tax_cost")
+    transfer_fee_cost = _trade_cost_sum(trades, "transfer_fee_cost")
     slippage_cost = _trade_cost_sum(trades, "slippage_cost")
-    trade_cost = commission_cost + tax_cost + slippage_cost
+    trade_cost = commission_cost + tax_cost + transfer_fee_cost + slippage_cost
     initial_capital = float(config.get("initial_capital", equity_curve.iloc[0] if len(equity_curve) else 1.0))
     trade_cost_ratio = float(trade_cost / initial_capital) if initial_capital > 0 else 0.0
     years = max(periods / annual_days, 1 / annual_days)
@@ -319,6 +351,7 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
         "annual_turnover": annual_turnover,
         "commission_cost": commission_cost,
         "tax_cost": tax_cost,
+        "transfer_fee_cost": transfer_fee_cost,
         "slippage_cost": slippage_cost,
         "trade_cost": trade_cost,
         "trade_cost_ratio": trade_cost_ratio,
@@ -427,8 +460,12 @@ def _tradability(
         valid_prev = prev_close > 0
         up_threshold = float(config.get("limit_up_threshold", 0.099))
         down_threshold = float(config.get("limit_down_threshold", 0.099))
-        limit_up = close[valid_prev] >= prev_close[valid_prev] * (1 + up_threshold)
-        limit_down = close[valid_prev] <= prev_close[valid_prev] * (1 - down_threshold)
+        high = _field_on_date(prices, "high", trade_date).reindex(close.index)
+        low = _field_on_date(prices, "low", trade_date).reindex(close.index)
+        up_probe = high.where(high.notna(), close)
+        down_probe = low.where(low.notna(), close)
+        limit_up = up_probe[valid_prev] >= prev_close[valid_prev] * (1 + up_threshold)
+        limit_down = down_probe[valid_prev] <= prev_close[valid_prev] * (1 - down_threshold)
         buyable -= set(limit_up[limit_up].index.astype(str))
         sellable -= set(limit_down[limit_down].index.astype(str))
 
@@ -482,6 +519,7 @@ def _trade(
     reason: str | None = None,
     commission_cost: float = 0.0,
     tax_cost: float = 0.0,
+    transfer_fee_cost: float = 0.0,
     slippage_cost: float = 0.0,
     capacity: dict[str, float | bool] | None = None,
 ) -> dict[str, Any]:
@@ -496,6 +534,7 @@ def _trade(
         "status": status,
         "commission_cost": float(commission_cost),
         "tax_cost": float(tax_cost),
+        "transfer_fee_cost": float(transfer_fee_cost),
         "slippage_cost": float(slippage_cost),
     }
     if reason is not None:
@@ -525,6 +564,7 @@ def _blocked_trade(
         "reason": reason,
         "commission_cost": 0.0,
         "tax_cost": 0.0,
+        "transfer_fee_cost": 0.0,
         "slippage_cost": 0.0,
     }
 
@@ -550,6 +590,8 @@ def _execute_risk_exits(
     trade_date: pd.Timestamp,
     commission: float,
     stamp_tax: float,
+    transfer_fee: float,
+    min_commission: float,
     slippage: float,
     prices: pd.DataFrame,
     config: dict,
@@ -563,13 +605,7 @@ def _execute_risk_exits(
         entry = entry_prices.get(stock)
         if entry is None or entry <= 0 or shares <= 0:
             continue
-        price = _price_for(stock, close, last_prices)
-        pnl = price / entry - 1
-        reason = None
-        if stop_loss is not None and pnl <= -abs(float(stop_loss)):
-            reason = "stop_loss"
-        elif take_profit is not None and pnl >= abs(float(take_profit)):
-            reason = "take_profit"
+        reason, execution_price = _risk_exit_decision(stock, entry, trade_date, prices, close, last_prices, stop_loss, take_profit)
         if reason is None:
             continue
         if stock not in tradability["sellable"]:
@@ -586,11 +622,72 @@ def _execute_risk_exits(
             stock,
             commission,
             stamp_tax,
+            transfer_fee,
+            min_commission,
             slippage,
             prices,
             config,
             reason,
+            execution_price=execution_price,
         )
+    return capital
+
+
+def _execute_stale_price_exits(
+    holdings: dict[str, int],
+    entry_prices: dict[str, float],
+    stale_unpriced_days: dict[str, int],
+    capital: float,
+    close: pd.Series,
+    last_prices: dict[str, float],
+    tradability: dict[str, set[str]],
+    trade_rows: list[dict[str, object]],
+    trade_date: pd.Timestamp,
+    commission: float,
+    stamp_tax: float,
+    transfer_fee: float,
+    min_commission: float,
+    slippage: float,
+    prices: pd.DataFrame,
+    config: dict,
+) -> float:
+    threshold = int(config.get("stale_price_exit_days", 20))
+    haircut = float(config.get("stale_price_haircut", 0.5))
+    if threshold <= 0 or not holdings:
+        return capital
+
+    volume = _field_on_date(prices, "volume", trade_date)
+    for stock, shares in list(holdings.items()):
+        has_price = stock in close.index and pd.notna(close.loc[stock])
+        has_volume = stock in volume.index and pd.notna(volume.loc[stock]) and float(volume.loc[stock]) > 0
+        if has_price and has_volume:
+            stale_unpriced_days[stock] = 0
+            continue
+        stale_unpriced_days[stock] = stale_unpriced_days.get(stock, 0) + 1
+        if stale_unpriced_days[stock] < threshold:
+            continue
+
+        base_price = _price_for(stock, close, last_prices) * max(0.0, min(haircut, 1.0))
+        capital = _sell_all(
+            holdings,
+            entry_prices,
+            capital,
+            close,
+            last_prices,
+            trade_rows,
+            trade_date,
+            stock,
+            commission,
+            stamp_tax,
+            transfer_fee,
+            min_commission,
+            slippage,
+            prices,
+            config,
+            "stale_price_exit",
+            execution_price=base_price,
+        )
+        stale_unpriced_days.pop(stock, None)
     return capital
 
 
@@ -605,6 +702,8 @@ def _liquidate_portfolio(
     trade_date: pd.Timestamp,
     commission: float,
     stamp_tax: float,
+    transfer_fee: float,
+    min_commission: float,
     slippage: float,
     prices: pd.DataFrame,
     config: dict,
@@ -627,6 +726,8 @@ def _liquidate_portfolio(
             stock,
             commission,
             stamp_tax,
+            transfer_fee,
+            min_commission,
             slippage,
             prices,
             config,
@@ -646,14 +747,22 @@ def _sell_all(
     stock: str,
     commission: float,
     stamp_tax: float,
+    transfer_fee: float,
+    min_commission: float,
     slippage: float,
     prices: pd.DataFrame,
     config: dict,
     reason: str,
+    execution_price: float | None = None,
 ) -> float:
     shares = holdings.get(stock, 0)
-    price = _price_for(stock, close, last_prices) * (1 - slippage)
-    proceeds = shares * price * (1 - commission - stamp_tax)
+    base_price = execution_price if execution_price is not None else _risk_exit_market_price(stock, close, last_prices, trade_date, prices, config)
+    price = float(base_price) * (1 - slippage)
+    gross = shares * price
+    commission_cost = _commission_cost(gross, commission, min_commission)
+    tax_cost = gross * stamp_tax
+    transfer_fee_cost = _transfer_fee_cost(gross, transfer_fee)
+    proceeds = gross - commission_cost - tax_cost - transfer_fee_cost
     capital += proceeds
     holdings.pop(stock, None)
     entry_prices.pop(stock, None)
@@ -668,6 +777,10 @@ def _sell_all(
             proceeds,
             status="risk_exit",
             reason=reason,
+            commission_cost=commission_cost,
+            tax_cost=tax_cost,
+            transfer_fee_cost=transfer_fee_cost,
+            slippage_cost=shares * float(base_price) * slippage,
             capacity=_capacity(prices, trade_date, stock, shares * price, config),
         )
     )
@@ -703,15 +816,84 @@ def _average_entry_price(old_entry: float | None, old_shares: int, price: float,
     return float((old_entry * old_shares + price * buy_shares) / (old_shares + buy_shares))
 
 
+def _commission_cost(gross: float, commission: float, min_commission: float) -> float:
+    if gross <= 0 or commission <= 0:
+        return 0.0
+    cost = gross * commission
+    return float(max(cost, min_commission)) if min_commission > 0 else float(cost)
+
+
+def _transfer_fee_cost(gross: float, transfer_fee: float) -> float:
+    if gross <= 0 or transfer_fee <= 0:
+        return 0.0
+    return float(gross * transfer_fee)
+
+
+def _shares_affordable(capital: float, price: float, commission: float, min_commission: float, transfer_fee: float) -> float:
+    if capital <= 0 or price <= 0:
+        return 0.0
+    variable_rate = max(commission, 0.0) + max(transfer_fee, 0.0)
+    variable_shares = capital / (price * (1 + variable_rate))
+    if min_commission <= 0:
+        return variable_shares
+    fixed_shares = (capital - min_commission) / (price * (1 + max(transfer_fee, 0.0)))
+    return max(0.0, min(variable_shares, fixed_shares))
+
+
+def _risk_exit_decision(
+    stock: str,
+    entry: float,
+    trade_date: pd.Timestamp,
+    prices: pd.DataFrame,
+    close: pd.Series,
+    last_prices: dict[str, float],
+    stop_loss: float | None,
+    take_profit: float | None,
+) -> tuple[str | None, float | None]:
+    open_price = _price_for(stock, _field_on_date(prices, "open", trade_date), last_prices)
+    high_price = _price_for(stock, _field_on_date(prices, "high", trade_date), last_prices)
+    low_price = _price_for(stock, _field_on_date(prices, "low", trade_date), last_prices)
+
+    if stop_loss is not None:
+        stop_price = entry * (1 - abs(float(stop_loss)))
+        if low_price <= stop_price:
+            execution = open_price if open_price <= stop_price else stop_price
+            return "stop_loss", float(execution)
+
+    if take_profit is not None:
+        take_price = entry * (1 + abs(float(take_profit)))
+        if high_price >= take_price:
+            execution = open_price if open_price >= take_price else take_price
+            return "take_profit", float(execution)
+
+    close_price = _price_for(stock, close, last_prices)
+    if stop_loss is not None and close_price / entry - 1 <= -abs(float(stop_loss)):
+        return "stop_loss", float(close_price)
+    if take_profit is not None and close_price / entry - 1 >= abs(float(take_profit)):
+        return "take_profit", float(close_price)
+    return None, None
+
+
+def _risk_exit_market_price(
+    stock: str,
+    close: pd.Series,
+    last_prices: dict[str, float],
+    trade_date: pd.Timestamp,
+    prices: pd.DataFrame,
+    config: dict,
+) -> float:
+    price_field = str(config.get("risk_exit_price_field", config.get("trade_price_field", "close"))).lower()
+    price_row = _price_row(prices, price_field, trade_date)
+    if not price_row.empty:
+        return _price_for(stock, price_row, last_prices)
+    return _price_for(stock, close, last_prices)
+
+
 def _capacity(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notional: float, config: dict) -> dict[str, float | bool]:
-    amount = _field(prices, "amount")
-    if amount.empty or stock not in amount.columns:
-        return {"capacity_ratio": 0.0, "capacity_warning": False}
     window = int(config.get("capacity_window", 20))
     amount_unit = float(config.get("amount_unit", 1000.0))
     warn_threshold = float(config.get("capacity_warning_threshold", 0.05))
-    history = amount.loc[amount.index <= trade_date, stock].dropna().tail(window)
-    adv = float(history.mean() * amount_unit) if not history.empty else 0.0
+    adv = _prior_adv(prices, trade_date, stock, window, amount_unit)
     ratio = float(abs(notional) / adv) if adv > 0 else 0.0
     return {"capacity_ratio": ratio, "capacity_warning": bool(ratio > warn_threshold)}
 
@@ -731,11 +913,9 @@ def _apply_capacity_limit(
     if participation <= 0 or requested_shares <= 0 or price <= 0:
         return requested_shares, "filled", None
 
-    amount = _field(prices, "amount")
-    if amount.empty or stock not in amount.columns or trade_date not in amount.index:
-        return requested_shares, "filled", None
     amount_unit = float(config.get("amount_unit", 1000.0))
-    max_notional = float(amount.loc[trade_date, stock]) * amount_unit * participation
+    window = int(config.get("capacity_window", 20))
+    max_notional = _prior_adv(prices, trade_date, stock, window, amount_unit) * participation
     if not np.isfinite(max_notional) or max_notional <= 0:
         return 0, "blocked", "capacity_limited"
 
@@ -744,6 +924,16 @@ def _apply_capacity_limit(
     if filled < requested_shares:
         return filled, "partial" if filled > 0 else "blocked", "capacity_limited"
     return requested_shares, "filled", None
+
+
+def _prior_adv(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, window: int, amount_unit: float) -> float:
+    amount = _field(prices, "amount")
+    if amount.empty or stock not in amount.columns:
+        return 0.0
+    history = amount.loc[amount.index < trade_date, stock].dropna().tail(max(window, 1))
+    if history.empty:
+        return 0.0
+    return float(history.mean() * amount_unit)
 
 
 def _next_price_date(price_dates: pd.Index, signal_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.Timestamp | None:

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.data_converter import convert_to_qlib_format
+from src.data_converter import _apply_adjustment
 
 
 class DataConverterTests(unittest.TestCase):
@@ -56,6 +57,27 @@ class DataConverterTests(unittest.TestCase):
 
             self.assertEqual(result["instruments"], 1)
             self.assertTrue(Path(result["ohlcv_price_file"]).exists())
+
+    def test_adjustment_scales_volume_opposite_to_prices(self) -> None:
+        feature_df = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2024-01-02", "2024-01-03"]),
+                "open": [10.0, 20.0],
+                "high": [10.0, 20.0],
+                "low": [10.0, 20.0],
+                "close": [10.0, 20.0],
+                "volume": [2000.0, 1000.0],
+                "amount": [2000.0, 2000.0],
+                "vwap": [10.0, 20.0],
+                "adj_factor": [1.0, 2.0],
+            }
+        )
+
+        adjusted = _apply_adjustment(feature_df)
+
+        self.assertAlmostEqual(float(adjusted.loc[0, "close"]), 5.0)
+        self.assertAlmostEqual(float(adjusted.loc[0, "volume"]), 4000.0)
+        self.assertAlmostEqual(float(adjusted.loc[0, "amount"]), 2000.0)
 
 
 if __name__ == "__main__":

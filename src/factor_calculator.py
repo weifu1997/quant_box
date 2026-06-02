@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -51,17 +52,27 @@ def load_or_compute_factors(
     path = resolve_path(cache_file or config["factors"]["cache_file"])
     if path.exists() and not force:
         cached = pd.read_parquet(path)
-        if _factor_cache_matches_request(cached, start_date, end_date, config):
+        if _factor_cache_matches_request(cached, start_date, end_date, config, cache_file=path):
             return cached
 
     path.parent.mkdir(parents=True, exist_ok=True)
     factors = compute_alpha158_factors(start_date, end_date)
     factors.to_parquet(path)
+    _write_factor_cache_meta(path, factors, start_date, end_date, config)
     return factors
 
 
-def _factor_cache_matches_request(factors: pd.DataFrame, start_date: str, end_date: str, config: dict) -> bool:
+def _factor_cache_matches_request(
+    factors: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+    config: dict,
+    cache_file: str | Path | None = None,
+) -> bool:
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
+        return False
+
+    if not _factor_cache_meta_matches(config, start_date, end_date, cache_file=cache_file):
         return False
 
     factor_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
@@ -101,3 +112,47 @@ def _price_cache_state(config: dict, start_date: str, end_date: str) -> tuple[pd
     else:
         symbols = set(prices.columns.astype(str).str.upper())
     return dates, symbols
+
+
+def _factor_cache_meta_path(cache_path: str | Path | None, config: dict) -> Path:
+    path = resolve_path(cache_path or config["factors"]["cache_file"])
+    return path.with_name(f"{path.name}.meta.json")
+
+
+def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cache_file: str | Path | None = None) -> bool:
+    if "qlib" not in config:
+        return True
+    meta_path = _factor_cache_meta_path(cache_file or config["factors"]["cache_file"], config)
+    if not meta_path.exists():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    expected = _factor_cache_meta_payload(None, start_date, end_date, config)
+    for key in ["provider_uri", "region", "instruments", "start_date", "end_date"]:
+        if meta.get(key) != expected.get(key):
+            return False
+    return True
+
+
+def _write_factor_cache_meta(path: Path, factors: pd.DataFrame, start_date: str, end_date: str, config: dict) -> None:
+    payload = _factor_cache_meta_payload(factors, start_date, end_date, config)
+    path.with_name(f"{path.name}.meta.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, end_date: str, config: dict) -> dict[str, object]:
+    qlib_cfg = config.get("qlib", {})
+    payload: dict[str, object] = {
+        "provider_uri": str(resolve_path(qlib_cfg.get("provider_uri", "data/qlib_data"))),
+        "region": str(qlib_cfg.get("region", "cn")),
+        "instruments": qlib_cfg.get("instruments", "csi300"),
+        "start_date": str(pd.Timestamp(start_date).date()),
+        "end_date": str(pd.Timestamp(end_date).date()),
+    }
+    if factors is not None and isinstance(factors.index, pd.MultiIndex):
+        payload["columns"] = list(map(str, factors.columns))
+        payload["rows"] = int(len(factors))
+        payload["symbols"] = sorted(set(factors.index.get_level_values(1).astype(str).str.upper()))
+    return payload

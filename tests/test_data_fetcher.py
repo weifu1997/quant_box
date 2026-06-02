@@ -76,6 +76,37 @@ class DataFetcherTests(unittest.TestCase):
 
         self.assertEqual(filtered["ts_code"].tolist(), ["000001.SZ", "000015.SZ"])
 
+    def test_filter_universe_frame_uses_point_in_time_st_calendar(self) -> None:
+        universe = pd.DataFrame(
+            [
+                {"ts_code": "000001.SZ", "name": "ST_STATIC_NAME", "list_status": "L", "list_date": "19910403", "delist_date": ""},
+                {"ts_code": "000002.SZ", "name": "NORMAL", "list_status": "L", "list_date": "19910403", "delist_date": ""},
+            ]
+        )
+        st_calendar = pd.DataFrame(
+            [
+                {"ts_code": "000001.SZ", "st_start_date": "20240601", "st_end_date": ""},
+            ]
+        )
+
+        before = filter_universe_frame(
+            universe,
+            universe="mainboard_a",
+            as_of_date="2024-05-31",
+            exclude_st=True,
+            st_calendar=st_calendar,
+        )
+        during = filter_universe_frame(
+            universe,
+            universe="mainboard_a",
+            as_of_date="2024-06-01",
+            exclude_st=True,
+            st_calendar=st_calendar,
+        )
+
+        self.assertIn("000001.SZ", before["ts_code"].tolist())
+        self.assertNotIn("000001.SZ", during["ts_code"].tolist())
+
     def test_fetch_daily_stocks_uses_comma_separated_batch_request(self) -> None:
         client = FakeTushareClient()
 

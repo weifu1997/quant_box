@@ -470,6 +470,7 @@ def fetch_stock_universe(
         universe=universe,
         as_of_date=date or data_cfg.get("end_date"),
         exclude_st=bool(data_cfg.get("exclude_st", True)),
+        st_calendar=_load_st_calendar(data_cfg.get("st_calendar_file")),
     )
     code_col = _code_column(filtered)
     return sorted(filtered[code_col].dropna().astype(str).unique().tolist())
@@ -495,6 +496,7 @@ def filter_universe_frame(
     universe: str,
     as_of_date: str | datetime | None = None,
     exclude_st: bool = True,
+    st_calendar: pd.DataFrame | str | Path | None = None,
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -511,7 +513,9 @@ def filter_universe_frame(
     else:
         raise ValueError(f"Unsupported universe: {universe}")
 
-    if exclude_st and "name" in result.columns:
+    if exclude_st and st_calendar is not None and as_of_date is not None:
+        result = _exclude_point_in_time_st(result, code_col, as_of_date, st_calendar)
+    elif exclude_st and "name" in result.columns:
         names = result["name"].fillna("").astype(str).str.upper()
         result = result[~names.str.contains("ST", regex=False)]
 
@@ -531,6 +535,45 @@ def filter_universe_frame(
             else:
                 result = result[status == "L"]
     return result
+
+
+def _load_st_calendar(path_value: str | Path | None) -> pd.DataFrame | None:
+    if not path_value:
+        return None
+    path = resolve_path(path_value)
+    if not path.exists():
+        logger.warning("Configured ST calendar file does not exist: %s", path)
+        return None
+    return pd.read_csv(path)
+
+
+def _exclude_point_in_time_st(
+    df: pd.DataFrame,
+    code_col: str,
+    as_of_date: str | datetime,
+    st_calendar: pd.DataFrame | str | Path,
+) -> pd.DataFrame:
+    calendar = pd.read_csv(resolve_path(st_calendar)) if isinstance(st_calendar, (str, Path)) else st_calendar.copy()
+    if calendar.empty:
+        return df
+    st_code_col = _code_column(calendar)
+    start_col = next((col for col in ["st_start_date", "start_date", "begin_date", "date"] if col in calendar.columns), None)
+    end_col = next((col for col in ["st_end_date", "end_date", "remove_date"] if col in calendar.columns), None)
+    if start_col is None:
+        raise ValueError("ST calendar must contain one of: st_start_date, start_date, begin_date, date.")
+
+    as_of = pd.Timestamp(as_of_date)
+    calendar[st_code_col] = calendar[st_code_col].astype(str).str.upper()
+    starts = _parse_calendar_dates(calendar[start_col])
+    ends = _parse_calendar_dates(calendar[end_col]) if end_col is not None else pd.Series(pd.NaT, index=calendar.index)
+    active = (starts <= as_of) & (ends.isna() | (ends >= as_of))
+    st_codes = set(calendar.loc[active, st_code_col].dropna().astype(str).str.upper())
+    return df[~df[code_col].astype(str).str.upper().isin(st_codes)]
+
+
+def _parse_calendar_dates(series: pd.Series) -> pd.Series:
+    text = series.astype(str).str.replace("-", "", regex=False)
+    return pd.to_datetime(text, format="%Y%m%d", errors="coerce")
 
 
 def _code_column(df: pd.DataFrame) -> str:
