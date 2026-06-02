@@ -14,7 +14,9 @@ sys.path.insert(0, str(ROOT))
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
-from src.strategy import composite_factor, resample_signals
+from src.scoring import build_strategy_scores
+from src.strategy import resample_signals
+from src.universe_coverage import summarize_universe_coverage
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -30,13 +32,13 @@ def main() -> None:
     parser.add_argument("--benchmark-file", help="Optional benchmark close parquet/csv for alpha, beta and IR.")
     args = parser.parse_args()
 
-    factors = load_or_compute_factors(args.start_date, args.end_date, cache_file=args.factor_file)
-    scores = composite_factor(factors, method=config["strategy"].get("factor_group", "momentum"))
-    scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
     price_file = resolve_path(args.price_file)
     if not price_file.exists():
         raise FileNotFoundError(f"Price file not found: {price_file}. Run scripts/run_convert_data.py first.")
     prices = pd.read_parquet(price_file)
+    factors = load_or_compute_factors(args.start_date, args.end_date, cache_file=args.factor_file)
+    scores = build_strategy_scores(factors, config, price_df=prices)
+    scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
 
     bt_config = {**config["backtest"], **config["strategy"]}
     if args.benchmark_file:
@@ -57,10 +59,18 @@ def main() -> None:
     result.holdings.to_csv(out_dir / "backtest_holdings.csv", index=False, encoding="utf-8-sig")
     result.trades.to_csv(out_dir / "backtest_trades.csv", index=False, encoding="utf-8-sig")
     (out_dir / "backtest_metrics.json").write_text(json.dumps(result.metrics, indent=2), encoding="utf-8")
+    coverage = summarize_universe_coverage(config, price_df=prices)
+    (out_dir / "universe_coverage.json").write_text(json.dumps(coverage, indent=2), encoding="utf-8")
 
     logger.info("Backtest finished.")
     for key, value in result.metrics.items():
         logger.info("%s: %.6f", key, value)
+    logger.info(
+        "Universe coverage: %d/%d target symbols in price panel (%.2f%%).",
+        coverage["price_target_symbols"],
+        coverage["target_symbols"],
+        coverage["price_target_coverage"] * 100,
+    )
 
 
 if __name__ == "__main__":

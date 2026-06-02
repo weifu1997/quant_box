@@ -243,7 +243,7 @@ def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
     if rebalance_freq == "weekly":
         keep_dates = set(date_series.resample("W-FRI").last().dropna())
     elif rebalance_freq == "monthly":
-        keep_dates = set(date_series.resample("M").last().dropna())
+        keep_dates = set(date_series.resample("ME").last().dropna())
     else:
         raise ValueError(f"Unsupported rebalance_freq: {rebalance_freq}")
     return score_panel[score_panel.index.get_level_values(0).isin(keep_dates)]

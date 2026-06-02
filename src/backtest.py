@@ -268,6 +268,12 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
             "profit_loss_ratio": 0.0,
             "turnover_count": 0.0,
             "annual_turnover": 0.0,
+            "commission_cost": 0.0,
+            "tax_cost": 0.0,
+            "slippage_cost": 0.0,
+            "trade_cost": 0.0,
+            "trade_cost_ratio": 0.0,
+            "annual_trade_cost_ratio": 0.0,
         }
 
     returns = equity_curve.pct_change().dropna()
@@ -289,6 +295,14 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
     profit_loss_ratio = float(wins.mean() / abs(losses.mean())) if len(wins) and len(losses) else 0.0
     sells = int((trades.get("side") == "SELL").sum()) if not trades.empty else 0
     annual_turnover = float(sells / max(periods / annual_days, 1 / annual_days) / top_n * 2)
+    commission_cost = _trade_cost_sum(trades, "commission_cost")
+    tax_cost = _trade_cost_sum(trades, "tax_cost")
+    slippage_cost = _trade_cost_sum(trades, "slippage_cost")
+    trade_cost = commission_cost + tax_cost + slippage_cost
+    initial_capital = float(config.get("initial_capital", equity_curve.iloc[0] if len(equity_curve) else 1.0))
+    trade_cost_ratio = float(trade_cost / initial_capital) if initial_capital > 0 else 0.0
+    years = max(periods / annual_days, 1 / annual_days)
+    annual_trade_cost_ratio = float(trade_cost_ratio / years)
 
     metrics = {
         "total_return": float(total_return),
@@ -303,11 +317,23 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
         "profit_loss_ratio": profit_loss_ratio,
         "turnover_count": float(sells),
         "annual_turnover": annual_turnover,
+        "commission_cost": commission_cost,
+        "tax_cost": tax_cost,
+        "slippage_cost": slippage_cost,
+        "trade_cost": trade_cost,
+        "trade_cost_ratio": trade_cost_ratio,
+        "annual_trade_cost_ratio": annual_trade_cost_ratio,
     }
     benchmark = config.get("benchmark_curve")
     if isinstance(benchmark, pd.Series):
         metrics.update(calculate_benchmark_metrics(equity_curve, benchmark, config))
     return metrics
+
+
+def _trade_cost_sum(trades: pd.DataFrame, column: str) -> float:
+    if trades.empty or column not in trades.columns:
+        return 0.0
+    return float(pd.to_numeric(trades[column], errors="coerce").fillna(0.0).sum())
 
 
 def calculate_benchmark_metrics(equity_curve: pd.Series, benchmark_curve: pd.Series, config: dict) -> dict[str, float]:

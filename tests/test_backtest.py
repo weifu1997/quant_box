@@ -31,6 +31,9 @@ class BacktestTests(unittest.TestCase):
 
         self.assertEqual(len(result.equity_curve), 3)
         self.assertIn("total_return", result.metrics)
+        self.assertIn("trade_cost", result.metrics)
+        self.assertGreater(result.metrics["trade_cost"], 0.0)
+        self.assertGreater(result.metrics["annual_trade_cost_ratio"], 0.0)
         self.assertFalse(result.trades.empty)
         self.assertEqual(pd.Timestamp(result.trades.iloc[0]["date"]), pd.Timestamp("2024-01-03"))
 

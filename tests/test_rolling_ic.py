@@ -92,6 +92,38 @@ class RollingICTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_rolling_ic_weights(rolling_ic, min_periods=1)
 
+    def test_rolling_weights_smoothing_and_turnover_cap_reduce_weight_jumps(self) -> None:
+        dates = pd.date_range("2024-01-01", periods=10, freq="D")
+        daily_ic = pd.DataFrame(
+            {
+                "F1": [0.08, 0.08, 0.08, 0.08, -0.08, -0.08, -0.08, -0.08, -0.08, -0.08],
+                "F2": [-0.08, -0.08, -0.08, -0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08],
+            },
+            index=dates,
+        )
+        rolling_ic = daily_ic.shift(1).rolling(window=3, min_periods=3).mean()
+        rolling_ic.attrs["daily_ic"] = daily_ic
+        rolling_ic.attrs["window"] = 3
+
+        raw = make_rolling_ic_weights(
+            rolling_ic,
+            top_k=2,
+            min_abs_ic=0.0,
+            min_periods=3,
+            correlation_threshold=2.0,
+        )
+        stable = make_rolling_ic_weights(
+            rolling_ic,
+            top_k=2,
+            min_abs_ic=0.0,
+            min_periods=3,
+            correlation_threshold=2.0,
+            weight_smoothing=0.6,
+            max_weight_turnover=0.5,
+        )
+
+        self.assertLess(_max_weight_delta(stable), _max_weight_delta(raw))
+
     def test_composite_factor_accepts_dynamic_weights(self) -> None:
         dates = pd.date_range("2024-01-01", periods=2, freq="D")
         index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
@@ -102,6 +134,17 @@ class RollingICTests(unittest.TestCase):
 
         self.assertEqual(scores.name, "score")
         self.assertEqual(len(scores), len(index))
+
+def _max_weight_delta(weights_by_date: dict[pd.Timestamp, pd.Series]) -> float:
+    previous: pd.Series | None = None
+    max_delta = 0.0
+    for date in sorted(weights_by_date):
+        current = weights_by_date[date]
+        if previous is not None:
+            index = current.index.union(previous.index)
+            max_delta = max(max_delta, float((current.reindex(index, fill_value=0.0) - previous.reindex(index, fill_value=0.0)).abs().sum()))
+        previous = current
+    return max_delta
 
 
 if __name__ == "__main__":

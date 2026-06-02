@@ -93,6 +93,8 @@ def make_rolling_ic_weights(
     min_abs_ic: float = 0.02,
     min_periods: int = 60,
     correlation_threshold: float = 0.7,
+    weight_smoothing: float = 0.0,
+    max_weight_turnover: float | None = None,
 ) -> dict[pd.Timestamp, pd.Series]:
     if rolling_ic_df.empty:
         return {}
@@ -106,6 +108,7 @@ def make_rolling_ic_weights(
     rolling_count = source.rolling(window=window, min_periods=min_periods).count()
 
     weights_by_date: dict[pd.Timestamp, pd.Series] = {}
+    previous_weights: pd.Series | None = None
     for date, mean_ic in rolling_ic_df.iterrows():
         count = rolling_count.loc[date].reindex(mean_ic.index).fillna(0)
         std_ic = rolling_std.loc[date].reindex(mean_ic.index)
@@ -121,7 +124,15 @@ def make_rolling_ic_weights(
         scores = candidates.loc[keep].reindex(candidates.loc[keep].abs().sort_values(ascending=False).index).head(top_k)
         denom = scores.abs().sum()
         if denom > 0:
-            weights_by_date[pd.Timestamp(date).normalize()] = scores.fillna(0) / denom
+            raw_weights = scores.fillna(0) / denom
+            stable_weights = _stabilize_weights(
+                raw_weights,
+                previous_weights,
+                weight_smoothing=weight_smoothing,
+                max_weight_turnover=max_weight_turnover,
+            )
+            weights_by_date[pd.Timestamp(date).normalize()] = stable_weights
+            previous_weights = stable_weights
     return weights_by_date
 
 
@@ -165,6 +176,43 @@ def _safe_corr(x: pd.Series, y: pd.Series, method: str, min_obs: int) -> float:
     if len(pair) < min_obs:
         return float("nan")
     return float(pair.iloc[:, 0].corr(pair.iloc[:, 1], method=method))
+
+
+def _stabilize_weights(
+    weights: pd.Series,
+    previous: pd.Series | None,
+    weight_smoothing: float = 0.0,
+    max_weight_turnover: float | None = None,
+) -> pd.Series:
+    current = weights.astype(float)
+    if previous is None or previous.empty:
+        return _normalize_abs_weights(current)
+
+    prior = previous.astype(float)
+    index = current.index.union(prior.index)
+    current = current.reindex(index, fill_value=0.0)
+    prior = prior.reindex(index, fill_value=0.0)
+
+    smoothing = max(0.0, min(float(weight_smoothing), 1.0))
+    if smoothing > 0:
+        current = smoothing * prior + (1.0 - smoothing) * current
+
+    if max_weight_turnover is not None:
+        max_turnover = max(0.0, float(max_weight_turnover))
+        delta = current - prior
+        turnover = float(delta.abs().sum())
+        if turnover > max_turnover and turnover > 0:
+            current = prior + delta * (max_turnover / turnover)
+
+    return _normalize_abs_weights(current)
+
+
+def _normalize_abs_weights(weights: pd.Series) -> pd.Series:
+    clean = weights.replace([np.inf, -np.inf], np.nan).dropna()
+    denom = clean.abs().sum()
+    if denom <= 0:
+        return clean
+    return clean[clean != 0] / denom
 
 
 def _close_prices(price_df: pd.DataFrame) -> pd.DataFrame:

@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.strategy import composite_factor, select_stocks
+from src.strategy import composite_factor, resample_signals, select_stocks
 
 
 class StrategyTests(unittest.TestCase):
@@ -82,6 +82,18 @@ class StrategyTests(unittest.TestCase):
         scores = composite_factor(factors, method="momentum")
 
         self.assertTrue(pd.notna(scores.loc[(pd.Timestamp("2024-01-02"), "C")]))
+
+    def test_resample_signals_supports_monthly_with_pandas_me_alias(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-31", "2024-02-01", "2024-02-29"])
+        index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
+        scores = pd.Series(range(len(index)), index=index, name="score")
+
+        sampled = resample_signals(scores, "monthly")
+
+        self.assertEqual(
+            sorted(sampled.index.get_level_values(0).unique().strftime("%Y-%m-%d").tolist()),
+            ["2024-01-31", "2024-02-29"],
+        )
 
 
 if __name__ == "__main__":

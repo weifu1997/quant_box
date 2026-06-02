@@ -13,7 +13,10 @@ data:
   constituents_file: "data/raw/mainboard_a_stocks.csv"
   daily_batch_size: 20
   daily_window_days: 60
-  max_new_symbols_per_run: 100
+  max_new_symbols_per_run: null
+  update_chunk_size: 20
+  update_sleep_seconds: 90
+  update_progress_file: "outputs/data_update_progress.json"
   retries: 3
   exclude_st: true
 
@@ -31,13 +34,15 @@ ic:
   min_abs_ic: 0.02
   corr_threshold: 0.7
   top_k: 30
+  weight_smoothing: 0.6
+  max_weight_turnover: 0.5
   price_file: "data/prices/ohlcv.parquet"
 
 strategy:
   top_n: 5
-  max_turnover: 3
-  rank_buffer: 0
-  factor_group: "volatility"
+  max_turnover: 1
+  rank_buffer: 10
+  factor_group: "ic_weighted"
   rebalance_freq: "weekly"
 
 backtest:

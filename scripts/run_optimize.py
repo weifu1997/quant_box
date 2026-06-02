@@ -30,16 +30,20 @@ def main() -> None:
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
     parser.add_argument("--price-file", default="data/prices/ohlcv.parquet")
-    parser.add_argument("--factor-groups", default="momentum,volatility,all,ic_weighted")
-    parser.add_argument("--top-n", default="7,10,15")
-    parser.add_argument("--max-turnover", default="1,2")
-    parser.add_argument("--rank-buffer", default="0,5,10")
-    parser.add_argument("--rebalance-freq", default="daily,weekly")
+    parser.add_argument("--factor-groups", default="ic_weighted,momentum")
+    parser.add_argument("--top-n", default="5,7,10")
+    parser.add_argument("--max-turnover", default="1")
+    parser.add_argument("--rank-buffer", default="10,20")
+    parser.add_argument("--rebalance-freq", default="weekly,monthly")
     parser.add_argument("--ic-top-k", type=int, default=30)
     parser.add_argument("--ic-window", type=int, default=config.get("ic", {}).get("window", 252))
     parser.add_argument("--ic-min-periods", type=int, default=config.get("ic", {}).get("min_periods", 60))
     parser.add_argument("--ic-min-abs", type=float, default=config.get("ic", {}).get("min_abs_ic", 0.02))
     parser.add_argument("--ic-corr-threshold", type=float, default=config.get("ic", {}).get("corr_threshold", 0.7))
+    parser.add_argument("--ic-weight-smoothing", type=float, default=config.get("ic", {}).get("weight_smoothing", 0.0))
+    parser.add_argument("--ic-max-weight-turnover", type=float, default=config.get("ic", {}).get("max_weight_turnover"))
+    parser.add_argument("--turnover-penalty", type=float, default=0.02)
+    parser.add_argument("--cost-penalty", type=float, default=1.0)
     parser.add_argument("--rolling-ic", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--walk-forward", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--train-years", type=int, default=3)
@@ -87,6 +91,10 @@ def main() -> None:
             ic_min_abs=args.ic_min_abs,
             ic_corr_threshold=args.ic_corr_threshold,
             ic_top_k=args.ic_top_k,
+            ic_weight_smoothing=args.ic_weight_smoothing,
+            ic_max_weight_turnover=args.ic_max_weight_turnover,
+            turnover_penalty=args.turnover_penalty,
+            cost_penalty=args.cost_penalty,
         )
     else:
         results = run_parameter_grid(
@@ -103,6 +111,10 @@ def main() -> None:
             ic_min_abs=args.ic_min_abs,
             ic_corr_threshold=args.ic_corr_threshold,
             ic_top_k=args.ic_top_k,
+            ic_weight_smoothing=args.ic_weight_smoothing,
+            ic_max_weight_turnover=args.ic_max_weight_turnover,
+            turnover_penalty=args.turnover_penalty,
+            cost_penalty=args.cost_penalty,
         )
     output_path = resolve_path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

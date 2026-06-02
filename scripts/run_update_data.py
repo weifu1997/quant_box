@@ -8,21 +8,37 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.data_fetcher import update_daily_data
+from src.data_fetcher import update_daily_data, update_daily_data_resumable
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch HS300 daily data through a tushare HTTP proxy.")
-    parser.add_argument("--codes", nargs="*", help="Optional ts_codes. If omitted, HS300 constituents are used.")
+    parser = argparse.ArgumentParser(description="Fetch configured A-share universe daily data through a Tushare HTTP proxy.")
+    parser.add_argument("--codes", nargs="*", help="Optional ts_codes. If omitted, configured universe constituents are used.")
     parser.add_argument("--start-date", help="Override config data.start_date.")
     parser.add_argument("--end-date", help="Override config data.end_date.")
+    parser.add_argument("--chunk-size", type=int, help="Resumable missing-symbol chunk size when --codes is omitted.")
+    parser.add_argument("--sleep-seconds", type=float, help="Seconds to sleep between resumable chunks when --codes is omitted.")
+    parser.add_argument("--max-chunks", type=int, help="Stop after this many resumable chunks.")
+    parser.add_argument("--include-existing", action="store_true", help="Also update existing raw files in resumable mode.")
+    parser.add_argument("--progress-file", help="Progress JSON path for resumable mode.")
     args = parser.parse_args()
 
     try:
-        written = update_daily_data(stock_codes=args.codes, start_date=args.start_date, end_date=args.end_date)
+        if args.codes:
+            written = update_daily_data(stock_codes=args.codes, start_date=args.start_date, end_date=args.end_date)
+        else:
+            written = update_daily_data_resumable(
+                start_date=args.start_date,
+                end_date=args.end_date,
+                chunk_size=args.chunk_size,
+                sleep_seconds=args.sleep_seconds,
+                progress_file=args.progress_file,
+                max_chunks=args.max_chunks,
+                include_existing=args.include_existing,
+            )
     except RuntimeError as exc:
         logger.error("%s", exc)
         raise SystemExit(1) from exc

@@ -7,15 +7,16 @@ import pandas as pd
 
 from src.backtest import run_backtest
 from src.factor_ic import calculate_factor_ic, calculate_rolling_ic, make_ic_weights, make_rolling_ic_weights, summarize_ic
+from src.scoring import build_strategy_scores
 from src.strategy import composite_factor, resample_signals
 
 
 DEFAULT_GRID = {
-    "factor_group": ["momentum", "volatility", "all", "ic_weighted"],
-    "top_n": [7, 10, 15],
-    "max_turnover": [1, 2],
-    "rank_buffer": [0, 5, 10],
-    "rebalance_freq": ["daily", "weekly"],
+    "factor_group": ["ic_weighted", "momentum"],
+    "top_n": [5, 7, 10],
+    "max_turnover": [1],
+    "rank_buffer": [10, 20],
+    "rebalance_freq": ["weekly", "monthly"],
 }
 
 
@@ -33,6 +34,10 @@ def run_parameter_grid(
     ic_min_abs: float = 0.02,
     ic_corr_threshold: float = 0.7,
     ic_top_k: int = 30,
+    ic_weight_smoothing: float = 0.0,
+    ic_max_weight_turnover: float | None = None,
+    turnover_penalty: float = 0.02,
+    cost_penalty: float = 1.0,
 ) -> pd.DataFrame:
     grid = grid or DEFAULT_GRID
     dynamic_weights = None
@@ -44,6 +49,8 @@ def run_parameter_grid(
             min_abs_ic=ic_min_abs,
             min_periods=ic_min_periods,
             correlation_threshold=ic_corr_threshold,
+            weight_smoothing=ic_weight_smoothing,
+            max_weight_turnover=ic_max_weight_turnover,
         )
     elif "ic_weighted" in set(grid.get("factor_group", [])) and ic_weights is None:
         ic_df = calculate_factor_ic(factor_df, price_df)
@@ -65,10 +72,10 @@ def run_parameter_grid(
 
         bt_config = {**base_config, **params}
         result = run_backtest(score_cache[cache_key], price_df, start_date, end_date, bt_config)
-        rows.append({**params, **result.metrics})
+        rows.append({**params, **result.metrics, "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty)})
 
     result_df = pd.DataFrame(rows)
-    return result_df.sort_values(["sharpe", "annual_return", "max_drawdown"], ascending=[False, False, False])
+    return result_df.sort_values(["optimization_score", "sharpe", "annual_return", "max_drawdown"], ascending=[False, False, False, False])
 
 
 def run_walk_forward_optimization(
@@ -87,6 +94,10 @@ def run_walk_forward_optimization(
     ic_min_abs: float = 0.02,
     ic_corr_threshold: float = 0.7,
     ic_top_k: int = 30,
+    ic_weight_smoothing: float = 0.0,
+    ic_max_weight_turnover: float | None = None,
+    turnover_penalty: float = 0.02,
+    cost_penalty: float = 1.0,
 ) -> pd.DataFrame:
     price_df = price_df.copy()
     price_df.index = pd.to_datetime(price_df.index)
@@ -123,6 +134,10 @@ def run_walk_forward_optimization(
             ic_min_abs=ic_min_abs,
             ic_corr_threshold=ic_corr_threshold,
             ic_top_k=ic_top_k,
+            ic_weight_smoothing=ic_weight_smoothing,
+            ic_max_weight_turnover=ic_max_weight_turnover,
+            turnover_penalty=turnover_penalty,
+            cost_penalty=cost_penalty,
         )
         if train_results.empty:
             train_start += pd.DateOffset(months=step_months)
@@ -142,6 +157,8 @@ def run_walk_forward_optimization(
                     min_abs_ic=ic_min_abs,
                     min_periods=ic_min_periods,
                     correlation_threshold=ic_corr_threshold,
+                    weight_smoothing=ic_weight_smoothing,
+                    max_weight_turnover=ic_max_weight_turnover,
                 )
                 last_weights = _last_dynamic_weights(train_dynamic_weights)
                 dynamic_weights = {pd.Timestamp(date).normalize(): last_weights for date in pd.to_datetime(test_factors.index.get_level_values(0).unique())}
@@ -152,7 +169,12 @@ def run_walk_forward_optimization(
                 score_source = test_factors
         else:
             score_source = test_factors
-        scores = composite_factor(score_source, method=factor_group, factor_weights=weights, factor_weights_dynamic=dynamic_weights)
+        if factor_group == "ic_weighted" and use_rolling_ic:
+            scores = composite_factor(score_source, method=factor_group, factor_weights_dynamic=dynamic_weights)
+        elif factor_group == "ic_weighted":
+            scores = composite_factor(score_source, method=factor_group, factor_weights=weights)
+        else:
+            scores = build_strategy_scores(score_source, {"strategy": {"factor_group": factor_group}}, price_df=test_prices)
         scores = resample_signals(scores, rebalance_freq)
         scores = _slice_score_dates(scores, test_start, test_end)
         result = run_backtest(
@@ -170,6 +192,7 @@ def run_walk_forward_optimization(
                 "test_end": test_end,
                 **params,
                 **result.metrics,
+                "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty),
             }
         )
         train_start += pd.DateOffset(months=step_months)
@@ -192,3 +215,17 @@ def _last_dynamic_weights(weights_by_date: dict[pd.Timestamp, pd.Series]) -> pd.
         return pd.Series(dtype=float)
     last_date = max(weights_by_date)
     return weights_by_date[last_date]
+
+
+def _optimization_score(metrics: dict, turnover_penalty: float = 0.02, cost_penalty: float = 1.0) -> float:
+    sharpe = _metric_float(metrics, "sharpe")
+    annual_turnover = _metric_float(metrics, "annual_turnover")
+    annual_trade_cost_ratio = _metric_float(metrics, "annual_trade_cost_ratio")
+    return sharpe - turnover_penalty * annual_turnover - cost_penalty * annual_trade_cost_ratio
+
+
+def _metric_float(metrics: dict, key: str) -> float:
+    value = pd.to_numeric(metrics.get(key, 0.0), errors="coerce")
+    if pd.isna(value):
+        return 0.0
+    return float(value)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
 import logging
 from urllib.parse import urlparse
 from pathlib import Path
@@ -523,8 +524,12 @@ def filter_universe_frame(
             delisted = pd.to_datetime(result["delist_date"].astype(str), format="%Y%m%d", errors="coerce")
             result = result[delisted.isna() | (delisted > as_of)]
         if "list_status" in result.columns:
-            status = result["list_status"].fillna("L").astype(str)
-            result = result[(status == "L") | ("delist_date" in result.columns)]
+            status = result["list_status"].fillna("L").astype(str).str.upper()
+            if "delist_date" in result.columns:
+                delisted = pd.to_datetime(result["delist_date"].astype(str), format="%Y%m%d", errors="coerce")
+                result = result[(status == "L") | (delisted.notna() & (delisted > as_of))]
+            else:
+                result = result[status == "L"]
     return result
 
 
@@ -645,6 +650,167 @@ def update_daily_data(
     return written
 
 
+def update_daily_data_resumable(
+    stock_codes: Iterable[str] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    raw_dir: str | Path | None = None,
+    chunk_size: int | None = None,
+    sleep_seconds: float | None = None,
+    progress_file: str | Path | None = None,
+    max_chunks: int | None = None,
+    include_existing: bool = False,
+) -> dict[str, Path]:
+    config = load_config()
+    data_cfg = config.get("data", {})
+    target_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    start = start_date or data_cfg["start_date"]
+    end = end_date or data_cfg["end_date"]
+    codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe()
+    codes = [str(code).upper() for code in dict.fromkeys(codes)]
+    chunk_size = max(1, int(chunk_size or data_cfg.get("update_chunk_size", 20)))
+    sleep_seconds = float(sleep_seconds if sleep_seconds is not None else data_cfg.get("update_sleep_seconds", 90))
+    progress_path = resolve_path(progress_file or data_cfg.get("update_progress_file", "outputs/data_update_progress.json"))
+
+    initial_existing = _existing_stock_codes(target_dir)
+    pending_codes = codes if include_existing else [code for code in codes if code not in initial_existing]
+    list_dates = _load_universe_list_dates(config)
+    written: dict[str, Path] = {}
+    failed: dict[str, str] = {}
+    last_error = ""
+    started_at = datetime.now().isoformat(timespec="seconds")
+    logger.info(
+        "Resumable update: %d target symbols, %d existing raw files, %d symbols pending.",
+        len(codes),
+        len(initial_existing & set(codes)),
+        len(pending_codes),
+    )
+    _write_update_progress(
+        progress_path,
+        {
+            "status": "running",
+            "started_at": started_at,
+            "updated_at": started_at,
+            "target_symbols": len(codes),
+            "initial_existing": len(initial_existing & set(codes)),
+            "pending_symbols": len(pending_codes),
+            "chunk_size": chunk_size,
+            "sleep_seconds": sleep_seconds,
+            "completed_symbols": 0,
+            "failed_symbols": 0,
+            "remaining_symbols": len(pending_codes),
+            "last_chunk": [],
+            "current_symbol": "",
+            "last_error": "",
+        },
+    )
+
+    chunks_run = 0
+    for batch_codes in _batched(pending_codes, chunk_size):
+        if max_chunks is not None and chunks_run >= max_chunks:
+            break
+        chunks_run += 1
+        chunk_error = ""
+        logger.info(
+            "Updating missing-symbol chunk %d: %s",
+            chunks_run,
+            ",".join(batch_codes[:5]) + ("..." if len(batch_codes) > 5 else ""),
+        )
+        for code in batch_codes:
+            code_start = _symbol_start_date(start, list_dates.get(code))
+            _write_update_progress(
+                progress_path,
+                {
+                    "status": "running",
+                    "started_at": started_at,
+                    "updated_at": datetime.now().isoformat(timespec="seconds"),
+                    "target_symbols": len(codes),
+                    "initial_existing": len(initial_existing & set(codes)),
+                    "pending_symbols": len(pending_codes),
+                    "chunk_size": chunk_size,
+                    "sleep_seconds": sleep_seconds,
+                    "completed_symbols": len(_existing_stock_codes(target_dir) & set(pending_codes)),
+                    "failed_symbols": len(failed),
+                    "remaining_symbols": max(len(pending_codes) - len(_existing_stock_codes(target_dir) & set(pending_codes)), 0),
+                    "last_chunk": batch_codes,
+                    "current_symbol": code,
+                    "current_start_date": code_start,
+                    "last_error": chunk_error,
+                },
+            )
+            try:
+                per_symbol_written = update_daily_data(
+                    stock_codes=[code],
+                    start_date=code_start,
+                    end_date=end,
+                    raw_dir=target_dir,
+                )
+                written.update(per_symbol_written)
+                if code not in _existing_stock_codes(target_dir):
+                    failed[code] = "not_written"
+            except Exception as exc:
+                chunk_error = str(exc)
+                last_error = chunk_error
+                failed[code] = chunk_error
+                logger.error("Symbol %s failed in chunk %d: %s", code, chunks_run, exc)
+
+            existing_now = _existing_stock_codes(target_dir)
+            completed = len(existing_now & set(pending_codes))
+            remaining = max(len(pending_codes) - completed, 0)
+            _write_update_progress(
+                progress_path,
+                {
+                    "status": "running",
+                    "started_at": started_at,
+                    "updated_at": datetime.now().isoformat(timespec="seconds"),
+                    "target_symbols": len(codes),
+                    "initial_existing": len(initial_existing & set(codes)),
+                    "pending_symbols": len(pending_codes),
+                    "chunk_size": chunk_size,
+                    "sleep_seconds": sleep_seconds,
+                    "completed_symbols": completed,
+                    "failed_symbols": len(failed),
+                    "remaining_symbols": remaining,
+                    "last_chunk": batch_codes,
+                    "current_symbol": code,
+                    "current_start_date": code_start,
+                    "last_error": chunk_error,
+                },
+            )
+        if remaining == 0:
+            break
+        if sleep_seconds > 0 and (max_chunks is None or chunks_run < max_chunks):
+            logger.info("Sleeping %.1f seconds before next chunk.", sleep_seconds)
+            time.sleep(sleep_seconds)
+
+    existing_final = _existing_stock_codes(target_dir)
+    completed_final = len(existing_final & set(pending_codes))
+    remaining_final = max(len(pending_codes) - completed_final, 0)
+    status = "complete" if remaining_final == 0 else "partial"
+    _write_update_progress(
+        progress_path,
+        {
+            "status": status,
+            "started_at": started_at,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "target_symbols": len(codes),
+            "initial_existing": len(initial_existing & set(codes)),
+            "pending_symbols": len(pending_codes),
+            "chunk_size": chunk_size,
+            "sleep_seconds": sleep_seconds,
+            "completed_symbols": completed_final,
+            "failed_symbols": len(failed),
+            "remaining_symbols": remaining_final,
+            "last_chunk": [],
+            "current_symbol": "",
+            "last_error": last_error,
+        },
+    )
+    return written
+
+
 def _group_codes_by_start(pending: dict[str, tuple[Path, str, bool]]) -> dict[str, list[str]]:
     grouped: dict[str, list[str]] = {}
     for code, (_path, actual_start, _needs_adj_backfill) in pending.items():
@@ -671,6 +837,42 @@ def _limit_new_symbols_per_run(
 def _batched(values: list[str], batch_size: int) -> Iterable[list[str]]:
     for index in range(0, len(values), batch_size):
         yield values[index : index + batch_size]
+
+
+def _existing_stock_codes(raw_dir: Path) -> set[str]:
+    return {
+        path.stem.upper()
+        for path in raw_dir.glob("*.csv")
+        if path.name.upper().endswith((".SZ.CSV", ".SH.CSV"))
+    }
+
+
+def _write_update_progress(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_universe_list_dates(config: dict) -> dict[str, str]:
+    data_cfg = config.get("data", {})
+    path = resolve_path(data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
+    if not path.exists():
+        return {}
+    df = pd.read_csv(path)
+    if "list_date" not in df.columns:
+        return {}
+    code_col = _code_column(df)
+    dates = pd.to_datetime(df["list_date"].astype(str), format="%Y%m%d", errors="coerce")
+    return {
+        str(code).upper(): date.strftime("%Y-%m-%d")
+        for code, date in zip(df[code_col], dates)
+        if pd.notna(date)
+    }
+
+
+def _symbol_start_date(default_start: str, list_date: str | None) -> str:
+    if not list_date:
+        return default_start
+    return max(pd.Timestamp(default_start), pd.Timestamp(list_date)).strftime("%Y-%m-%d")
 
 
 def _date_windows(

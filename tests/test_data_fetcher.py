@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.data_fetcher import DAILY_FIELDS, fetch_daily_stocks, update_daily_data
+from src.data_fetcher import DAILY_FIELDS, fetch_daily_stocks, filter_universe_frame, update_daily_data, update_daily_data_resumable
 
 
 class FakeTushareClient:
@@ -63,6 +63,19 @@ class MissingAdjFactorClient(FakeTushareClient):
 
 
 class DataFetcherTests(unittest.TestCase):
+    def test_filter_universe_frame_excludes_delisted_before_as_of_date(self) -> None:
+        universe = pd.DataFrame(
+            [
+                {"ts_code": "000001.SZ", "name": "PINGAN", "list_status": "L", "list_date": "19910403", "delist_date": ""},
+                {"ts_code": "000003.SZ", "name": "DELISTED", "list_status": "D", "list_date": "19910403", "delist_date": "20020614"},
+                {"ts_code": "000015.SZ", "name": "FUTURE_EXIT", "list_status": "D", "list_date": "19910403", "delist_date": "20251231"},
+            ]
+        )
+
+        filtered = filter_universe_frame(universe, universe="mainboard_a", as_of_date="2024-01-01", exclude_st=True)
+
+        self.assertEqual(filtered["ts_code"].tolist(), ["000001.SZ", "000015.SZ"])
+
     def test_fetch_daily_stocks_uses_comma_separated_batch_request(self) -> None:
         client = FakeTushareClient()
 
@@ -214,6 +227,63 @@ class DataFetcherTests(unittest.TestCase):
             self.assertTrue((raw_dir / "000001.SZ.csv").exists())
             self.assertTrue((raw_dir / "600519.SH.csv").exists())
             self.assertFalse((raw_dir / "000002.SZ.csv").exists())
+
+    def test_resumable_update_prioritizes_missing_symbols_and_writes_progress(self) -> None:
+        client = FakeTushareClient()
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "daily_batch_size": 100,
+                "update_chunk_size": 1,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-03",
+                        "open": 9.0,
+                        "high": 9.0,
+                        "low": 9.0,
+                        "close": 9.0,
+                        "vol": 100.0,
+                        "amount": 900.0,
+                        "adj_factor": 1.0,
+                    }
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.TushareHttpClient.from_config", return_value=client):
+                written = update_daily_data_resumable(
+                    stock_codes=["000001.SZ", "600519.SH", "000002.SZ"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=1,
+                    sleep_seconds=0,
+                    max_chunks=1,
+                )
+
+            progress = pd.read_json(progress_file, typ="series")
+
+            self.assertEqual(set(written), {"600519.SH"})
+            self.assertTrue((raw_dir / "600519.SH.csv").exists())
+            self.assertFalse((raw_dir / "000002.SZ.csv").exists())
+            self.assertEqual(int(progress["initial_existing"]), 1)
+            self.assertEqual(int(progress["pending_symbols"]), 2)
+            self.assertEqual(int(progress["completed_symbols"]), 1)
+            self.assertEqual(int(progress["remaining_symbols"]), 1)
 
 
 if __name__ == "__main__":
