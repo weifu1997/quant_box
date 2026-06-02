@@ -626,7 +626,7 @@ def update_daily_data(
     codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe()
     client = TushareHttpClient.from_config(config)
     batch_size = int(data_cfg.get("daily_batch_size", 100))
-    window_days = int(data_cfg.get("daily_window_days", 60))
+    window_days = int(data_cfg.get("daily_window_days", 250))
     max_new_symbols = data_cfg.get("max_new_symbols_per_run")
     max_new_symbols = int(max_new_symbols) if max_new_symbols is not None else None
     retries = int(data_cfg.get("retries", 3))
