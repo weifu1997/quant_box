@@ -16,6 +16,7 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.scoring import build_strategy_scores
 from src.strategy import resample_signals
+from src.trading_calendar import resolve_target_date_value
 from src.universe_coverage import summarize_universe_coverage
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
@@ -31,12 +32,14 @@ def main() -> None:
     parser.add_argument("--price-file", default="data/prices/ohlcv.parquet")
     parser.add_argument("--benchmark-file", help="Optional benchmark close parquet/csv for alpha, beta and IR.")
     args = parser.parse_args()
+    end_date = resolve_target_date_value(args.end_date, config=config)
+    config["data"]["end_date"] = end_date
 
     price_file = resolve_path(args.price_file)
     if not price_file.exists():
         raise FileNotFoundError(f"Price file not found: {price_file}. Run scripts/run_convert_data.py first.")
     prices = pd.read_parquet(price_file)
-    factors = load_or_compute_factors(args.start_date, args.end_date, cache_file=args.factor_file)
+    factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file)
     scores = build_strategy_scores(factors, config, price_df=prices)
     scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
 
@@ -51,7 +54,7 @@ def main() -> None:
             benchmark = benchmark_df.iloc[:, 0] if isinstance(benchmark_df, pd.DataFrame) else benchmark_df
             benchmark.index = pd.to_datetime(benchmark.index)
         bt_config["benchmark_curve"] = benchmark
-    result = run_backtest(scores, prices, args.start_date, args.end_date, bt_config)
+    result = run_backtest(scores, prices, args.start_date, end_date, bt_config)
 
     out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 from src.data_fetcher import filter_universe_frame
+from src.trading_calendar import resolve_target_date_value
 
 
 def summarize_universe_coverage(
@@ -53,7 +54,7 @@ def _load_target_symbols(config: dict, universe_file: Path) -> set[str]:
     filtered = filter_universe_frame(
         df,
         universe=str(data_cfg.get("universe", "mainboard_a")),
-        as_of_date=data_cfg.get("end_date"),
+        as_of_date=resolve_target_date_value(data_cfg.get("end_date"), config=config),
         exclude_st=bool(data_cfg.get("exclude_st", True)),
     )
     for col in ["ts_code", "con_code", "instrument", "code"]:

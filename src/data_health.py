@@ -9,7 +9,7 @@ import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 from src.data_fetcher import filter_universe_frame
-from src.trading_calendar import latest_trade_date
+from src.trading_calendar import latest_trade_date, resolve_target_date_value
 
 
 @dataclass
@@ -51,7 +51,7 @@ def build_data_health_report(
     raw_dir = resolve_path(data_cfg.get("raw_dir", "data/raw"))
     price_file = resolve_path(cfg.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet"))
     factor_file = resolve_path(cfg.get("factors", {}).get("cache_file", "data/factors/alpha158.parquet"))
-    requested_end = str(pd.Timestamp(data_cfg.get("end_date")).date())
+    requested_end = resolve_target_date_value(data_cfg.get("end_date"), config=cfg)
 
     target_symbols = _target_symbols(cfg)
     raw_symbols = _raw_symbols(raw_dir)
@@ -140,7 +140,7 @@ def _target_symbols(config: dict) -> set[str]:
     filtered = filter_universe_frame(
         df,
         universe=str(data_cfg.get("universe", "mainboard_a")),
-        as_of_date=data_cfg.get("end_date"),
+        as_of_date=resolve_target_date_value(data_cfg.get("end_date"), config=config),
         exclude_st=bool(data_cfg.get("exclude_st", True)),
     )
     for column in ["ts_code", "con_code", "instrument", "code"]:

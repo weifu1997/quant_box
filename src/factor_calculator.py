@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.config_loader import load_config, resolve_path
+from src.trading_calendar import resolve_target_date_value
 
 
 def compute_alpha158_factors(
@@ -22,6 +23,7 @@ def compute_alpha158_factors(
         raise RuntimeError("pyqlib is required to compute Alpha158 factors. Install requirements first.") from exc
 
     config = load_config()
+    end = resolve_target_date_value(end_date, config=config)
     qlib_cfg = config.get("qlib", {})
     provider = resolve_path(provider_uri or qlib_cfg["provider_uri"])
     region = qlib_cfg.get("region", "cn")
@@ -31,11 +33,11 @@ def compute_alpha158_factors(
     handler = Alpha158(
         instruments=instruments,
         start_time=start_date,
-        end_time=end_date,
+        end_time=end,
         fit_start_time=start_date,
-        fit_end_time=end_date,
+        fit_end_time=end,
     )
-    dataset = DatasetH(handler, segments={"full": (start_date, end_date)})
+    dataset = DatasetH(handler, segments={"full": (start_date, end)})
     factors = dataset.prepare("full", col_set="feature")
     if not isinstance(factors.index, pd.MultiIndex):
         raise ValueError("Expected Alpha158 result to use a MultiIndex of datetime/instrument.")
@@ -49,16 +51,17 @@ def load_or_compute_factors(
     force: bool = False,
 ) -> pd.DataFrame:
     config = load_config()
+    end = resolve_target_date_value(end_date, config=config)
     path = resolve_path(cache_file or config["factors"]["cache_file"])
     if path.exists() and not force:
         cached = pd.read_parquet(path)
-        if _factor_cache_matches_request(cached, start_date, end_date, config, cache_file=path):
+        if _factor_cache_matches_request(cached, start_date, end, config, cache_file=path):
             return cached
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    factors = compute_alpha158_factors(start_date, end_date)
+    factors = compute_alpha158_factors(start_date, end)
     factors.to_parquet(path)
-    _write_factor_cache_meta(path, factors, start_date, end_date, config)
+    _write_factor_cache_meta(path, factors, start_date, end, config)
     return factors
 
 

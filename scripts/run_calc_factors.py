@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
+from src.trading_calendar import resolve_target_date_value
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -23,7 +24,9 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Recompute even if the factor cache exists.")
     args = parser.parse_args()
 
-    factors = load_or_compute_factors(args.start_date, args.end_date, force=args.force)
+    end_date = resolve_target_date_value(args.end_date, config=config)
+    config["data"]["end_date"] = end_date
+    factors = load_or_compute_factors(args.start_date, end_date, force=args.force)
     cache_path = resolve_path(config["factors"]["cache_file"])
     logger.info("Saved factors to %s", cache_path)
     logger.info("Shape: %s", factors.shape)

@@ -8,6 +8,7 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.scoring import build_strategy_scores
 from src.strategy import select_stocks
+from src.trading_calendar import resolve_target_date_value
 
 
 def read_previous_holdings(path: str | Path | None = None) -> list[str]:
@@ -33,7 +34,10 @@ def generate_signal(
     data_cfg = config["data"]
     strategy_cfg = config["strategy"]
     use_latest_date = str(signal_date).lower() == "latest"
-    factor_end_date = data_cfg["end_date"] if use_latest_date else signal_date
+    factor_end_date = resolve_target_date_value(
+        data_cfg["end_date"] if use_latest_date else signal_date,
+        config=config,
+    )
 
     if factors is None:
         factors = load_or_compute_factors(
@@ -46,7 +50,8 @@ def generate_signal(
     if use_latest_date:
         signal_date = latest_date.strftime("%Y-%m-%d")
     else:
-        requested_date = pd.Timestamp(signal_date).normalize()
+        signal_date = factor_end_date
+        requested_date = pd.Timestamp(factor_end_date).normalize()
         if latest_date != requested_date:
             raise ValueError(f"Factor cache latest date {latest_date.date()} does not match signal_date {requested_date.date()}.")
     latest_scores = scores.xs(latest_date, level=0, drop_level=True)

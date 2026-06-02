@@ -13,6 +13,7 @@ from typing import Iterable
 import pandas as pd
 
 from src.config_loader import load_config, resolve_path
+from src.trading_calendar import resolve_target_date_value
 
 
 logger = logging.getLogger(__name__)
@@ -453,9 +454,10 @@ def fetch_stock_universe(
     config = load_config()
     data_cfg = config.get("data", {})
     universe = (universe or data_cfg.get("universe", "mainboard_a")).lower()
+    as_of_date = date or resolve_target_date_value(data_cfg.get("end_date"), config=config)
 
     if universe in {"hs300", "csi300"}:
-        return fetch_hs300_stocks(date=date, client=client, local_file=local_file)
+        return fetch_hs300_stocks(date=as_of_date, client=client, local_file=local_file)
 
     local_path = resolve_path(local_file or data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
     if local_path.exists():
@@ -470,7 +472,7 @@ def fetch_stock_universe(
     filtered = filter_universe_frame(
         df,
         universe=universe,
-        as_of_date=date or data_cfg.get("end_date"),
+        as_of_date=as_of_date,
         exclude_st=bool(data_cfg.get("exclude_st", True)),
         st_calendar=_load_st_calendar(data_cfg.get("st_calendar_file")),
     )
@@ -624,8 +626,8 @@ def update_daily_data(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     start = start_date or data_cfg["start_date"]
-    end = end_date or data_cfg["end_date"]
-    codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe()
+    end = resolve_target_date_value(end_date or data_cfg["end_date"], config=config)
+    codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe(date=end)
     client = TushareHttpClient.from_config(config)
     batch_size = int(data_cfg.get("daily_batch_size", 100))
     window_days = int(data_cfg.get("daily_window_days", 500))
@@ -712,8 +714,8 @@ def update_daily_data_resumable(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     start = start_date or data_cfg["start_date"]
-    end = end_date or data_cfg["end_date"]
-    codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe()
+    end = resolve_target_date_value(end_date or data_cfg["end_date"], config=config)
+    codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe(date=end)
     codes = [str(code).upper() for code in dict.fromkeys(codes)]
     chunk_size = max(1, int(chunk_size or data_cfg.get("update_chunk_size", 20)))
     sleep_seconds = float(sleep_seconds if sleep_seconds is not None else data_cfg.get("update_sleep_seconds", 90))

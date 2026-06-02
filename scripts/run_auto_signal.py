@@ -33,7 +33,7 @@ from src.reporting import archive_run, signal_action_summary, write_daily_signal
 from src.scoring import build_strategy_scores
 from src.signal_generator import generate_signal, read_previous_holdings, save_signal
 from src.strategy import resample_signals
-from src.trading_calendar import next_business_day, next_trade_date
+from src.trading_calendar import next_business_day, next_trade_date, resolve_target_date
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -73,20 +73,30 @@ def main() -> None:
 
     config = deepcopy(base_config)
     config["data"]["start_date"] = args.start_date
-    config["data"]["end_date"] = args.end_date
+    target_resolution = resolve_target_date(args.end_date, config=config)
+    end_date = target_resolution.target_date
+    config["data"]["end_date"] = end_date
     out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    status = _new_status()
+    status = _new_status(target_resolution.to_dict())
     _write_status(out_dir, status)
     artifacts: list[Path] = []
 
     try:
+        logger.info(
+            "Resolved target end date: %s (requested=%s, latest_trade_date=%s, cutoff=%s, reason=%s).",
+            end_date,
+            target_resolution.requested,
+            target_resolution.latest_trade_date,
+            target_resolution.cutoff_time,
+            target_resolution.reason,
+        )
         if not args.skip_update:
             _stage(status, out_dir, "update_data", "running")
             logger.info("Updating raw stock data, including existing files.")
             update_daily_data_resumable(
                 start_date=args.start_date,
-                end_date=args.end_date,
+                end_date=end_date,
                 chunk_size=args.chunk_size,
                 sleep_seconds=args.sleep_seconds,
                 max_chunks=args.max_chunks,
@@ -113,7 +123,7 @@ def main() -> None:
                 raise FileNotFoundError(f"Factor cache not found: {factor_path}")
             factors = pd.read_parquet(factor_path)
         else:
-            factors = load_or_compute_factors(args.start_date, args.end_date, cache_file=factor_file, force=True)
+            factors = load_or_compute_factors(args.start_date, end_date, cache_file=factor_file, force=True)
         _stage(status, out_dir, "compute_factors", "complete")
 
         price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet"))
@@ -148,7 +158,7 @@ def main() -> None:
                 prices,
                 base_config={**config["backtest"], **config["strategy"]},
                 start_date=args.start_date,
-                end_date=args.end_date,
+                end_date=end_date,
                 grid=grid,
                 train_years=args.train_years,
                 test_months=args.test_months,
@@ -195,7 +205,7 @@ def main() -> None:
             scores,
             prices,
             args.start_date,
-            args.end_date,
+            end_date,
             {**selected_config["backtest"], **selected_config["strategy"]},
         )
         equity_path = out_dir / "auto_backtest_equity.csv"
@@ -211,14 +221,15 @@ def main() -> None:
 
         _stage(status, out_dir, "generate_signal", "running")
         previous = read_previous_holdings(selected_config["outputs"]["holdings_file"])
+        signal_date_arg = _resolve_signal_date_arg(args.date, end_date)
         signal_df, target_holdings = generate_signal(
-            args.date,
+            signal_date_arg,
             previous_holdings=previous,
             factor_file=factor_file,
             config=selected_config,
             factors=factors,
         )
-        output_date = signal_df["date"].iloc[0] if args.date.lower() == "latest" and not signal_df.empty else args.date
+        output_date = _signal_output_date(signal_df, signal_date_arg)
         intended = next_trade_date(output_date, price_df=prices) or next_business_day(output_date)
         intended_text = str(pd.Timestamp(intended).date())
         block_reasons = []
@@ -257,6 +268,7 @@ def main() -> None:
         artifacts.append(selected_params_path)
         report = {
             "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "target_date_resolution": target_resolution.to_dict(),
             "selected_params": selected_params,
             "parameter_quality": parameter_quality.to_dict(),
             "data_health": data_health.to_dict(),
@@ -290,6 +302,7 @@ def main() -> None:
 
         status["status"] = "complete" if is_executable else "blocked"
         status["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        status["target_date_resolution"] = target_resolution.to_dict()
         status["is_executable"] = is_executable
         status["block_reasons"] = block_reasons
         _write_status(out_dir, status)
@@ -305,8 +318,21 @@ def main() -> None:
         raise
 
 
-def _new_status() -> dict[str, Any]:
-    return {"status": "running", "started_at": datetime.now().isoformat(timespec="seconds"), "stages": []}
+def _new_status(target_date_resolution: dict[str, str] | None = None) -> dict[str, Any]:
+    status: dict[str, Any] = {"status": "running", "started_at": datetime.now().isoformat(timespec="seconds"), "stages": []}
+    if target_date_resolution is not None:
+        status["target_date_resolution"] = target_date_resolution
+    return status
+
+
+def _resolve_signal_date_arg(value: str, target_end_date: str) -> str:
+    return target_end_date if str(value).strip().lower() in {"auto", "latest_trade_date", "latest_trading_day"} else value
+
+
+def _signal_output_date(signal_df: pd.DataFrame, signal_date_arg: str) -> str:
+    if not signal_df.empty and "date" in signal_df.columns:
+        return str(signal_df["date"].iloc[0])
+    return signal_date_arg
 
 
 def _stage(status: dict[str, Any], out_dir: Path, name: str, state: str, message: str = "") -> None:

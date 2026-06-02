@@ -14,6 +14,7 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
 from src.optimizer import DEFAULT_GRID, run_parameter_grid, run_walk_forward_optimization
+from src.trading_calendar import resolve_target_date_value
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -51,8 +52,10 @@ def main() -> None:
     parser.add_argument("--step-months", type=int, default=6)
     parser.add_argument("--output", default="outputs/optimization_results.csv")
     args = parser.parse_args()
+    end_date = resolve_target_date_value(args.end_date, config=config)
+    config["data"]["end_date"] = end_date
 
-    factors = load_or_compute_factors(args.start_date, args.end_date, cache_file=args.factor_file)
+    factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file)
     prices = pd.read_parquet(resolve_path(args.price_file))
 
     grid = {
@@ -80,7 +83,7 @@ def main() -> None:
             prices,
             base_config=base_config,
             start_date=args.start_date,
-            end_date=args.end_date,
+            end_date=end_date,
             grid=grid,
             train_years=args.train_years,
             test_months=args.test_months,
@@ -102,7 +105,7 @@ def main() -> None:
             prices,
             base_config=base_config,
             start_date=args.start_date,
-            end_date=args.end_date,
+            end_date=end_date,
             grid=grid,
             ic_weights=ic_weights,
             use_rolling_ic=args.rolling_ic,

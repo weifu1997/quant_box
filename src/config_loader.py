@@ -15,7 +15,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tushare": {"http_url": "http://your-proxy-server:8020/", "token": "your_token", "timeout": 30},
     "data": {
         "start_date": "2015-01-01",
-        "end_date": "2025-12-31",
+        "end_date": "auto",
+        "target_date_cutoff_time": "20:00",
+        "timezone": "Asia/Shanghai",
+        "trade_calendar_lookback_days": 90,
         "universe": "mainboard_a",
         "freq": "daily",
         "raw_dir": "data/raw",
