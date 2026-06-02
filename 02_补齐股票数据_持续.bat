@@ -6,8 +6,8 @@ cd /d "%~dp0"
 set PYTHON=python
 if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.exe
 
-set CHUNK_SIZE=10
-set SLEEP_SECONDS=30
+set CHUNK_SIZE=15
+set SLEEP_SECONDS=10
 
 echo Starting resumable stock data backfill...
 echo Chunk size: %CHUNK_SIZE%
