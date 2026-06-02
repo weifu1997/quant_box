@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.auto_tuning import apply_strategy_params, select_stable_params, summarize_parameter_validation
+from src.auto_tuning import apply_strategy_params, assess_parameter_quality, select_stable_params, summarize_parameter_validation
 
 
 class AutoTuningTests(unittest.TestCase):
@@ -81,6 +81,32 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(config["strategy"]["top_n"], 5)
         self.assertEqual(selected["strategy"]["top_n"], 7)
         self.assertEqual(selected["strategy"]["rebalance_freq"], "weekly")
+
+    def test_assess_parameter_quality_blocks_unstable_selected_params(self) -> None:
+        summary = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 5,
+                    "max_turnover": 1,
+                    "rank_buffer": 10,
+                    "rebalance_freq": "weekly",
+                    "windows": 2,
+                    "positive_return_rate": 0.25,
+                    "sharpe_mean": -0.1,
+                    "max_drawdown_worst": -0.5,
+                    "annual_turnover_mean": 2.0,
+                    "annual_trade_cost_ratio_mean": 0.01,
+                    "auto_score": 1.0,
+                }
+            ]
+        )
+
+        quality = assess_parameter_quality(summary)
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertIn("validation_windows_below_threshold:2<3", quality.issues)
+        self.assertTrue(any(issue.startswith("positive_return_rate_below_threshold") for issue in quality.issues))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
 import pandas as pd
@@ -16,6 +17,27 @@ METRIC_DEFAULTS = {
     "annual_trade_cost_ratio": 0.0,
     "win_rate": 0.0,
 }
+
+
+@dataclass
+class ParameterQualityReport:
+    is_acceptable: bool
+    issues: list[str]
+    windows: int
+    positive_return_rate: float
+    sharpe_mean: float
+    max_drawdown_worst: float
+    annual_turnover_mean: float
+    annual_trade_cost_ratio_mean: float
+    min_validation_windows: int
+    min_positive_return_rate: float
+    min_sharpe_mean: float
+    max_drawdown_limit: float
+    max_annual_turnover: float
+    max_annual_trade_cost_ratio: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def summarize_parameter_validation(
@@ -86,6 +108,73 @@ def select_stable_params(summary: pd.DataFrame, param_columns: Iterable[str] = P
     return {column: _python_scalar(best[column]) for column in param_columns}
 
 
+def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None = None) -> ParameterQualityReport:
+    cfg = quality_config or {}
+    min_windows = int(cfg.get("min_validation_windows", 3))
+    min_positive = float(cfg.get("min_positive_return_rate", 0.5))
+    min_sharpe = float(cfg.get("min_sharpe_mean", 0.0))
+    max_drawdown = float(cfg.get("max_drawdown_limit", -0.35))
+    max_turnover = float(cfg.get("max_annual_turnover", 20.0))
+    max_cost = float(cfg.get("max_annual_trade_cost_ratio", 0.2))
+    issues: list[str] = []
+
+    if summary.empty:
+        return ParameterQualityReport(
+            is_acceptable=False,
+            issues=["parameter_summary_empty"],
+            windows=0,
+            positive_return_rate=0.0,
+            sharpe_mean=0.0,
+            max_drawdown_worst=0.0,
+            annual_turnover_mean=0.0,
+            annual_trade_cost_ratio_mean=0.0,
+            min_validation_windows=min_windows,
+            min_positive_return_rate=min_positive,
+            min_sharpe_mean=min_sharpe,
+            max_drawdown_limit=max_drawdown,
+            max_annual_turnover=max_turnover,
+            max_annual_trade_cost_ratio=max_cost,
+        )
+
+    best = summary.iloc[0]
+    windows = int(_number(best.get("windows"), 0))
+    positive_return_rate = _number(best.get("positive_return_rate"), 0.0)
+    sharpe_mean = _number(best.get("sharpe_mean"), 0.0)
+    max_drawdown_worst = _number(best.get("max_drawdown_worst"), 0.0)
+    annual_turnover_mean = _number(best.get("annual_turnover_mean"), 0.0)
+    annual_trade_cost_ratio_mean = _number(best.get("annual_trade_cost_ratio_mean"), 0.0)
+
+    if windows < min_windows:
+        issues.append(f"validation_windows_below_threshold:{windows}<{min_windows}")
+    if positive_return_rate < min_positive:
+        issues.append(f"positive_return_rate_below_threshold:{positive_return_rate:.4f}<{min_positive:.4f}")
+    if sharpe_mean < min_sharpe:
+        issues.append(f"sharpe_mean_below_threshold:{sharpe_mean:.4f}<{min_sharpe:.4f}")
+    if max_drawdown_worst < max_drawdown:
+        issues.append(f"max_drawdown_worse_than_limit:{max_drawdown_worst:.4f}<{max_drawdown:.4f}")
+    if annual_turnover_mean > max_turnover:
+        issues.append(f"annual_turnover_above_threshold:{annual_turnover_mean:.4f}>{max_turnover:.4f}")
+    if annual_trade_cost_ratio_mean > max_cost:
+        issues.append(f"annual_trade_cost_ratio_above_threshold:{annual_trade_cost_ratio_mean:.4f}>{max_cost:.4f}")
+
+    return ParameterQualityReport(
+        is_acceptable=not issues,
+        issues=issues,
+        windows=windows,
+        positive_return_rate=positive_return_rate,
+        sharpe_mean=sharpe_mean,
+        max_drawdown_worst=max_drawdown_worst,
+        annual_turnover_mean=annual_turnover_mean,
+        annual_trade_cost_ratio_mean=annual_trade_cost_ratio_mean,
+        min_validation_windows=min_windows,
+        min_positive_return_rate=min_positive,
+        min_sharpe_mean=min_sharpe,
+        max_drawdown_limit=max_drawdown,
+        max_annual_turnover=max_turnover,
+        max_annual_trade_cost_ratio=max_cost,
+    )
+
+
 def apply_strategy_params(config: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     selected = deepcopy(config)
     selected.setdefault("strategy", {})
@@ -99,3 +188,10 @@ def _python_scalar(value: Any) -> Any:
     if hasattr(value, "item"):
         return value.item()
     return value
+
+
+def _number(value: Any, default: float) -> float:
+    parsed = pd.to_numeric(value, errors="coerce")
+    if pd.isna(parsed):
+        return default
+    return float(parsed)

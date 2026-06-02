@@ -63,6 +63,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stale_price_exit_days": 20,
         "stale_price_haircut": 0.5,
     },
+    "quality": {
+        "min_raw_coverage": 0.95,
+        "min_price_coverage": 0.95,
+        "min_factor_coverage": 0.95,
+        "require_latest_end_date": True,
+        "min_validation_windows": 3,
+        "min_positive_return_rate": 0.5,
+        "min_sharpe_mean": 0.0,
+        "max_drawdown_limit": -0.35,
+        "max_annual_turnover": 20.0,
+        "max_annual_trade_cost_ratio": 0.2,
+    },
+    "account": {
+        "file": "config/account.yaml",
+        "current_holdings_file": "config/current_holdings.csv",
+        "total_asset": 1_000_000,
+        "cash": 0.0,
+        "max_position_pct": None,
+        "lot_size": 100,
+        "star_market_lot_size": 200,
+    },
+    "reports": {"history_dir": "outputs/history"},
     "outputs": {"dir": "outputs", "holdings_file": "outputs/latest_holdings.csv"},
 }
 

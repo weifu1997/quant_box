@@ -190,6 +190,40 @@ Get-Content outputs\data_update_progress.json
 
 注意：自动流程会先更新已有股票并补齐缺失股票，再转换数据、重算因子、自动选参、回测和生成信号。如果当前缺失股票很多，这一步会耗时较久。
 
+自动流程会先判断信号是否可执行：
+
+- 数据覆盖率、价格面板和因子缓存必须通过健康检查
+- 自动选中的参数必须通过样本外质量门槛
+- 如果任一门槛不通过，只输出 `candidate_signal_*.csv` 和 `manual_orders_candidate_*.csv`，不会覆盖 `outputs/latest_holdings.csv`
+- 如果门槛全部通过，输出正式 `signal_*.csv`、`manual_orders_*.csv` 和 `latest_holdings.csv`
+
+可选账户与真实持仓文件：
+
+```text
+config/account.yaml
+config/current_holdings.csv
+```
+
+`config/account.yaml` 示例：
+
+```yaml
+total_asset: 1000000
+cash: 100000
+max_position_pct: 0.2
+lot_size: 100
+star_market_lot_size: 200
+```
+
+`config/current_holdings.csv` 示例：
+
+```text
+instrument,shares
+600519.SH,100
+000001.SZ,500
+```
+
+这两个文件已加入 `.gitignore`，不会提交到 GitHub。没有真实持仓文件时，系统仍会生成候选交易单，但会在备注中提示 `current_shares_missing`。
+
 ## 输出文件
 
 常见输出：
@@ -207,13 +241,23 @@ outputs/backtest_holdings.csv          回测持仓
 outputs/backtest_trades.csv            回测成交
 outputs/backtest_metrics.json          回测指标
 outputs/optimization_results.csv       参数优化结果
+outputs/auto_run_status.json           自动流程阶段状态
+outputs/data_health_report.json        数据健康检查
+outputs/data_health_report.csv         数据健康检查表
+outputs/auto_validation_windows.csv    自动选参逐窗口验证
 outputs/auto_parameter_summary.csv     自动选参汇总
 outputs/auto_selected_params.json      自动选中的策略参数
+outputs/auto_parameter_quality.json    自动选参质量门槛判断
 outputs/auto_backtest_metrics.json     自动选参后的回测指标
 outputs/auto_signal_report.json        自动信号报告
+outputs/daily_signal_report.md         每日信号 Markdown 报告
+outputs/manual_orders_YYYY-MM-DD.csv   人工执行交易单
+outputs/manual_orders_candidate_YYYY-MM-DD.csv 门槛未通过时的候选交易单
+outputs/candidate_signal_YYYY-MM-DD.csv 门槛未通过时的候选信号
 outputs/signal_YYYY-MM-DD.csv          每日信号
 outputs/latest_holdings.csv            最新持仓
 outputs/data_update_progress.json      数据补齐进度
+outputs/history/YYYY-MM-DD/            每次自动运行的归档快照
 ```
 
 ## 策略与回测要点
@@ -252,6 +296,8 @@ GitHub 会保存代码、默认配置、脚本和测试，但不会保存：
 
 - `.venv`
 - `config/settings.local.yaml`
+- `config/account.yaml`
+- `config/current_holdings.csv`
 - `data/`
 - `outputs/`
 
@@ -259,6 +305,8 @@ GitHub 会保存代码、默认配置、脚本和测试，但不会保存：
 
 ```text
 config/settings.local.yaml
+config/account.yaml
+config/current_holdings.csv
 data/
 outputs/
 ```
@@ -273,6 +321,7 @@ outputs/
 ## 注意事项
 
 - 本项目只生成手动交易信号，不负责自动下单。
-- 不要提交 `config/settings.local.yaml`。
+- 不要提交 `config/settings.local.yaml`、`config/account.yaml`、`config/current_holdings.csv`。
 - 如果数据补齐窗口长时间没有新增文件，先双击 `05_查看补齐进度.bat` 看 `current_symbol`、`last_error` 和 raw CSV 数量。
+- 如果 `auto_signal_report.json` 里的 `is_executable` 是 `false`，不要按候选信号交易，先看 `block_reasons`。
 - 大批量补齐数据是小时级任务，建议保持小批次可恢复模式运行。

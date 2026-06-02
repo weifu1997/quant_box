@@ -2,6 +2,9 @@ __pycache__/
 *.py[cod]
 .venv/
 config/settings.local.yaml
+config/account.yaml
+config/current_holdings.csv
+.pytest_cache/
 data/raw/*
 !data/raw/.gitkeep
 data/qlib_data/*

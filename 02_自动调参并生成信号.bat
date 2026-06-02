@@ -13,11 +13,18 @@ echo Running automatic data refresh, parameter tuning, backtest and latest signa
 echo Chunk size: %CHUNK_SIZE%
 echo Sleep seconds: %SLEEP_SECONDS%
 echo Outputs:
+echo   outputs\auto_run_status.json
+echo   outputs\data_health_report.json
 echo   outputs\auto_parameter_summary.csv
 echo   outputs\auto_selected_params.json
+echo   outputs\auto_parameter_quality.json
 echo   outputs\auto_backtest_metrics.json
 echo   outputs\auto_signal_report.json
+echo   outputs\daily_signal_report.md
+echo   outputs\manual_orders_*.csv
+echo   outputs\manual_orders_candidate_*.csv
 echo   outputs\signal_*.csv
+echo   outputs\candidate_signal_*.csv
 echo   outputs\latest_holdings.csv
 echo.
 

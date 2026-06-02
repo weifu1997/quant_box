@@ -27,6 +27,7 @@ def generate_signal(
     previous_holdings: list[str] | None = None,
     factor_file: str | Path | None = None,
     config: dict | None = None,
+    factors: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     config = config or load_config()
     data_cfg = config["data"]
@@ -34,11 +35,12 @@ def generate_signal(
     use_latest_date = str(signal_date).lower() == "latest"
     factor_end_date = data_cfg["end_date"] if use_latest_date else signal_date
 
-    factors = load_or_compute_factors(
-        start_date=data_cfg["start_date"],
-        end_date=factor_end_date,
-        cache_file=factor_file or config["factors"]["cache_file"],
-    )
+    if factors is None:
+        factors = load_or_compute_factors(
+            start_date=data_cfg["start_date"],
+            end_date=factor_end_date,
+            cache_file=factor_file or config["factors"]["cache_file"],
+        )
     scores = build_strategy_scores(factors, config)
     latest_date = pd.Timestamp(scores.index.get_level_values(0).max()).normalize()
     if use_latest_date:

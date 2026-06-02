@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+from datetime import datetime
 import json
 import logging
 import sys
@@ -12,17 +14,26 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.auto_tuning import apply_strategy_params, select_stable_params, summarize_parameter_validation
+from src.auto_tuning import (
+    ParameterQualityReport,
+    apply_strategy_params,
+    assess_parameter_quality,
+    select_stable_params,
+    summarize_parameter_validation,
+)
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.data_converter import convert_to_qlib_format
 from src.data_fetcher import update_daily_data_resumable
+from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
+from src.manual_orders import generate_manual_orders, load_account_state, load_current_holdings, save_manual_orders
 from src.optimizer import DEFAULT_GRID, run_walk_forward_grid_validation
+from src.reporting import archive_run, signal_action_summary, write_daily_signal_report
 from src.scoring import build_strategy_scores
 from src.signal_generator import generate_signal, read_previous_holdings, save_signal
 from src.strategy import resample_signals
-from src.universe_coverage import summarize_universe_coverage
+from src.trading_calendar import next_business_day, next_trade_date
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -33,17 +44,20 @@ def _csv_values(value: str, cast):
 
 
 def main() -> None:
-    config = load_config()
+    base_config = load_config()
     parser = argparse.ArgumentParser(description="Run data refresh, automatic walk-forward tuning, backtest and latest signal.")
     parser.add_argument("--skip-update", action="store_true", help="Skip Tushare data update.")
     parser.add_argument("--skip-convert", action="store_true", help="Skip raw-to-price conversion.")
-    parser.add_argument("--skip-factor", action="store_true", help="Skip factor recomputation when cache is valid.")
+    parser.add_argument("--skip-factor", action="store_true", help="Reuse existing factor cache without recomputation.")
     parser.add_argument("--skip-optimize", action="store_true", help="Use current config strategy instead of automatic tuning.")
-    parser.add_argument("--start-date", default=config["data"]["start_date"])
-    parser.add_argument("--end-date", default=config["data"]["end_date"])
+    parser.add_argument("--allow-unhealthy", action="store_true", help="Continue even if data health checks fail.")
+    parser.add_argument("--allow-low-quality", action="store_true", help="Continue even if selected parameters fail quality gates.")
+    parser.add_argument("--no-archive", action="store_true", help="Do not copy run artifacts into outputs/history.")
+    parser.add_argument("--start-date", default=base_config["data"]["start_date"])
+    parser.add_argument("--end-date", default=base_config["data"]["end_date"])
     parser.add_argument("--date", default="latest", help="Signal date, YYYY-MM-DD, or latest.")
-    parser.add_argument("--chunk-size", type=int, default=config["data"].get("update_chunk_size", 20))
-    parser.add_argument("--sleep-seconds", type=float, default=config["data"].get("update_sleep_seconds", 90))
+    parser.add_argument("--chunk-size", type=int, default=base_config["data"].get("update_chunk_size", 20))
+    parser.add_argument("--sleep-seconds", type=float, default=base_config["data"].get("update_sleep_seconds", 90))
     parser.add_argument("--max-chunks", type=int)
     parser.add_argument("--factor-groups", default="ic_weighted,momentum")
     parser.add_argument("--top-n", default="5,7,10")
@@ -57,110 +71,289 @@ def main() -> None:
     parser.add_argument("--cost-penalty", type=float, default=1.0)
     args = parser.parse_args()
 
-    if not args.skip_update:
-        logger.info("Updating raw stock data, including existing files.")
-        update_daily_data_resumable(
-            start_date=args.start_date,
-            end_date=args.end_date,
-            chunk_size=args.chunk_size,
-            sleep_seconds=args.sleep_seconds,
-            max_chunks=args.max_chunks,
-            include_existing=True,
-        )
-
-    if not args.skip_convert:
-        logger.info("Converting raw data to Qlib provider and price panels.")
-        convert_to_qlib_format()
-
-    factor_file = config["factors"]["cache_file"]
-    logger.info("Loading or computing factors.")
-    factors = load_or_compute_factors(args.start_date, args.end_date, cache_file=factor_file, force=not args.skip_factor)
-
-    price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet"))
-    if not price_path.exists():
-        raise FileNotFoundError(f"Price file not found: {price_path}. Run conversion first.")
-    prices = pd.read_parquet(price_path)
-
+    config = deepcopy(base_config)
+    config["data"]["start_date"] = args.start_date
+    config["data"]["end_date"] = args.end_date
     out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
     out_dir.mkdir(parents=True, exist_ok=True)
+    status = _new_status()
+    _write_status(out_dir, status)
+    artifacts: list[Path] = []
 
-    selected_config = config
-    selected_params: dict[str, Any] = dict(config.get("strategy", {}))
-    validation = pd.DataFrame()
-    summary = pd.DataFrame()
-    if not args.skip_optimize:
-        grid = {
-            **DEFAULT_GRID,
-            "factor_group": _csv_values(args.factor_groups, str),
-            "top_n": _csv_values(args.top_n, int),
-            "max_turnover": _csv_values(args.max_turnover, int),
-            "rank_buffer": _csv_values(args.rank_buffer, int),
-            "rebalance_freq": _csv_values(args.rebalance_freq, str),
-        }
-        logger.info("Running automatic walk-forward grid validation.")
-        validation = run_walk_forward_grid_validation(
-            factors,
-            prices,
-            base_config={**config["backtest"], **config["strategy"]},
-            start_date=args.start_date,
-            end_date=args.end_date,
-            grid=grid,
-            train_years=args.train_years,
-            test_months=args.test_months,
-            step_months=args.step_months,
-            turnover_penalty=args.turnover_penalty,
-            cost_penalty=args.cost_penalty,
-            use_rolling_ic=True,
-            ic_window=int(config.get("ic", {}).get("window", 252)),
-            ic_min_periods=int(config.get("ic", {}).get("min_periods", 60)),
-            ic_min_abs=float(config.get("ic", {}).get("min_abs_ic", 0.02)),
-            ic_corr_threshold=float(config.get("ic", {}).get("corr_threshold", 0.7)),
-            ic_top_k=int(config.get("ic", {}).get("top_k", 30)),
-            ic_weight_smoothing=float(config.get("ic", {}).get("weight_smoothing", 0.0)),
-            ic_max_weight_turnover=config.get("ic", {}).get("max_weight_turnover"),
+    try:
+        if not args.skip_update:
+            _stage(status, out_dir, "update_data", "running")
+            logger.info("Updating raw stock data, including existing files.")
+            update_daily_data_resumable(
+                start_date=args.start_date,
+                end_date=args.end_date,
+                chunk_size=args.chunk_size,
+                sleep_seconds=args.sleep_seconds,
+                max_chunks=args.max_chunks,
+                include_existing=True,
+            )
+            _stage(status, out_dir, "update_data", "complete")
+        else:
+            _stage(status, out_dir, "update_data", "skipped")
+
+        if not args.skip_convert:
+            _stage(status, out_dir, "convert_data", "running")
+            logger.info("Converting raw data to Qlib provider and price panels.")
+            convert_to_qlib_format()
+            _stage(status, out_dir, "convert_data", "complete")
+        else:
+            _stage(status, out_dir, "convert_data", "skipped")
+
+        factor_file = config["factors"]["cache_file"]
+        _stage(status, out_dir, "compute_factors", "running")
+        logger.info("Loading or computing factors.")
+        factor_path = resolve_path(factor_file)
+        if args.skip_factor:
+            if not factor_path.exists():
+                raise FileNotFoundError(f"Factor cache not found: {factor_path}")
+            factors = pd.read_parquet(factor_path)
+        else:
+            factors = load_or_compute_factors(args.start_date, args.end_date, cache_file=factor_file, force=True)
+        _stage(status, out_dir, "compute_factors", "complete")
+
+        price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet"))
+        if not price_path.exists():
+            raise FileNotFoundError(f"Price file not found: {price_path}. Run conversion first.")
+        prices = pd.read_parquet(price_path)
+
+        _stage(status, out_dir, "data_health", "running")
+        data_health = build_data_health_report(config, price_df=prices, factor_df=factors)
+        health_json, health_csv = write_data_health_report(data_health, out_dir)
+        artifacts.extend([health_json, health_csv])
+        _stage(status, out_dir, "data_health", "complete", "healthy" if data_health.is_healthy else ",".join(data_health.issues))
+        data_gate = data_health.is_healthy or args.allow_unhealthy
+
+        selected_config = config
+        selected_params: dict[str, Any] = dict(config.get("strategy", {}))
+        validation = pd.DataFrame()
+        summary = pd.DataFrame()
+        if not args.skip_optimize:
+            _stage(status, out_dir, "optimize_params", "running")
+            grid = {
+                **DEFAULT_GRID,
+                "factor_group": _csv_values(args.factor_groups, str),
+                "top_n": _csv_values(args.top_n, int),
+                "max_turnover": _csv_values(args.max_turnover, int),
+                "rank_buffer": _csv_values(args.rank_buffer, int),
+                "rebalance_freq": _csv_values(args.rebalance_freq, str),
+            }
+            logger.info("Running automatic walk-forward grid validation.")
+            validation = run_walk_forward_grid_validation(
+                factors,
+                prices,
+                base_config={**config["backtest"], **config["strategy"]},
+                start_date=args.start_date,
+                end_date=args.end_date,
+                grid=grid,
+                train_years=args.train_years,
+                test_months=args.test_months,
+                step_months=args.step_months,
+                turnover_penalty=args.turnover_penalty,
+                cost_penalty=args.cost_penalty,
+                use_rolling_ic=True,
+                ic_window=int(config.get("ic", {}).get("window", 252)),
+                ic_min_periods=int(config.get("ic", {}).get("min_periods", 60)),
+                ic_min_abs=float(config.get("ic", {}).get("min_abs_ic", 0.02)),
+                ic_corr_threshold=float(config.get("ic", {}).get("corr_threshold", 0.7)),
+                ic_top_k=int(config.get("ic", {}).get("top_k", 30)),
+                ic_weight_smoothing=float(config.get("ic", {}).get("weight_smoothing", 0.0)),
+                ic_max_weight_turnover=config.get("ic", {}).get("max_weight_turnover"),
+            )
+            validation_path = out_dir / "auto_validation_windows.csv"
+            validation.to_csv(validation_path, index=False, encoding="utf-8-sig")
+            summary = summarize_parameter_validation(validation)
+            summary_path = out_dir / "auto_parameter_summary.csv"
+            summary.to_csv(summary_path, index=False, encoding="utf-8-sig")
+            artifacts.extend([validation_path, summary_path])
+            if not summary.empty:
+                selected_params = select_stable_params(summary)
+                selected_config = apply_strategy_params(config, selected_params)
+            _stage(status, out_dir, "optimize_params", "complete")
+        else:
+            _stage(status, out_dir, "optimize_params", "skipped")
+
+        parameter_quality = (
+            assess_parameter_quality(summary, config.get("quality", {}))
+            if not args.skip_optimize
+            else _skipped_quality(config.get("quality", {}))
         )
-        validation.to_csv(out_dir / "auto_validation_windows.csv", index=False, encoding="utf-8-sig")
-        summary = summarize_parameter_validation(validation)
-        summary.to_csv(out_dir / "auto_parameter_summary.csv", index=False, encoding="utf-8-sig")
-        selected_params = select_stable_params(summary)
-        selected_config = apply_strategy_params(config, selected_params)
+        quality_path = out_dir / "auto_parameter_quality.json"
+        _write_json(quality_path, parameter_quality.to_dict())
+        artifacts.append(quality_path)
+        quality_gate = parameter_quality.is_acceptable or args.allow_low_quality
 
-    logger.info("Selected strategy params: %s", selected_params)
-    scores = build_strategy_scores(factors, selected_config, price_df=prices)
-    scores = resample_signals(scores, selected_config["strategy"].get("rebalance_freq", "daily"))
-    result = run_backtest(
-        scores,
-        prices,
-        args.start_date,
-        args.end_date,
-        {**selected_config["backtest"], **selected_config["strategy"]},
+        _stage(status, out_dir, "backtest", "running")
+        logger.info("Selected strategy params: %s", selected_params)
+        scores = build_strategy_scores(factors, selected_config, price_df=prices)
+        scores = resample_signals(scores, selected_config["strategy"].get("rebalance_freq", "daily"))
+        result = run_backtest(
+            scores,
+            prices,
+            args.start_date,
+            args.end_date,
+            {**selected_config["backtest"], **selected_config["strategy"]},
+        )
+        equity_path = out_dir / "auto_backtest_equity.csv"
+        holdings_bt_path = out_dir / "auto_backtest_holdings.csv"
+        trades_path = out_dir / "auto_backtest_trades.csv"
+        metrics_path = out_dir / "auto_backtest_metrics.json"
+        result.equity_curve.to_csv(equity_path, encoding="utf-8-sig")
+        result.holdings.to_csv(holdings_bt_path, index=False, encoding="utf-8-sig")
+        result.trades.to_csv(trades_path, index=False, encoding="utf-8-sig")
+        _write_json(metrics_path, result.metrics)
+        artifacts.extend([equity_path, holdings_bt_path, trades_path, metrics_path])
+        _stage(status, out_dir, "backtest", "complete")
+
+        _stage(status, out_dir, "generate_signal", "running")
+        previous = read_previous_holdings(selected_config["outputs"]["holdings_file"])
+        signal_df, target_holdings = generate_signal(
+            args.date,
+            previous_holdings=previous,
+            factor_file=factor_file,
+            config=selected_config,
+            factors=factors,
+        )
+        output_date = signal_df["date"].iloc[0] if args.date.lower() == "latest" and not signal_df.empty else args.date
+        intended = next_trade_date(output_date, price_df=prices) or next_business_day(output_date)
+        intended_text = str(pd.Timestamp(intended).date())
+        block_reasons = []
+        if not data_gate:
+            block_reasons.extend([f"data:{issue}" for issue in data_health.issues])
+        if not quality_gate:
+            block_reasons.extend([f"params:{issue}" for issue in parameter_quality.issues])
+        is_executable = not block_reasons
+
+        if is_executable:
+            signal_path, holdings_path = save_signal(signal_df, target_holdings, output_date, config=selected_config)
+        else:
+            signal_path, holdings_path = _save_candidate_signal(signal_df, target_holdings, output_date, out_dir)
+        artifacts.extend([signal_path, holdings_path])
+
+        account = load_account_state(selected_config)
+        current_holdings = load_current_holdings(selected_config)
+        orders = generate_manual_orders(
+            signal_df,
+            target_holdings,
+            prices,
+            signal_date=output_date,
+            intended_trade_date=intended_text,
+            config=selected_config,
+            account=account,
+            current_holdings=current_holdings,
+            is_executable=is_executable,
+            block_reasons=block_reasons,
+        )
+        orders_path = save_manual_orders(orders, output_date, out_dir, executable=is_executable)
+        artifacts.append(orders_path)
+        _stage(status, out_dir, "generate_signal", "complete", "executable" if is_executable else "blocked")
+
+        selected_params_path = out_dir / "auto_selected_params.json"
+        _write_json(selected_params_path, selected_params)
+        artifacts.append(selected_params_path)
+        report = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "selected_params": selected_params,
+            "parameter_quality": parameter_quality.to_dict(),
+            "data_health": data_health.to_dict(),
+            "backtest_metrics": result.metrics,
+            "account": account.to_dict(),
+            "signal_summary": signal_action_summary(signal_df),
+            "signal_date": str(output_date),
+            "intended_trade_date": intended_text,
+            "is_executable": is_executable,
+            "block_reasons": block_reasons,
+            "validation_windows": int(len(validation)),
+            "validation_param_sets": int(len(summary)),
+            "files": {
+                "signal": str(signal_path),
+                "holdings": str(holdings_path),
+                "manual_orders": str(orders_path),
+                "data_health": str(health_json),
+                "parameter_quality": str(quality_path),
+                "backtest_metrics": str(metrics_path),
+            },
+        }
+        report_path = out_dir / "auto_signal_report.json"
+        _write_json(report_path, report)
+        markdown_path = write_daily_signal_report(report, out_dir)
+        artifacts.extend([report_path, markdown_path])
+
+        if not args.no_archive:
+            archive_dir = archive_run(artifacts, selected_config.get("reports", {}).get("history_dir", "outputs/history"), str(output_date))
+            report["files"]["archive_dir"] = str(archive_dir)
+            _write_json(report_path, report)
+
+        status["status"] = "complete" if is_executable else "blocked"
+        status["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        status["is_executable"] = is_executable
+        status["block_reasons"] = block_reasons
+        _write_status(out_dir, status)
+        logger.info("Auto signal saved to %s", signal_path)
+        logger.info("Manual orders saved to %s", orders_path)
+        logger.info("Auto report saved to %s", report_path)
+    except Exception as exc:
+        status["status"] = "failed"
+        status["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        status["last_error"] = str(exc)
+        _stage(status, out_dir, "run", "failed", str(exc))
+        _write_status(out_dir, status)
+        raise
+
+
+def _new_status() -> dict[str, Any]:
+    return {"status": "running", "started_at": datetime.now().isoformat(timespec="seconds"), "stages": []}
+
+
+def _stage(status: dict[str, Any], out_dir: Path, name: str, state: str, message: str = "") -> None:
+    status["stages"].append(
+        {
+            "name": name,
+            "state": state,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "message": message,
+        }
     )
-    result.equity_curve.to_csv(out_dir / "auto_backtest_equity.csv", encoding="utf-8-sig")
-    result.holdings.to_csv(out_dir / "auto_backtest_holdings.csv", index=False, encoding="utf-8-sig")
-    result.trades.to_csv(out_dir / "auto_backtest_trades.csv", index=False, encoding="utf-8-sig")
+    _write_status(out_dir, status)
 
-    previous = read_previous_holdings(selected_config["outputs"]["holdings_file"])
-    signal_df, holdings = generate_signal(args.date, previous_holdings=previous, factor_file=factor_file, config=selected_config)
-    output_date = signal_df["date"].iloc[0] if args.date.lower() == "latest" and not signal_df.empty else args.date
-    signal_path, holdings_path = save_signal(signal_df, holdings, output_date, config=selected_config)
 
-    coverage = summarize_universe_coverage(selected_config, price_df=prices)
-    report = {
-        "selected_params": selected_params,
-        "backtest_metrics": result.metrics,
-        "universe_coverage": coverage,
-        "signal_path": str(signal_path),
-        "holdings_path": str(holdings_path),
-        "validation_windows": int(len(validation)),
-        "validation_param_sets": int(len(summary)),
-        "signal_date": str(output_date),
-    }
-    (out_dir / "auto_selected_params.json").write_text(json.dumps(selected_params, indent=2, ensure_ascii=False), encoding="utf-8")
-    (out_dir / "auto_backtest_metrics.json").write_text(json.dumps(result.metrics, indent=2, ensure_ascii=False), encoding="utf-8")
-    (out_dir / "auto_signal_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+def _write_status(out_dir: Path, status: dict[str, Any]) -> None:
+    _write_json(out_dir / "auto_run_status.json", status)
 
-    logger.info("Auto signal saved to %s", signal_path)
-    logger.info("Auto report saved to %s", out_dir / "auto_signal_report.json")
+
+def _write_json(path: Path, value: Any) -> None:
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+
+
+def _save_candidate_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str, out_dir: Path) -> tuple[Path, Path]:
+    signal_path = out_dir / f"candidate_signal_{signal_date}.csv"
+    holdings_path = out_dir / f"candidate_holdings_{signal_date}.csv"
+    signal_df.to_csv(signal_path, index=False, encoding="utf-8-sig")
+    pd.DataFrame({"instrument": holdings}).to_csv(holdings_path, index=False, encoding="utf-8-sig")
+    return signal_path, holdings_path
+
+
+def _skipped_quality(quality_config: dict) -> ParameterQualityReport:
+    return ParameterQualityReport(
+        is_acceptable=True,
+        issues=["parameter_validation_skipped"],
+        windows=0,
+        positive_return_rate=0.0,
+        sharpe_mean=0.0,
+        max_drawdown_worst=0.0,
+        annual_turnover_mean=0.0,
+        annual_trade_cost_ratio_mean=0.0,
+        min_validation_windows=int(quality_config.get("min_validation_windows", 3)),
+        min_positive_return_rate=float(quality_config.get("min_positive_return_rate", 0.5)),
+        min_sharpe_mean=float(quality_config.get("min_sharpe_mean", 0.0)),
+        max_drawdown_limit=float(quality_config.get("max_drawdown_limit", -0.35)),
+        max_annual_turnover=float(quality_config.get("max_annual_turnover", 20.0)),
+        max_annual_trade_cost_ratio=float(quality_config.get("max_annual_trade_cost_ratio", 0.2)),
+    )
 
 
 if __name__ == "__main__":
