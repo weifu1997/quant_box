@@ -761,27 +761,30 @@ def update_daily_data_resumable(
             chunks_run,
             ",".join(batch_codes[:5]) + ("..." if len(batch_codes) > 5 else ""),
         )
-        for code in batch_codes:
-            code_start = _symbol_start_date(start, list_dates.get(code))
+        chunk_starts = {code: _symbol_start_date(start, list_dates.get(code)) for code in batch_codes}
+        for code_start, grouped_codes in _group_chunk_codes_by_start(chunk_starts).items():
             try:
-                per_symbol_written = update_daily_data(
-                    stock_codes=[code],
+                batch_written = update_daily_data(
+                    stock_codes=grouped_codes,
                     start_date=code_start,
                     end_date=end,
                     raw_dir=target_dir,
                 )
-                written.update(per_symbol_written)
-                if code not in _existing_stock_codes(target_dir):
-                    chunk_error = f"{code}: not_written"
-                    last_error = chunk_error
-                    failed[code] = "not_written"
+                written.update(batch_written)
             except Exception as exc:
                 chunk_error = str(exc)
                 last_error = chunk_error
-                failed[code] = chunk_error
-                logger.error("Symbol %s failed in chunk %d: %s", code, chunks_run, exc)
+                for code in grouped_codes:
+                    failed[code] = chunk_error
+                logger.error("Code group failed in chunk %d (%s): %s", chunks_run, ",".join(grouped_codes[:5]), exc)
 
             existing_now = _existing_stock_codes(target_dir)
+            for code in grouped_codes:
+                if code not in existing_now and code not in failed:
+                    chunk_error = f"{code}: not_written"
+                    last_error = chunk_error
+                    failed[code] = "not_written"
+
             completed = len(existing_now & set(pending_codes))
             remaining = max(len(pending_codes) - completed, 0)
             _write_update_progress(
@@ -799,7 +802,7 @@ def update_daily_data_resumable(
                     "failed_symbols": len(failed),
                     "remaining_symbols": remaining,
                     "last_chunk": batch_codes,
-                    "current_symbol": code,
+                    "current_symbol": grouped_codes[-1] if grouped_codes else "",
                     "current_start_date": code_start,
                     "last_error": chunk_error,
                 },
@@ -842,6 +845,13 @@ def update_daily_data_resumable(
 def _group_codes_by_start(pending: dict[str, tuple[Path, str, bool]]) -> dict[str, list[str]]:
     grouped: dict[str, list[str]] = {}
     for code, (_path, actual_start, _needs_adj_backfill) in pending.items():
+        grouped.setdefault(actual_start, []).append(code)
+    return grouped
+
+
+def _group_chunk_codes_by_start(chunk_starts: dict[str, str]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for code, actual_start in chunk_starts.items():
         grouped.setdefault(actual_start, []).append(code)
     return grouped
 
