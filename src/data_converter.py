@@ -86,6 +86,8 @@ def convert_to_qlib_format(
     instruments: list[tuple[str, str, str]] = []
     close_frames: list[pd.Series] = []
     panel_frames: list[pd.DataFrame] = []
+    adjusted_close_frames: list[pd.Series] = []
+    adjusted_panel_frames: list[pd.DataFrame] = []
     for code, df in prepared:
         start = df["trade_date"].min().strftime("%Y-%m-%d")
         end = df["trade_date"].max().strftime("%Y-%m-%d")
@@ -98,11 +100,10 @@ def convert_to_qlib_format(
         feature_df.to_parquet(stock_dir / "day.parquet", index=False)
         _write_qlib_bin_features(stock_dir, feature_df, calendar, calendar_index, missing_value=missing_value)
 
-        close = raw_feature_df.set_index("date")["close"].rename(code.lower())
-        close_frames.append(close)
-        panel = raw_feature_df.set_index("date")[PANEL_COLUMNS].copy()
-        panel.columns = pd.MultiIndex.from_product([panel.columns, [code.lower()]], names=["field", "instrument"])
-        panel_frames.append(panel)
+        close_frames.append(_close_panel(raw_feature_df, code))
+        panel_frames.append(_ohlcv_panel(raw_feature_df, code))
+        adjusted_close_frames.append(_close_panel(feature_df, code))
+        adjusted_panel_frames.append(_ohlcv_panel(feature_df, code))
 
     instrument_name = str(config.get("qlib", {}).get("instruments", "all"))
     _write_instruments(instrument_dir / "all.txt", instruments)
@@ -112,6 +113,10 @@ def convert_to_qlib_format(
         pd.concat(close_frames, axis=1).sort_index().to_parquet(prices_dir / "close.parquet")
     if panel_frames:
         pd.concat(panel_frames, axis=1).sort_index().to_parquet(prices_dir / "ohlcv.parquet")
+    if adjusted_close_frames:
+        pd.concat(adjusted_close_frames, axis=1).sort_index().to_parquet(prices_dir / "close_adjusted.parquet")
+    if adjusted_panel_frames:
+        pd.concat(adjusted_panel_frames, axis=1).sort_index().to_parquet(prices_dir / "ohlcv_adjusted.parquet")
 
     return {
         "calendar_days": len(calendar),
@@ -119,7 +124,9 @@ def convert_to_qlib_format(
         "provider_uri": target_dir,
         "close_price_file": prices_dir / "close.parquet",
         "ohlcv_price_file": prices_dir / "ohlcv.parquet",
-}
+        "adjusted_close_price_file": prices_dir / "close_adjusted.parquet",
+        "adjusted_ohlcv_price_file": prices_dir / "ohlcv_adjusted.parquet",
+    }
 
 
 def _prepare_feature_frame(df: pd.DataFrame, adjusted: bool) -> pd.DataFrame:
@@ -141,6 +148,16 @@ def _load_tradable_codes(path_value: str | Path) -> set[str]:
     if col is None:
         raise ValueError(f"{path} must contain one of: ts_code, instrument, code, con_code.")
     return set(df[col].dropna().astype(str).str.upper())
+
+
+def _close_panel(feature_df: pd.DataFrame, code: str) -> pd.Series:
+    return feature_df.set_index("date")["close"].rename(code.lower())
+
+
+def _ohlcv_panel(feature_df: pd.DataFrame, code: str) -> pd.DataFrame:
+    panel = feature_df.set_index("date")[PANEL_COLUMNS].copy()
+    panel.columns = pd.MultiIndex.from_product([panel.columns, [code.lower()]], names=["field", "instrument"])
+    return panel
 
 
 def _apply_adjustment(feature_df: pd.DataFrame) -> pd.DataFrame:
@@ -171,7 +188,7 @@ def _write_instruments(path: Path, instruments: list[tuple[str, str, str]]) -> N
 
 
 def _remove_price_outputs(prices_dir: Path) -> None:
-    for name in ["close.parquet", "ohlcv.parquet"]:
+    for name in ["close.parquet", "ohlcv.parquet", "close_adjusted.parquet", "ohlcv_adjusted.parquet"]:
         path = prices_dir / name
         if path.exists():
             path.unlink()

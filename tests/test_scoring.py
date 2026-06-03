@@ -92,6 +92,36 @@ class ScoringTests(unittest.TestCase):
 
         self.assertEqual(scores.name, "score")
 
+    def test_build_strategy_scores_falls_back_to_adjusted_close_price_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            close_path = tmp_path / "close_adjusted.parquet"
+            pd.DataFrame({"A": [10.0, 10.1]}, index=pd.to_datetime(["2024-01-01", "2024-01-02"])).to_parquet(close_path)
+            missing_ohlcv = tmp_path / "ohlcv_adjusted.parquet"
+            index = pd.MultiIndex.from_product(
+                [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+                names=["datetime", "instrument"],
+            )
+            factors = pd.DataFrame({"F1": range(5)}, index=index)
+            config = {
+                "strategy": {"factor_group": "ic_weighted"},
+                "ic": {"price_file": str(missing_ohlcv), "top_k": 1, "min_abs_ic": 0.0, "min_periods": 1},
+            }
+
+            def fake_resolve_path(value: str | Path) -> Path:
+                return Path(value)
+
+            with patch("src.scoring.resolve_path", side_effect=fake_resolve_path), patch(
+                "src.scoring.calculate_rolling_ic",
+                return_value=pd.DataFrame(),
+            ), patch(
+                "src.scoring.make_rolling_ic_weights",
+                return_value={pd.Timestamp("2024-01-02"): pd.Series({"F1": 1.0})},
+            ):
+                scores = build_strategy_scores(factors, config)
+
+        self.assertEqual(scores.name, "score")
+
     def test_build_strategy_scores_reuses_matching_weight_cache(self) -> None:
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

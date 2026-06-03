@@ -127,7 +127,7 @@ def main() -> None:
             factors = load_or_compute_factors(args.start_date, end_date, cache_file=factor_file, force=True)
         _stage(status, out_dir, "compute_factors", "complete")
 
-        price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet"))
+        price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
         if not price_path.exists():
             raise FileNotFoundError(f"Price file not found: {price_path}. Run conversion first.")
         prices = pd.read_parquet(price_path)

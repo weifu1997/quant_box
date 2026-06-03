@@ -41,7 +41,7 @@ ic:
   top_k: 30
   weight_smoothing: 0.6
   max_weight_turnover: 0.5
-  price_file: "data/prices/ohlcv.parquet"
+  price_file: "data/prices/ohlcv_adjusted.parquet"
   weights_cache_enabled: true
   weights_cache_file: "data/factors/rolling_ic_weights.pkl"
 

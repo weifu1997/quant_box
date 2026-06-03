@@ -29,7 +29,7 @@ def main() -> None:
     parser.add_argument("--start-date", default=config["data"]["start_date"])
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
-    parser.add_argument("--price-file", default="data/prices/ohlcv.parquet")
+    parser.add_argument("--price-file", default=config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
     parser.add_argument("--benchmark-file", help="Optional benchmark close parquet/csv for alpha, beta and IR.")
     args = parser.parse_args()
     end_date = resolve_target_date_value(args.end_date, config=config)

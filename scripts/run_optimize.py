@@ -31,7 +31,7 @@ def main() -> None:
     parser.add_argument("--start-date", default=config["data"]["start_date"])
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
-    parser.add_argument("--price-file", default="data/prices/ohlcv.parquet")
+    parser.add_argument("--price-file", default=config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
     parser.add_argument("--factor-groups", default="ic_weighted,momentum")
     parser.add_argument("--top-n", default="5,7,10")
     parser.add_argument("--max-turnover", default="1")

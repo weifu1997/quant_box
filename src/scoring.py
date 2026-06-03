@@ -23,7 +23,8 @@ def build_strategy_scores(
         return composite_factor(factors, method=factor_group)
 
     ic_cfg = config.get("ic", {})
-    prices = price_df if price_df is not None else _load_ic_price_frame(price_file or ic_cfg.get("price_file", "data/prices/ohlcv.parquet"))
+    price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
+    prices = price_df if price_df is not None else _load_ic_price_frame(price_path)
     dynamic_weights = _load_or_compute_dynamic_weights(factors, prices, ic_cfg)
     return composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights)
 
@@ -46,7 +47,8 @@ def build_latest_strategy_scores(
         return composite_factor(latest_factors, method=factor_group)
 
     ic_cfg = config.get("ic", {})
-    prices = price_df if price_df is not None else _load_ic_price_frame(price_file or ic_cfg.get("price_file", "data/prices/ohlcv.parquet"))
+    price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
+    prices = price_df if price_df is not None else _load_ic_price_frame(price_path)
     weights = _latest_ic_weights(factors, prices, ic_cfg, target_date)
     if weights.empty:
         raise ValueError(f"No usable IC weights found for signal date {target_date.date()}.")
@@ -55,8 +57,9 @@ def build_latest_strategy_scores(
 
 def _load_ic_price_frame(path_value: str | Path) -> pd.DataFrame:
     price_path = resolve_path(path_value)
-    if not price_path.exists() and price_path.name == "ohlcv.parquet":
-        fallback_price_file = price_path.with_name("close.parquet")
+    if not price_path.exists() and price_path.name in {"ohlcv.parquet", "ohlcv_adjusted.parquet"}:
+        fallback_name = "close_adjusted.parquet" if price_path.name == "ohlcv_adjusted.parquet" else "close.parquet"
+        fallback_price_file = price_path.with_name(fallback_name)
         if fallback_price_file.exists():
             price_path = fallback_price_file
     if not price_path.exists():

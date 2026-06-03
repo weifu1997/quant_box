@@ -57,6 +57,67 @@ class DataConverterTests(unittest.TestCase):
 
             self.assertEqual(result["instruments"], 1)
             self.assertTrue(Path(result["ohlcv_price_file"]).exists())
+            self.assertTrue(Path(result["adjusted_ohlcv_price_file"]).exists())
+
+    def test_convert_to_qlib_format_writes_raw_and_adjusted_price_panels(self) -> None:
+        config = {
+            "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},
+            "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            qlib_dir = root / "qlib"
+            raw_dir.mkdir()
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 10.0,
+                        "high": 10.0,
+                        "low": 10.0,
+                        "close": 10.0,
+                        "vol": 2000.0,
+                        "amount": 2000.0,
+                        "adj_factor": 1.0,
+                    },
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-03",
+                        "open": 20.0,
+                        "high": 20.0,
+                        "low": 20.0,
+                        "close": 20.0,
+                        "vol": 1000.0,
+                        "amount": 2000.0,
+                        "adj_factor": 2.0,
+                    },
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+
+            def fake_resolve_path(value: str | Path) -> Path:
+                if str(value) == "data/prices":
+                    return root / "prices"
+                path = Path(value)
+                return path if path.is_absolute() else root / path
+
+            with patch("src.data_converter.load_config", return_value=config), patch(
+                "src.data_converter.resolve_path",
+                side_effect=fake_resolve_path,
+            ):
+                result = convert_to_qlib_format(raw_dir=raw_dir, qlib_dir=qlib_dir)
+
+            raw_panel = pd.read_parquet(result["ohlcv_price_file"])
+            adjusted_panel = pd.read_parquet(result["adjusted_ohlcv_price_file"])
+            qlib_features = pd.read_parquet(qlib_dir / "features" / "000001.sz" / "day.parquet")
+
+            first_date = pd.Timestamp("2024-01-02")
+            self.assertAlmostEqual(float(raw_panel.loc[first_date, ("close", "000001.sz")]), 10.0)
+            self.assertAlmostEqual(float(adjusted_panel.loc[first_date, ("close", "000001.sz")]), 5.0)
+            self.assertAlmostEqual(float(adjusted_panel.loc[first_date, ("volume", "000001.sz")]), 4000.0)
+            self.assertAlmostEqual(float(qlib_features.loc[0, "close"]), 5.0)
 
     def test_convert_to_qlib_format_removes_stale_price_files_when_no_stock_remains(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -68,8 +129,12 @@ class DataConverterTests(unittest.TestCase):
             prices_dir.mkdir()
             close_path = prices_dir / "close.parquet"
             ohlcv_path = prices_dir / "ohlcv.parquet"
+            adjusted_close_path = prices_dir / "close_adjusted.parquet"
+            adjusted_ohlcv_path = prices_dir / "ohlcv_adjusted.parquet"
             close_path.write_text("stale", encoding="utf-8")
             ohlcv_path.write_text("stale", encoding="utf-8")
+            adjusted_close_path.write_text("stale", encoding="utf-8")
+            adjusted_ohlcv_path.write_text("stale", encoding="utf-8")
             pd.DataFrame(
                 [
                     {
@@ -111,6 +176,8 @@ class DataConverterTests(unittest.TestCase):
 
             self.assertFalse(close_path.exists())
             self.assertFalse(ohlcv_path.exists())
+            self.assertFalse(adjusted_close_path.exists())
+            self.assertFalse(adjusted_ohlcv_path.exists())
 
     def test_adjustment_scales_volume_opposite_to_prices(self) -> None:
         feature_df = pd.DataFrame(

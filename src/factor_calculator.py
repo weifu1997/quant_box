@@ -129,9 +129,10 @@ def _factor_cache_matches_request(
 
 
 def _price_cache_state(config: dict, start_date: str, end_date: str) -> tuple[pd.DatetimeIndex, set[str]]:
-    price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet"))
-    if not price_path.exists() and price_path.name == "ohlcv.parquet":
-        fallback = price_path.with_name("close.parquet")
+    price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
+    if not price_path.exists() and price_path.name in {"ohlcv.parquet", "ohlcv_adjusted.parquet"}:
+        fallback_name = "close_adjusted.parquet" if price_path.name == "ohlcv_adjusted.parquet" else "close.parquet"
+        fallback = price_path.with_name(fallback_name)
         if fallback.exists():
             price_path = fallback
     if not price_path.exists():

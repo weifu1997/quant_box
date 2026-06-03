@@ -51,7 +51,7 @@ def build_data_health_report(
     data_cfg = cfg.get("data", {})
     quality_cfg = cfg.get("quality", {})
     raw_dir = resolve_path(data_cfg.get("raw_dir", "data/raw"))
-    price_file = resolve_path(cfg.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet"))
+    price_file = resolve_path(cfg.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
     factor_file = resolve_path(cfg.get("factors", {}).get("cache_file", "data/factors/alpha158.parquet"))
     requested_end = resolve_target_date_value(data_cfg.get("end_date"), config=cfg)
 

@@ -214,7 +214,7 @@ def _target_trade_calendar(
     if not file_calendar.empty:
         return file_calendar, source
 
-    configured_price_file = price_file or config.get("ic", {}).get("price_file", "data/prices/ohlcv.parquet")
+    configured_price_file = price_file or config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet")
     prices = price_calendar(price_df=price_df, price_file=configured_price_file)
     if not prices.empty:
         return prices, "price_calendar"
