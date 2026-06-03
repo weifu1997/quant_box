@@ -84,3 +84,19 @@ def save_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str, 
     signal_df.to_csv(signal_path, index=False, encoding="utf-8-sig")
     pd.DataFrame({"instrument": holdings}).to_csv(holdings_path, index=False, encoding="utf-8-sig")
     return signal_path, holdings_path
+
+
+def save_candidate_signal(
+    signal_df: pd.DataFrame,
+    holdings: list[str],
+    signal_date: str,
+    config: dict | None = None,
+) -> tuple[Path, Path]:
+    config = config or load_config()
+    out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    signal_path = out_dir / f"candidate_signal_{signal_date}.csv"
+    holdings_path = out_dir / f"candidate_holdings_{signal_date}.csv"
+    signal_df.to_csv(signal_path, index=False, encoding="utf-8-sig")
+    pd.DataFrame({"instrument": holdings}).to_csv(holdings_path, index=False, encoding="utf-8-sig")
+    return signal_path, holdings_path

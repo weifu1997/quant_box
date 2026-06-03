@@ -105,7 +105,7 @@ setx TUSHARE_TOKEN "你的token"
 | `07_计算因子.bat` | 分步工具：计算或读取 Alpha158 因子缓存 |
 | `08_参数优化.bat` | 运行 walk-forward 参数优化 |
 | `09_运行回测.bat` | 分步工具：运行当前配置下的回测 |
-| `10_生成最新信号.bat` | 分步工具：基于最新因子生成手动交易信号 |
+| `10_生成最新信号.bat` | 分步工具：基于最新因子生成候选手动交易信号；如需覆盖正式持仓，传入 `--official` |
 | `11_旧版全流程_补数据到信号.bat` | 旧版全流程：补数据到信号，但不自动采用调参结果 |
 
 最常用的是：
@@ -180,6 +180,7 @@ Get-Content outputs\data_update_progress.json
 .\.venv\Scripts\python.exe scripts\run_calc_factors.py
 .\.venv\Scripts\python.exe scripts\run_backtest.py
 .\.venv\Scripts\python.exe scripts\run_daily_signal.py --date latest
+# 如需写入正式 signal_*.csv 和 latest_holdings.csv，加 --official
 ```
 
 完整一键流程：

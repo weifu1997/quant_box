@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -77,6 +79,34 @@ class TradingCalendarTests(unittest.TestCase):
 
     def test_next_business_day_uses_a_share_trade_calendar(self) -> None:
         self.assertEqual(str(next_business_day("2024-02-08").date()), "2024-02-19")
+
+    def test_next_business_day_uses_configured_calendar_when_library_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = Path(tmp) / "qlib_data"
+            calendar_dir = provider / "calendars"
+            calendar_dir.mkdir(parents=True)
+            (calendar_dir / "day.txt").write_text("2024-02-08\n2024-02-19\n", encoding="utf-8")
+
+            with patch("src.trading_calendar._a_trade_calendar_next_trade_date", return_value=None):
+                next_date = next_business_day(
+                    "2024-02-08",
+                    config={"qlib": {"provider_uri": str(provider)}, "ic": {"price_file": str(Path(tmp) / "missing.parquet")}},
+                )
+
+        self.assertEqual(str(next_date.date()), "2024-02-19")
+
+    def test_next_business_day_strict_raises_without_trade_calendar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("src.trading_calendar._a_trade_calendar_next_trade_date", return_value=None):
+                with self.assertRaises(ValueError):
+                    next_business_day(
+                        "2024-02-08",
+                        config={
+                            "qlib": {"provider_uri": str(Path(tmp) / "missing_qlib")},
+                            "ic": {"price_file": str(Path(tmp) / "missing.parquet")},
+                        },
+                        strict=True,
+                    )
 
     def test_fixed_target_date_bypasses_cutoff(self) -> None:
         resolution = resolve_target_date(

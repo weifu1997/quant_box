@@ -7,7 +7,8 @@ set PYTHON=python
 if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.exe
 
 echo Generating latest daily signal...
-echo Outputs: outputs\signal_*.csv and outputs\latest_holdings.csv
+echo Outputs: outputs\candidate_signal_*.csv and outputs\candidate_holdings_*.csv
+echo Add --official to write outputs\signal_*.csv and outputs\latest_holdings.csv.
 echo.
 
 "%PYTHON%" scripts\run_daily_signal.py --date latest %*

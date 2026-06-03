@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.signal_generator import generate_signal, read_previous_holdings, save_signal
+from src.signal_generator import generate_signal, read_previous_holdings, save_candidate_signal, save_signal
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -18,14 +18,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate daily rebalance signal.")
     parser.add_argument("--date", default="latest", help="Signal date, YYYY-MM-DD, or latest factor date.")
     parser.add_argument("--previous-holdings", nargs="*", help="Optional previous holdings override.")
+    parser.add_argument(
+        "--official",
+        action="store_true",
+        help="Write official signal files and overwrite latest holdings. Default writes candidate files only.",
+    )
     args = parser.parse_args()
 
     previous = args.previous_holdings if args.previous_holdings is not None else read_previous_holdings()
     signal_df, holdings = generate_signal(args.date, previous_holdings=previous)
-    output_date = signal_df["date"].iloc[0] if args.date.lower() == "latest" and not signal_df.empty else args.date
-    signal_path, holdings_path = save_signal(signal_df, holdings, output_date)
-    logger.info("Signal saved to %s", signal_path)
-    logger.info("Latest holdings saved to %s", holdings_path)
+    output_date = _signal_output_date(signal_df, args.date)
+    if args.official:
+        signal_path, holdings_path = save_signal(signal_df, holdings, output_date)
+        logger.info("Official signal saved to %s", signal_path)
+        logger.info("Latest holdings saved to %s", holdings_path)
+    else:
+        signal_path, holdings_path = save_candidate_signal(signal_df, holdings, output_date)
+        logger.info("Candidate signal saved to %s", signal_path)
+        logger.info("Candidate holdings saved to %s", holdings_path)
+
+
+def _signal_output_date(signal_df, requested_date: str) -> str:
+    if not signal_df.empty and "date" in signal_df.columns:
+        return str(signal_df["date"].iloc[0])
+    return requested_date
 
 
 if __name__ == "__main__":

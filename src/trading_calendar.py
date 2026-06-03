@@ -154,11 +154,43 @@ def next_trade_date(
     return pd.Timestamp(calendar[pos]).normalize()
 
 
-def next_business_day(date: str | pd.Timestamp) -> pd.Timestamp:
+def next_business_day(
+    date: str | pd.Timestamp,
+    config: dict | None = None,
+    calendar: Iterable[str | datetime | pd.Timestamp] | pd.DatetimeIndex | None = None,
+    price_df: pd.DataFrame | None = None,
+    price_file: str | Path | None = None,
+    strict: bool = False,
+) -> pd.Timestamp:
+    signal_ts = pd.Timestamp(date).normalize()
+    explicit = _normalize_calendar(calendar)
+    next_date = _next_from_calendar(explicit, signal_ts)
+    if next_date is not None:
+        return next_date
+
+    cfg = config or load_config()
+    file_calendar, _source = _configured_file_calendar(cfg)
+    next_date = _next_from_calendar(file_calendar, signal_ts)
+    if next_date is not None:
+        return next_date
+
+    configured_price_file = price_file or cfg.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet")
+    prices = price_calendar(price_df=price_df, price_file=configured_price_file)
+    next_date = _next_from_calendar(prices, signal_ts)
+    if next_date is not None:
+        return next_date
+
     next_trade = _a_trade_calendar_next_trade_date(date)
     if next_trade is not None:
         return next_trade
-    current = pd.Timestamp(date).normalize() + pd.Timedelta(days=1)
+
+    if strict:
+        raise ValueError(f"Unable to resolve next A-share trading day after {signal_ts.date()}.")
+    logger.warning(
+        "Falling back to weekday calendar for next business day after %s because no A-share trade calendar is available.",
+        signal_ts.date(),
+    )
+    current = signal_ts + pd.Timedelta(days=1)
     while current.weekday() >= 5:
         current += pd.Timedelta(days=1)
     return current
@@ -232,6 +264,16 @@ def _normalize_calendar(calendar: Iterable[str | datetime | pd.Timestamp] | pd.D
     dates = pd.Series(compact).where(pd.Series(compact).notna(), pd.Series(fallback))
     dates = pd.DatetimeIndex(dates.dropna()).normalize().unique().sort_values()
     return dates
+
+
+def _next_from_calendar(calendar: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp | None:
+    if calendar.empty:
+        return None
+    signal_ts = pd.Timestamp(date).normalize()
+    pos = calendar.searchsorted(signal_ts, side="right")
+    if pos >= len(calendar):
+        return None
+    return pd.Timestamp(calendar[pos]).normalize()
 
 
 def _configured_file_calendar(config: dict) -> tuple[pd.DatetimeIndex, str]:

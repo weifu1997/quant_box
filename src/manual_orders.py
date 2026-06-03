@@ -60,9 +60,10 @@ def load_current_holdings(config: dict | None = None) -> pd.DataFrame:
     if "shares" not in frame.columns:
         frame["shares"] = pd.NA
     result = frame[["instrument", "shares"]].copy()
-    result["instrument"] = result["instrument"].dropna().astype(str)
+    result["instrument"] = result["instrument"].map(_normalize_instrument)
     result["shares"] = pd.to_numeric(result["shares"], errors="coerce")
-    return result.dropna(subset=["instrument"]).drop_duplicates("instrument", keep="last").reset_index(drop=True)
+    result = result[result["instrument"] != ""]
+    return result.drop_duplicates("instrument", keep="last").reset_index(drop=True)
 
 
 def generate_manual_orders(
@@ -82,12 +83,15 @@ def generate_manual_orders(
     current = current_holdings if current_holdings is not None else load_current_holdings(cfg)
     current_map = _current_share_map(current)
     action_map = _signal_action_map(signal_df)
-    target_set = set(map(str, target_holdings))
+    normalized_targets = _normalize_instruments(target_holdings)
+    target_set = set(normalized_targets)
     all_symbols = sorted(set(action_map) | target_set | set(current_map), key=lambda code: (code not in target_set, code))
 
     rows: list[dict[str, Any]] = []
-    target_weight = _target_weight(target_holdings, account, cfg)
-    close = _price_row(price_df, "close", pd.Timestamp(signal_date))
+    target_weight = _target_weight(normalized_targets, account, cfg)
+    reference_date = _reference_price_date(price_df, signal_date, intended_trade_date)
+    close = _price_row(price_df, "close", reference_date)
+    reference_from_signal_date = _reference_from_signal_date(signal_date, intended_trade_date, reference_date)
     for instrument in all_symbols:
         action = action_map.get(instrument, "HOLD" if instrument in target_set else "SELL")
         reference_price = _reference_price(instrument, close)
@@ -108,8 +112,15 @@ def generate_manual_orders(
                 "current_shares": current_shares,
                 "target_shares": target_shares,
                 "order_shares": order_shares,
+                "reference_price_date": str(reference_date.date()),
                 "reference_price": reference_price,
-                "note": _order_note(current_shares, reference_price, is_executable, block_reasons),
+                "note": _order_note(
+                    current_shares,
+                    reference_price,
+                    is_executable,
+                    block_reasons,
+                    reference_from_signal_date=reference_from_signal_date,
+                ),
             }
         )
     return pd.DataFrame(rows)
@@ -135,7 +146,9 @@ def _current_share_map(current_holdings: pd.DataFrame) -> dict[str, float | None
         return {}
     result: dict[str, float | None] = {}
     for _, row in current_holdings.iterrows():
-        instrument = str(row["instrument"])
+        instrument = _normalize_instrument(row["instrument"])
+        if not instrument:
+            continue
         shares = row.get("shares")
         result[instrument] = None if pd.isna(shares) else float(shares)
     return result
@@ -144,7 +157,12 @@ def _current_share_map(current_holdings: pd.DataFrame) -> dict[str, float | None
 def _signal_action_map(signal_df: pd.DataFrame) -> dict[str, str]:
     if signal_df.empty or "instrument" not in signal_df.columns or "action" not in signal_df.columns:
         return {}
-    return {str(row["instrument"]): str(row["action"]).upper() for _, row in signal_df.iterrows()}
+    result: dict[str, str] = {}
+    for _, row in signal_df.iterrows():
+        instrument = _normalize_instrument(row["instrument"])
+        if instrument:
+            result[instrument] = str(row["action"]).upper()
+    return result
 
 
 def _target_weight(target_holdings: list[str], account: AccountState, config: dict) -> float:
@@ -160,15 +178,23 @@ def _target_weight(target_holdings: list[str], account: AccountState, config: di
 
 
 def _price_row(price_df: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Series:
-    if price_df.empty or date not in price_df.index:
+    if price_df.empty:
         return pd.Series(dtype=float)
+    target = pd.Timestamp(date).normalize()
+    normalized_index = pd.DatetimeIndex(pd.to_datetime(price_df.index).normalize())
+    matches = normalized_index == target
+    if not matches.any():
+        return pd.Series(dtype=float)
+    row_key = price_df.index[matches][0]
     if isinstance(price_df.columns, pd.MultiIndex):
         if field not in price_df.columns.get_level_values(0):
             return pd.Series(dtype=float)
-        row = price_df.xs(field, level=0, axis=1).loc[date]
+        row = price_df.xs(field, level=0, axis=1).loc[row_key]
     else:
-        row = price_df.loc[date]
-    row.index = row.index.astype(str)
+        row = price_df.loc[row_key]
+    row.index = [_normalize_instrument(value) for value in row.index]
+    row = row[row.index != ""]
+    row = row[~row.index.duplicated(keep="last")]
     return row.astype(float)
 
 
@@ -199,12 +225,61 @@ def _order_note(
     reference_price: float | None,
     is_executable: bool,
     block_reasons: list[str] | None,
+    reference_from_signal_date: bool = False,
 ) -> str:
     notes: list[str] = []
     if not is_executable:
         notes.append("blocked:" + ",".join(block_reasons or ["quality_gate_failed"]))
+    if reference_from_signal_date:
+        notes.append("reference_price_from_signal_date")
     if current_shares is None:
         notes.append("current_shares_missing")
     if reference_price is None:
         notes.append("reference_price_missing")
     return ";".join(notes)
+
+
+def _reference_price_date(price_df: pd.DataFrame, signal_date: str, intended_trade_date: str | None) -> pd.Timestamp:
+    signal_ts = pd.Timestamp(signal_date).normalize()
+    if intended_trade_date:
+        intended_ts = pd.Timestamp(intended_trade_date).normalize()
+        if _has_price_date(price_df, intended_ts):
+            return intended_ts
+    return signal_ts
+
+
+def _reference_from_signal_date(
+    signal_date: str,
+    intended_trade_date: str | None,
+    reference_date: pd.Timestamp,
+) -> bool:
+    if not intended_trade_date:
+        return False
+    intended_ts = pd.Timestamp(intended_trade_date).normalize()
+    signal_ts = pd.Timestamp(signal_date).normalize()
+    return intended_ts != signal_ts and pd.Timestamp(reference_date).normalize() == signal_ts
+
+
+def _has_price_date(price_df: pd.DataFrame, date: pd.Timestamp) -> bool:
+    if price_df.empty:
+        return False
+    normalized_index = pd.DatetimeIndex(pd.to_datetime(price_df.index).normalize())
+    return bool((normalized_index == pd.Timestamp(date).normalize()).any())
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _normalize_instruments(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        instrument = _normalize_instrument(value)
+        if not instrument or instrument in seen:
+            continue
+        result.append(instrument)
+        seen.add(instrument)
+    return result

@@ -242,7 +242,11 @@ def main() -> None:
             factors=factors,
         )
         output_date = _signal_output_date(signal_df, signal_date_arg)
-        intended = next_trade_date(output_date, price_df=prices) or next_business_day(output_date)
+        intended = next_trade_date(output_date, price_df=prices) or next_business_day(
+            output_date,
+            config=selected_config,
+            price_df=prices,
+        )
         intended_text = str(pd.Timestamp(intended).date())
         block_reasons = []
         if not data_gate:
