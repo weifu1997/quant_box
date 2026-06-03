@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
 from src.trading_calendar import next_business_day, resolve_target_date
 
 
@@ -77,8 +79,29 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(resolution.target_date, "2024-02-08")
         self.assertEqual(resolution.calendar_source, "a_trade_calendar")
 
+    def test_auto_target_date_falls_back_to_a_trade_calendar_when_tushare_fails(self) -> None:
+        with patch("requests.post", side_effect=RuntimeError("bad proxy")), patch(
+            "src.trading_calendar._a_trade_calendar",
+            return_value=pd.DatetimeIndex(pd.to_datetime(["2024-01-02", "2024-01-03"])),
+        ):
+            resolution = resolve_target_date(
+                "auto",
+                config=_config(http_url="http://example.test"),
+                now=datetime(2024, 1, 3, 20, 1),
+            )
+
+        self.assertEqual(resolution.target_date, "2024-01-03")
+        self.assertEqual(resolution.calendar_source, "a_trade_calendar")
+        self.assertIn("tushare_trade_cal_unavailable", resolution.calendar_warnings)
+
     def test_next_business_day_uses_a_share_trade_calendar(self) -> None:
         self.assertEqual(str(next_business_day("2024-02-08").date()), "2024-02-19")
+
+    def test_next_business_day_rejects_missing_or_invalid_date(self) -> None:
+        with self.assertRaisesRegex(ValueError, "date is required"):
+            next_business_day(None)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Invalid date"):
+            next_business_day("not-a-date")
 
     def test_next_business_day_uses_configured_calendar_when_library_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

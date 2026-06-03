@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +10,8 @@ from src.factor_calculator import load_or_compute_factors
 from src.scoring import build_latest_strategy_scores
 from src.strategy import select_stocks
 from src.trading_calendar import resolve_target_date_value
+
+logger = logging.getLogger(__name__)
 
 
 def read_previous_holdings(path: str | Path | None = None) -> list[str]:
@@ -45,16 +48,13 @@ def generate_signal(
             end_date=factor_end_date,
             cache_file=factor_file or config["factors"]["cache_file"],
         )
-    score_date = "latest" if use_latest_date else factor_end_date
+    score_date = "latest" if use_latest_date else _effective_signal_date(factors, factor_end_date)
     scores = build_latest_strategy_scores(factors, config, signal_date=score_date)
     latest_date = pd.Timestamp(scores.index.get_level_values(0).max()).normalize()
     if use_latest_date:
         signal_date = latest_date.strftime("%Y-%m-%d")
     else:
-        signal_date = factor_end_date
-        requested_date = pd.Timestamp(factor_end_date).normalize()
-        if latest_date != requested_date:
-            raise ValueError(f"Factor cache latest date {latest_date.date()} does not match signal_date {requested_date.date()}.")
+        signal_date = str(pd.Timestamp(score_date).date())
     latest_scores = scores.xs(latest_date, level=0, drop_level=True)
     previous_holdings = previous_holdings if previous_holdings is not None else read_previous_holdings()
     holdings = select_stocks(
@@ -73,6 +73,29 @@ def generate_signal(
     for code in sorted(old_set - new_set):
         rows.append({"date": signal_date, "instrument": code, "action": "SELL"})
     return pd.DataFrame(rows), holdings
+
+
+def _effective_signal_date(factors: pd.DataFrame, requested_date: str) -> str:
+    requested_ts = pd.Timestamp(requested_date).normalize()
+    dates = _factor_dates(factors)
+    eligible = dates[dates <= requested_ts]
+    if eligible.empty:
+        raise ValueError(f"No factor cache date is available on or before requested signal_date {requested_ts.date()}.")
+    effective = pd.Timestamp(eligible.max()).normalize()
+    if effective != requested_ts:
+        logger.warning(
+            "Falling back signal date from %s to %s because factor cache has no rows for the requested date.",
+            requested_ts.date(),
+            effective.date(),
+        )
+    return str(effective.date())
+
+
+def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
+    if factors.empty or not isinstance(factors.index, pd.MultiIndex):
+        raise ValueError("factors must use MultiIndex: date/instrument.")
+    date_level = factors.index.names[0] or 0
+    return pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(date_level)).normalize()).unique().sort_values()
 
 
 def save_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str, config: dict | None = None) -> tuple[Path, Path]:

@@ -8,10 +8,31 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.factor_calculator import load_or_compute_factors
+import src.factor_calculator as factor_calculator
+from src.factor_calculator import _ensure_qlib_initialized, load_or_compute_factors
+
+
+class FakeQlib:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def init(self, provider_uri: str, region: str) -> None:
+        self.calls.append((provider_uri, region))
 
 
 class FactorCalculatorTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        factor_calculator._QLIB_INIT_STATE = None
+
+    def test_ensure_qlib_initialized_reuses_matching_provider_and_region(self) -> None:
+        fake = FakeQlib()
+        provider = Path("data/qlib_data")
+
+        _ensure_qlib_initialized(fake, provider, "cn")
+        _ensure_qlib_initialized(fake, provider, "cn")
+
+        self.assertEqual(fake.calls, [(str(provider), "cn")])
+
     def test_load_or_compute_factors_recomputes_when_price_panel_has_new_symbol(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

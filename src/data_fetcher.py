@@ -144,7 +144,8 @@ def fetch_daily_stock(
     start_date: str | datetime,
     end_date: str | datetime,
     client: TushareHttpClient | None = None,
-    retries: int = 3,
+    retries: int = 5,
+    retry_max_wait: float | None = None,
 ) -> pd.DataFrame:
     client = client or TushareHttpClient.from_config()
     last_error: Exception | None = None
@@ -162,7 +163,7 @@ def fetch_daily_stock(
         except (RuntimeError, ValueError) as exc:
             last_error = exc
             if attempt < retries:
-                wait_seconds = 2 ** (attempt - 1) + random.uniform(0, 1)
+                wait_seconds = _retry_wait_seconds(attempt, retry_max_wait)
                 logger.warning("Retrying %s daily data after error: %s", ts_code, exc)
                 time.sleep(wait_seconds)
     raise ValueError(f"{ts_code} daily data response is invalid after {retries} attempts: {last_error}") from last_error
@@ -173,7 +174,8 @@ def fetch_daily_stocks(
     start_date: str | datetime,
     end_date: str | datetime,
     client: TushareHttpClient | None = None,
-    retries: int = 3,
+    retries: int = 5,
+    retry_max_wait: float | None = None,
     batch_size: int = 100,
     window_days: int | None = None,
     skip_failed: bool = True,
@@ -186,7 +188,16 @@ def fetch_daily_stocks(
         failed_codes: list[str] = []
         for code in codes:
             try:
-                frames.append(fetch_daily_stock(code, start_date, end_date, client=client, retries=retries))
+                frames.append(
+                    fetch_daily_stock(
+                        code,
+                        start_date,
+                        end_date,
+                        client=client,
+                        retries=retries,
+                        retry_max_wait=retry_max_wait,
+                    )
+                )
             except (RuntimeError, ValueError) as exc:
                 if not skip_failed:
                     raise
@@ -209,6 +220,7 @@ def fetch_daily_stocks(
                 window_end,
                 client=client,
                 retries=retries,
+                retry_max_wait=retry_max_wait,
                 skip_failed=skip_failed,
             )
             failed_codes.update(window_df.attrs.get("failed_codes", []))
@@ -234,7 +246,8 @@ def _fetch_daily_stock_batch(
     start_date: str | datetime,
     end_date: str | datetime,
     client: TushareHttpClient,
-    retries: int = 3,
+    retries: int = 5,
+    retry_max_wait: float | None = None,
     skip_failed: bool = True,
 ) -> pd.DataFrame:
     params = {
@@ -269,7 +282,7 @@ def _fetch_daily_stock_batch(
             if skip_failed and _is_tushare_connection_error(exc):
                 break
             if attempt < retries:
-                wait_seconds = 2 ** (attempt - 1) + random.uniform(0, 1)
+                wait_seconds = _retry_wait_seconds(attempt, retry_max_wait)
                 logger.warning("Retrying %d-stock daily batch after error: %s", len(ts_codes), exc)
                 time.sleep(wait_seconds)
     logger.warning("Falling back to per-stock daily fetch for %d symbols after batch error: %s", len(ts_codes), last_error)
@@ -278,7 +291,16 @@ def _fetch_daily_stock_batch(
     fallback_retries = 1 if last_error is not None and _is_tushare_connection_error(last_error) else retries
     for code in ts_codes:
         try:
-            frames.append(fetch_daily_stock(code, start_date, end_date, client=client, retries=fallback_retries))
+            frames.append(
+                fetch_daily_stock(
+                    code,
+                    start_date,
+                    end_date,
+                    client=client,
+                    retries=fallback_retries,
+                    retry_max_wait=retry_max_wait,
+                )
+            )
         except (RuntimeError, ValueError) as exc:
             if not skip_failed:
                 raise
@@ -291,6 +313,13 @@ def _fetch_daily_stock_batch(
 
 def _is_tushare_connection_error(exc: Exception) -> bool:
     return "Failed to connect to tushare HTTP proxy" in str(exc)
+
+
+def _retry_wait_seconds(attempt: int, retry_max_wait: float | None = None) -> float:
+    wait_seconds = 2 ** (attempt - 1) + random.uniform(0, 1)
+    if retry_max_wait is None:
+        return wait_seconds
+    return min(wait_seconds, max(float(retry_max_wait), 0.0))
 
 
 def _fetch_adj_factor_batch(
@@ -633,7 +662,9 @@ def update_daily_data(
     window_days = int(data_cfg.get("daily_window_days", 500))
     max_new_symbols = data_cfg.get("max_new_symbols_per_run")
     max_new_symbols = int(max_new_symbols) if max_new_symbols is not None else None
-    retries = int(data_cfg.get("retries", 3))
+    retries = int(data_cfg.get("retries", 5))
+    retry_max_wait = data_cfg.get("retry_max_wait", 30)
+    retry_max_wait = float(retry_max_wait) if retry_max_wait is not None else None
 
     written: dict[str, Path] = {}
     failed: dict[str, str] = {}
@@ -658,6 +689,7 @@ def update_daily_data(
                 end,
                 client=client,
                 retries=retries,
+                retry_max_wait=retry_max_wait,
                 batch_size=batch_size,
                 window_days=window_days,
                 skip_failed=True,

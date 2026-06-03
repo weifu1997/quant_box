@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.data_fetcher import (
     DAILY_FIELDS,
+    fetch_daily_stock,
     fetch_daily_stocks,
     fetch_stock_universe,
     filter_universe_frame,
@@ -79,7 +80,23 @@ class EmptyTushareClient(FakeTushareClient):
         raise AssertionError(f"Unexpected API call: {api_name}")
 
 
+class FailingTushareClient(FakeTushareClient):
+    def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        self.calls.append((api_name, (params or {}).copy(), fields))
+        raise RuntimeError("limited")
+
+
 class DataFetcherTests(unittest.TestCase):
+    def test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait(self) -> None:
+        client = FailingTushareClient()
+
+        with patch("src.data_fetcher.random.uniform", return_value=0.0), patch("src.data_fetcher.time.sleep") as sleep:
+            with self.assertRaises(ValueError):
+                fetch_daily_stock("000001.SZ", "2024-01-01", "2024-01-03", client=client, retry_max_wait=1.5)
+
+        self.assertEqual(len(client.calls), 5)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1.0, 1.5, 1.5, 1.5])
+
     def test_hs300_universe_uses_hs300_constituents_not_mainboard_file(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

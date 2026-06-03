@@ -4,10 +4,38 @@ import unittest
 
 import pandas as pd
 
-from src.backtest import run_backtest
+from src.backtest import _lot_size, _max_drawdown_duration, calculate_metrics, run_backtest
 
 
 class BacktestTests(unittest.TestCase):
+    def test_calculate_metrics_turnover_ignores_blocked_sells(self) -> None:
+        equity = pd.Series([100000.0, 100100.0, 100200.0], index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]))
+        trades = pd.DataFrame(
+            [
+                {"side": "SELL", "status": "blocked"},
+                {"side": "SELL", "status": "filled"},
+                {"side": "SELL", "status": "partial"},
+                {"side": "SELL", "status": "risk_exit"},
+                {"side": "BUY", "status": "filled"},
+            ]
+        )
+
+        metrics = calculate_metrics(equity, trades, {"annual_trading_days": 252, "top_n": 1})
+
+        self.assertEqual(metrics["turnover_count"], 3.0)
+
+    def test_max_drawdown_duration_matches_longest_underwater_run(self) -> None:
+        equity = pd.Series([100.0, 90.0, 95.0, 101.0, 99.0, 98.0, 102.0])
+
+        self.assertEqual(_max_drawdown_duration(equity), 2)
+
+    def test_lot_size_keeps_non_star_boards_at_default_lot(self) -> None:
+        config = {"lot_size": 100, "star_market_lot_size": 200}
+
+        self.assertEqual(_lot_size("688001.SH", config), 200)
+        self.assertEqual(_lot_size("300001.SZ", config), 100)
+        self.assertEqual(_lot_size("830001.BJ", config), 100)
+
     def test_run_backtest_produces_equity_curve(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates, ["A", "B"]], names=["datetime", "instrument"])

@@ -20,6 +20,7 @@ def composite_factor(
     factor_weights: pd.Series | dict[str, float] | None = None,
     factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
     factor_directions: pd.Series | dict[str, float] | None = None,
+    min_obs: int = 5,
 ) -> pd.Series:
     if factor_df.empty:
         raise ValueError("factor_df is empty.")
@@ -33,7 +34,7 @@ def composite_factor(
     if numeric.empty:
         raise ValueError(f"No factor columns matched factor_group='{method}'.")
 
-    clean = _cross_sectional_zscore(numeric)
+    clean = _cross_sectional_zscore(numeric, min_obs=min_obs)
     if factor_directions is not None:
         directions = pd.Series(factor_directions, dtype=float)
         common = [col for col in clean.columns if col in directions.index]

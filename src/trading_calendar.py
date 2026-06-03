@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, time, timedelta
 import logging
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -29,8 +29,9 @@ class TargetDateResolution:
     now: str
     calendar_source: str
     reason: str
+    calendar_warnings: list[str]
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -99,9 +100,10 @@ def resolve_target_date(
             now=now_dt.isoformat(timespec="seconds"),
             calendar_source="fixed",
             reason="fixed_end_date",
+            calendar_warnings=[],
         )
 
-    trade_calendar, source = _target_trade_calendar(
+    trade_calendar, source, calendar_warnings = _target_trade_calendar(
         cfg,
         now_dt=now_dt,
         calendar=calendar,
@@ -136,6 +138,7 @@ def resolve_target_date(
         now=now_dt.isoformat(timespec="seconds"),
         calendar_source=source,
         reason=reason,
+        calendar_warnings=calendar_warnings,
     )
 
 
@@ -162,7 +165,7 @@ def next_business_day(
     price_file: str | Path | None = None,
     strict: bool = False,
 ) -> pd.Timestamp:
-    signal_ts = pd.Timestamp(date).normalize()
+    signal_ts = _required_date(date)
     explicit = _normalize_calendar(calendar)
     next_date = _next_from_calendar(explicit, signal_ts)
     if next_date is not None:
@@ -229,29 +232,36 @@ def _target_trade_calendar(
     calendar: Iterable[str | datetime | pd.Timestamp] | pd.DatetimeIndex | None,
     price_df: pd.DataFrame | None,
     price_file: str | Path | None,
-) -> tuple[pd.DatetimeIndex, str]:
+) -> tuple[pd.DatetimeIndex, str, list[str]]:
+    warnings: list[str] = []
     explicit = _normalize_calendar(calendar)
     if not explicit.empty:
-        return explicit, "explicit"
+        return explicit, "explicit", warnings
+    if calendar is not None:
+        warnings.append("explicit_calendar_unavailable")
 
     remote = _tushare_trade_calendar(config, now_dt)
     if not remote.empty:
-        return remote, "tushare_trade_cal"
+        return remote, "tushare_trade_cal", warnings
+    warnings.append("tushare_trade_cal_unavailable")
 
     library_calendar = _a_trade_calendar(config, now_dt)
     if not library_calendar.empty:
-        return library_calendar, "a_trade_calendar"
+        return library_calendar, "a_trade_calendar", warnings
+    warnings.append("a_trade_calendar_unavailable")
 
     file_calendar, source = _configured_file_calendar(config)
     if not file_calendar.empty:
-        return file_calendar, source
+        return file_calendar, source, warnings
+    warnings.append("calendar_file_unavailable")
 
     configured_price_file = price_file or config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet")
     prices = price_calendar(price_df=price_df, price_file=configured_price_file)
     if not prices.empty:
-        return prices, "price_calendar"
+        return prices, "price_calendar", warnings
 
-    return pd.DatetimeIndex([]), ""
+    warnings.append("price_calendar_unavailable")
+    return pd.DatetimeIndex([]), "", warnings
 
 
 def _normalize_calendar(calendar: Iterable[str | datetime | pd.Timestamp] | pd.DatetimeIndex | None) -> pd.DatetimeIndex:
@@ -274,6 +284,18 @@ def _next_from_calendar(calendar: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Ti
     if pos >= len(calendar):
         return None
     return pd.Timestamp(calendar[pos]).normalize()
+
+
+def _required_date(date: str | pd.Timestamp | None) -> pd.Timestamp:
+    if date is None:
+        raise ValueError("date is required")
+    try:
+        ts = pd.Timestamp(date)
+    except Exception as exc:
+        raise ValueError(f"Invalid date: {date!r}") from exc
+    if pd.isna(ts):
+        raise ValueError("date is required")
+    return ts.normalize()
 
 
 def _configured_file_calendar(config: dict) -> tuple[pd.DatetimeIndex, str]:

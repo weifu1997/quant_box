@@ -21,7 +21,8 @@ data:
   update_chunk_size: 20
   update_sleep_seconds: 90
   update_progress_file: "outputs/data_update_progress.json"
-  retries: 3
+  retries: 5
+  retry_max_wait: 30
   exclude_st: true
   st_calendar_file: null
 
@@ -51,6 +52,7 @@ strategy:
   rank_buffer: 10
   factor_group: "ic_weighted"
   rebalance_freq: "weekly"
+  min_cross_section_obs: 5
 
 backtest:
   initial_capital: 1000000

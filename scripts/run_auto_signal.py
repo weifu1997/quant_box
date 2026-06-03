@@ -54,6 +54,11 @@ def main() -> None:
     parser.add_argument("--allow-unhealthy", action="store_true", help="Continue even if data health checks fail.")
     parser.add_argument("--allow-low-quality", action="store_true", help="Continue even if selected parameters fail quality gates.")
     parser.add_argument("--no-archive", action="store_true", help="Do not copy run artifacts into outputs/history.")
+    parser.add_argument(
+        "--promote-candidate",
+        metavar="YYYY-MM-DD",
+        help="Promote candidate_signal_DATE.csv and candidate_holdings_DATE.csv to official signal/latest holdings, then exit.",
+    )
     parser.add_argument("--start-date", default=base_config["data"]["start_date"])
     parser.add_argument("--end-date", default=base_config["data"]["end_date"])
     parser.add_argument("--date", default="latest", help="Signal date, YYYY-MM-DD, or latest.")
@@ -73,12 +78,18 @@ def main() -> None:
     args = parser.parse_args()
 
     config = deepcopy(base_config)
+    out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if args.promote_candidate:
+        signal_path, holdings_path = _promote_candidate(args.promote_candidate, config, out_dir)
+        logger.info("Promoted candidate signal to %s", signal_path)
+        logger.info("Promoted candidate holdings to %s", holdings_path)
+        return
+
     config["data"]["start_date"] = args.start_date
     target_resolution = resolve_target_date(args.end_date, config=config)
     end_date = target_resolution.target_date
     config["data"]["end_date"] = end_date
-    out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
-    out_dir.mkdir(parents=True, exist_ok=True)
     status = _new_status(target_resolution.to_dict())
     _write_status(out_dir, status)
     artifacts: list[Path] = []
@@ -379,9 +390,29 @@ def _save_candidate_signal(signal_df: pd.DataFrame, holdings: list[str], signal_
     return signal_path, holdings_path
 
 
+def _promote_candidate(date_arg: str, config: dict, out_dir: Path) -> tuple[Path, Path]:
+    try:
+        signal_date = str(pd.Timestamp(date_arg).date())
+    except Exception as exc:
+        raise ValueError(f"Invalid --promote-candidate date: {date_arg!r}. Expected YYYY-MM-DD.") from exc
+    signal_path = out_dir / f"candidate_signal_{signal_date}.csv"
+    holdings_path = out_dir / f"candidate_holdings_{signal_date}.csv"
+    if not signal_path.exists():
+        raise FileNotFoundError(f"Candidate signal file not found: {signal_path}")
+    if not holdings_path.exists():
+        raise FileNotFoundError(f"Candidate holdings file not found: {holdings_path}")
+    signal_df = pd.read_csv(signal_path)
+    holdings_df = pd.read_csv(holdings_path)
+    col = "instrument" if "instrument" in holdings_df.columns else "ticker"
+    if col not in holdings_df.columns:
+        raise ValueError(f"Candidate holdings file must contain instrument or ticker column: {holdings_path}")
+    holdings = holdings_df[col].dropna().astype(str).tolist()
+    return save_signal(signal_df, holdings, signal_date, config=config)
+
+
 def _skipped_quality(quality_config: dict) -> ParameterQualityReport:
     return ParameterQualityReport(
-        is_acceptable=True,
+        is_acceptable=False,
         issues=["parameter_validation_skipped"],
         windows=0,
         positive_return_rate=0.0,

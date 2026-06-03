@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 from src.trading_calendar import resolve_target_date_value
+
+logger = logging.getLogger(__name__)
+_QLIB_INIT_STATE: tuple[str, str] | None = None
 
 
 def compute_alpha158_factors(
@@ -29,7 +33,7 @@ def compute_alpha158_factors(
     region = qlib_cfg.get("region", "cn")
     instruments = instruments or qlib_cfg.get("instruments", "csi300")
 
-    qlib.init(provider_uri=str(provider), region=region)
+    _ensure_qlib_initialized(qlib, provider, region)
     handler = Alpha158(
         instruments=instruments,
         start_time=start_date,
@@ -42,6 +46,28 @@ def compute_alpha158_factors(
     if not isinstance(factors.index, pd.MultiIndex):
         raise ValueError("Expected Alpha158 result to use a MultiIndex of datetime/instrument.")
     return factors.sort_index()
+
+
+def _ensure_qlib_initialized(qlib_module, provider: Path, region: str) -> None:
+    global _QLIB_INIT_STATE
+    state = (str(provider), str(region))
+    if _QLIB_INIT_STATE == state:
+        return
+    if _QLIB_INIT_STATE is not None and _QLIB_INIT_STATE != state:
+        logger.warning(
+            "Reinitializing qlib from provider=%s region=%s to provider=%s region=%s.",
+            _QLIB_INIT_STATE[0],
+            _QLIB_INIT_STATE[1],
+            state[0],
+            state[1],
+        )
+    try:
+        qlib_module.init(provider_uri=state[0], region=state[1])
+    except Exception as exc:
+        if "already" not in str(exc).lower() and "initialized" not in str(exc).lower():
+            raise
+        logger.warning("qlib appears to be already initialized; reusing existing global state: %s", exc)
+    _QLIB_INIT_STATE = state
 
 
 def load_or_compute_factors(

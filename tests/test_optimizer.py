@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from src.optimizer import _optimization_score
+import pandas as pd
+
+from src.optimizer import _optimization_score, run_walk_forward_grid_validation, run_walk_forward_optimization
 
 
 class OptimizerTests(unittest.TestCase):
@@ -14,6 +16,90 @@ class OptimizerTests(unittest.TestCase):
 
     def test_optimization_score_treats_missing_metrics_as_zero(self) -> None:
         self.assertEqual(_optimization_score({"sharpe": float("nan")}), 0.0)
+
+    def test_run_walk_forward_optimization_returns_out_of_sample_window(self) -> None:
+        factors, prices = _walk_forward_data()
+        grid = _small_grid()
+
+        result = run_walk_forward_optimization(
+            factors,
+            prices,
+            base_config=_base_backtest_config(),
+            start_date="2023-01-02",
+            end_date="2024-02-15",
+            grid=grid,
+            train_years=1,
+            test_months=1,
+            step_months=12,
+            use_rolling_ic=False,
+        )
+
+        self.assertFalse(result.empty)
+        self.assertIn("optimization_score", result.columns)
+        self.assertIn("test_start", result.columns)
+
+    def test_run_walk_forward_grid_validation_evaluates_all_grid_combinations(self) -> None:
+        factors, prices = _walk_forward_data()
+        grid = _small_grid()
+
+        result = run_walk_forward_grid_validation(
+            factors,
+            prices,
+            base_config=_base_backtest_config(),
+            start_date="2023-01-02",
+            end_date="2024-02-15",
+            grid=grid,
+            train_years=1,
+            test_months=1,
+            step_months=12,
+            use_rolling_ic=False,
+        )
+
+        self.assertFalse(result.empty)
+        self.assertEqual(len(result), 4)
+        self.assertEqual(set(result["top_n"]), {1, 2})
+        self.assertEqual(set(result["rebalance_freq"]), {"daily", "weekly"})
+
+
+def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    dates = pd.date_range("2023-01-02", periods=300, freq="B")
+    instruments = ["A", "B", "C", "D", "E"]
+    index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+    values = []
+    for day_idx, _date in enumerate(dates):
+        for inst_idx, _instrument in enumerate(instruments):
+            values.append(day_idx * 0.01 + inst_idx)
+    factors = pd.DataFrame({"ROC5": values}, index=index)
+    prices = pd.DataFrame(
+        {
+            instrument: [10.0 + inst_idx + day_idx * 0.01 for day_idx in range(len(dates))]
+            for inst_idx, instrument in enumerate(instruments)
+        },
+        index=dates,
+    )
+    return factors, prices
+
+
+def _small_grid() -> dict[str, list]:
+    return {
+        "factor_group": ["momentum"],
+        "top_n": [1, 2],
+        "max_turnover": [1],
+        "rank_buffer": [0],
+        "rebalance_freq": ["daily", "weekly"],
+    }
+
+
+def _base_backtest_config() -> dict:
+    return {
+        "initial_capital": 100000,
+        "commission": 0.0,
+        "stamp_tax": 0.0,
+        "top_n": 1,
+        "max_turnover": 1,
+        "rank_buffer": 0,
+        "annual_trading_days": 252,
+    }
 
 
 if __name__ == "__main__":

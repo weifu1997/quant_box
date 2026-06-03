@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -30,7 +31,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "update_chunk_size": 20,
         "update_sleep_seconds": 90,
         "update_progress_file": "outputs/data_update_progress.json",
-        "retries": 3,
+        "retries": 5,
+        "retry_max_wait": 30,
         "exclude_st": True,
         "st_calendar_file": None,
     },
@@ -48,7 +50,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "weights_cache_enabled": True,
         "weights_cache_file": "data/factors/rolling_ic_weights.pkl",
     },
-    "strategy": {"top_n": 7, "max_turnover": 1, "rank_buffer": 10, "factor_group": "ic_weighted", "rebalance_freq": "weekly"},
+    "strategy": {
+        "top_n": 7,
+        "max_turnover": 1,
+        "rank_buffer": 10,
+        "factor_group": "ic_weighted",
+        "rebalance_freq": "weekly",
+        "min_cross_section_obs": 5,
+    },
     "backtest": {
         "initial_capital": 1_000_000,
         "commission": 0.0003,
@@ -140,6 +149,6 @@ def _expand_env_values(value: Any) -> Any:
         return {key: _expand_env_values(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_expand_env_values(item) for item in value]
-    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-        return os.getenv(value[2:-1], "")
+    if isinstance(value, str):
+        return re.sub(r"\$\{([^}]+)\}", lambda match: os.getenv(match.group(1), ""), value)
     return value

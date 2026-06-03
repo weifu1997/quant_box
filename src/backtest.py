@@ -326,7 +326,7 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
     losses = returns[returns < 0]
     win_rate = float(len(wins) / len(returns)) if len(returns) else 0.0
     profit_loss_ratio = float(wins.mean() / abs(losses.mean())) if len(wins) and len(losses) else 0.0
-    sells = int((trades.get("side") == "SELL").sum()) if not trades.empty else 0
+    sells = _turnover_sell_count(trades)
     annual_turnover = float(sells / max(periods / annual_days, 1 / annual_days) / top_n * 2)
     commission_cost = _trade_cost_sum(trades, "commission_cost")
     tax_cost = _trade_cost_sum(trades, "tax_cost")
@@ -369,6 +369,16 @@ def _trade_cost_sum(trades: pd.DataFrame, column: str) -> float:
     if trades.empty or column not in trades.columns:
         return 0.0
     return float(pd.to_numeric(trades[column], errors="coerce").fillna(0.0).sum())
+
+
+def _turnover_sell_count(trades: pd.DataFrame) -> int:
+    if trades.empty or "side" not in trades.columns:
+        return 0
+    sell_mask = trades["side"].astype(str).str.upper() == "SELL"
+    if "status" not in trades.columns:
+        return int(sell_mask.sum())
+    executable = trades["status"].astype(str).str.lower().isin({"filled", "partial", "risk_exit"})
+    return int((sell_mask & executable).sum())
 
 
 def calculate_benchmark_metrics(equity_curve: pd.Series, benchmark_curve: pd.Series, config: dict) -> dict[str, float]:
@@ -534,7 +544,11 @@ def _lot_size(stock: str, config: dict) -> int:
     lot_map = config.get("lot_size_map", {})
     if stock in lot_map:
         return int(lot_map[stock])
-    if str(stock).lower().startswith(("688", "689")):
+    code = str(stock).split(".", 1)[0].upper()
+    for prefix, lot_size in lot_map.items():
+        if code.startswith(str(prefix).upper()):
+            return int(lot_size)
+    if code.startswith(("688", "689")):
         return int(config.get("star_market_lot_size", 200))
     return int(config.get("lot_size", LOT_SIZE))
 
@@ -602,13 +616,14 @@ def _blocked_trade(
 
 
 def _max_drawdown_duration(equity_curve: pd.Series) -> int:
+    if equity_curve.empty:
+        return 0
     running_max = equity_curve.cummax()
     underwater = equity_curve < running_max
-    longest = current = 0
-    for is_underwater in underwater:
-        current = current + 1 if is_underwater else 0
-        longest = max(longest, current)
-    return longest
+    if not bool(underwater.any()):
+        return 0
+    groups = (~underwater).cumsum()
+    return int(underwater.groupby(groups).size().max() - 1)
 
 
 def _execute_risk_exits(

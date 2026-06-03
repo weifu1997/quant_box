@@ -19,14 +19,15 @@ def build_strategy_scores(
 ) -> pd.Series:
     strategy_cfg = config.get("strategy", {})
     factor_group = strategy_cfg.get("factor_group", "momentum")
+    min_obs = int(strategy_cfg.get("min_cross_section_obs", 5))
     if factor_group != "ic_weighted":
-        return composite_factor(factors, method=factor_group)
+        return composite_factor(factors, method=factor_group, min_obs=min_obs)
 
     ic_cfg = config.get("ic", {})
     price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
     prices = price_df if price_df is not None else _load_ic_price_frame(price_path)
     dynamic_weights = _load_or_compute_dynamic_weights(factors, prices, ic_cfg)
-    return composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights)
+    return composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights, min_obs=min_obs)
 
 
 def build_latest_strategy_scores(
@@ -38,13 +39,14 @@ def build_latest_strategy_scores(
 ) -> pd.Series:
     strategy_cfg = config.get("strategy", {})
     factor_group = strategy_cfg.get("factor_group", "momentum")
+    min_obs = int(strategy_cfg.get("min_cross_section_obs", 5))
     target_date = _resolve_score_date(factors, signal_date)
     latest_factors = _slice_factor_date(factors, target_date)
     if latest_factors.empty:
         raise ValueError(f"No factor rows found for signal date {target_date.date()}.")
 
     if factor_group != "ic_weighted":
-        return composite_factor(latest_factors, method=factor_group)
+        return composite_factor(latest_factors, method=factor_group, min_obs=min_obs)
 
     ic_cfg = config.get("ic", {})
     price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
@@ -52,7 +54,7 @@ def build_latest_strategy_scores(
     weights = _latest_ic_weights(factors, prices, ic_cfg, target_date)
     if weights.empty:
         raise ValueError(f"No usable IC weights found for signal date {target_date.date()}.")
-    return composite_factor(latest_factors, method=factor_group, factor_weights=weights)
+    return composite_factor(latest_factors, method=factor_group, factor_weights=weights, min_obs=min_obs)
 
 
 def _load_ic_price_frame(path_value: str | Path) -> pd.DataFrame:

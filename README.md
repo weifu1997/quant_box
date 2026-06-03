@@ -97,7 +97,7 @@ setx TUSHARE_TOKEN "你的token"
 | --- | --- |
 | `00_安装依赖环境.bat` | 新电脑首次安装 `.venv` 和依赖 |
 | `01_检查Tushare配置.bat` | 检查 Tushare HTTP 代理配置是否可读取 |
-| `02_自动调参并生成信号.bat` | 日常主入口：更新数据、转换、重算因子、自动选参、回测并生成最新信号 |
+| `02_快速更新并生成信号.bat` | 日常快速入口：更新数据、转换、重算因子，跳过重调参与完整回测并生成最新信号 |
 | `03_运行测试.bat` | 运行自动化测试 |
 | `04_补齐股票数据_持续.bat` | 分步工具：持续补齐缺失主板股票日线数据 |
 | `05_查看补齐进度.bat` | 分步工具：查看本地 raw CSV 数量和补齐进度 JSON |
@@ -111,8 +111,10 @@ setx TUSHARE_TOKEN "你的token"
 最常用的是：
 
 ```text
-02_自动调参并生成信号.bat
+02_快速更新并生成信号.bat
 ```
+
+旧入口 `02_自动调参并生成信号.bat` 会转发到新的快速入口，避免旧习惯失效。
 
 如果代码更新后或运行异常，再双击 `03_运行测试.bat`。如果需要排查某一步，再使用 `04` 到 `10` 的分步工具。
 
@@ -183,13 +185,15 @@ Get-Content outputs\data_update_progress.json
 # 如需写入正式 signal_*.csv 和 latest_holdings.csv，加 --official
 ```
 
-完整一键流程：
+日常快速一键流程：
 
 ```text
-02_自动调参并生成信号.bat
+02_快速更新并生成信号.bat
 ```
 
-注意：自动流程会先更新已有股票并补齐缺失股票，再转换数据、重算因子、自动选参、回测和生成信号。如果当前缺失股票很多，这一步会耗时较久。
+注意：快速流程会先更新已有股票并补齐缺失股票，再转换数据、重算因子和生成信号；它会显式跳过 walk-forward 重调参与完整回测。如果需要重调参和回测，先运行 `08_参数优化.bat` 和 `09_运行回测.bat`，或直接用命令行去掉 `--skip-optimize --skip-backtest`。
+
+`02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 15 --sleep-seconds 10`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
 
 自动流程会先判断信号是否可执行：
 
@@ -258,6 +262,7 @@ outputs/candidate_signal_YYYY-MM-DD.csv 门槛未通过时的候选信号
 outputs/signal_YYYY-MM-DD.csv          每日信号
 outputs/latest_holdings.csv            最新持仓
 outputs/data_update_progress.json      数据补齐进度
+data/raw/failed_fetches.csv             本轮补数据失败的股票及原因
 outputs/history/YYYY-MM-DD/            每次自动运行的归档快照
 ```
 
@@ -316,7 +321,7 @@ outputs/
 
 ```text
 00_安装依赖环境.bat
-02_自动调参并生成信号.bat
+02_快速更新并生成信号.bat
 ```
 
 ## 注意事项

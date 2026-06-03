@@ -11,6 +11,19 @@ from src.scoring import build_latest_strategy_scores, build_strategy_scores
 
 
 class ScoringTests(unittest.TestCase):
+    def test_build_strategy_scores_uses_configured_min_cross_section_obs(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"ROC5": [1.0, 2.0]}, index=index)
+        config = {"strategy": {"factor_group": "momentum", "min_cross_section_obs": 2}}
+
+        scores = build_strategy_scores(factors, config)
+
+        self.assertFalse(scores.isna().any())
+        self.assertGreater(scores.loc[(pd.Timestamp("2024-01-02"), "B")], scores.loc[(pd.Timestamp("2024-01-02"), "A")])
+
     def test_build_strategy_scores_uses_dynamic_ic_weights(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
