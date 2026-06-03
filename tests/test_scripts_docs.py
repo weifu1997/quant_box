@@ -39,11 +39,18 @@ class ScriptsDocsTests(unittest.TestCase):
     def test_legacy_run_all_bat_is_explicit_about_optimization(self) -> None:
         run_all = (ROOT / "run_all.bat").read_text(encoding="utf-8")
         legacy = (ROOT / "11_旧版全流程_补数据到信号.bat").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
+        self.assertIn("scripts\\run_auto_signal.py", run_all)
+        self.assertIn("--skip-optimize", run_all)
+        self.assertNotIn("--skip-backtest", run_all)
         self.assertIn("without walk-forward optimization", run_all)
-        self.assertIn("backtest current config", run_all)
+        self.assertIn("refresh existing and missing raw data", run_all)
+        self.assertIn("check data health", run_all)
         self.assertIn("latest candidate signal", run_all)
         self.assertIn("without walk-forward optimization", legacy)
+        self.assertIn("刷新已有和缺失股票", readme)
+        self.assertIn("data health", readme)
 
     def test_bat_files_are_utf8_and_use_crlf_line_endings(self) -> None:
         for path in BAT_FILES:

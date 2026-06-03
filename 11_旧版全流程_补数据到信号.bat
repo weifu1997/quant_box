@@ -3,12 +3,13 @@ setlocal
 
 cd /d "%~dp0"
 
-echo Running legacy full pipeline without walk-forward optimization:
-echo 1. update data
+echo Running automatic full pipeline without walk-forward optimization:
+echo 1. refresh existing and missing raw data
 echo 2. convert data
 echo 3. calculate factors
-echo 4. backtest current config
-echo 5. generate latest candidate signal
+echo 4. check data health
+echo 5. run backtest
+echo 6. generate latest candidate signal
 echo.
 
 call "%~dp0run_all.bat" %*

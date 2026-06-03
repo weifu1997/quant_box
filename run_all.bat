@@ -6,46 +6,35 @@ cd /d "%~dp0"
 set PYTHON=python
 if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.exe
 
-echo Running legacy full pipeline without walk-forward optimization:
-echo 1/5 update data
-echo 2/5 convert data
-echo 3/5 calculate factors
-echo 4/5 backtest current config
-echo 5/5 generate latest candidate signal
+set CHUNK_SIZE=15
+set SLEEP_SECONDS=10
+set HELP_REQUESTED=0
+for %%A in (%*) do (
+  if "%%~A"=="--help" set HELP_REQUESTED=1
+  if "%%~A"=="-h" set HELP_REQUESTED=1
+)
+
+echo Running automatic full pipeline without walk-forward optimization:
+echo 1/6 refresh existing and missing raw data
+echo 2/6 convert data
+echo 3/6 calculate factors
+echo 4/6 check data health
+echo 5/6 run backtest
+echo 6/6 generate latest candidate signal
+echo Chunk size override: %CHUNK_SIZE%
+echo Sleep seconds override: %SLEEP_SECONDS%
 echo.
 
-echo [1/5] Updating data...
-%PYTHON% scripts\run_update_data.py
-if errorlevel 1 goto failed
-
-echo.
-echo [2/5] Converting data...
-%PYTHON% scripts\run_convert_data.py
-if errorlevel 1 goto failed
-
-echo.
-echo [3/5] Calculating factors...
-%PYTHON% scripts\run_calc_factors.py --force
-if errorlevel 1 goto failed
-
-echo.
-echo [4/5] Running backtest...
-%PYTHON% scripts\run_backtest.py
-if errorlevel 1 goto failed
-
-echo.
-echo [5/5] Generating latest candidate signal...
-%PYTHON% scripts\run_daily_signal.py
-if errorlevel 1 goto failed
-
-echo.
-echo Legacy full pipeline finished.
-endlocal
-exit /b 0
-
-:failed
+"%PYTHON%" scripts\run_auto_signal.py --skip-optimize --chunk-size %CHUNK_SIZE% --sleep-seconds %SLEEP_SECONDS% %*
 set EXIT_CODE=%errorlevel%
+
 echo.
-echo Legacy full pipeline failed with exit code %EXIT_CODE%.
+if %HELP_REQUESTED% equ 1 (
+  echo Help displayed.
+) else if %EXIT_CODE% equ 0 (
+  echo Automatic full pipeline finished.
+) else (
+  echo Automatic full pipeline failed with exit code %EXIT_CODE%.
+)
 endlocal
 exit /b %EXIT_CODE%
