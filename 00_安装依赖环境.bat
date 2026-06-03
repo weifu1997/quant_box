@@ -26,6 +26,7 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 set PYTHON=%~dp0.venv\Scripts\python.exe
+set PIP_COMMON_ARGS=--disable-pip-version-check --timeout 60 --retries 10
 
 echo.
 echo Checking pip...
@@ -42,17 +43,17 @@ if errorlevel 1 (
 )
 
 echo.
-echo Upgrading pip...
-"%PYTHON%" -m pip install --upgrade pip
+echo Installing compatible pip version...
+"%PYTHON%" -m pip install %PIP_COMMON_ARGS% "pip<24.1"
 if errorlevel 1 (
-  echo Failed to upgrade pip.
+  echo Failed to install a compatible pip version.
   pause
   exit /b 1
 )
 
 echo.
 echo Installing project dependencies...
-"%PYTHON%" -m pip install -r requirements.txt
+"%PYTHON%" -m pip install %PIP_COMMON_ARGS% -r requirements.txt
 if errorlevel 1 (
   echo Failed to install dependencies.
   pause
