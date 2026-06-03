@@ -26,6 +26,7 @@ class FakeTushareClient:
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         codes = str(params.get("ts_code", "")).split(",")
+        trade_date = str(params.get("end_date", "20240102"))
         rows = []
         for code in codes:
             if not code:
@@ -33,7 +34,7 @@ class FakeTushareClient:
             rows.append(
                 {
                     "ts_code": code,
-                    "trade_date": "20240102",
+                    "trade_date": trade_date,
                     "open": 10.0,
                     "high": 11.0,
                     "low": 9.0,
@@ -62,11 +63,12 @@ class MissingAdjFactorClient(FakeTushareClient):
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         codes = str(params.get("ts_code", "")).split(",")
+        trade_date = str(params.get("end_date", "20240102"))
         rows = []
         for code in codes:
             if not code or code == self.missing_code:
                 continue
-            rows.append({"ts_code": code, "trade_date": "20240102", "adj_factor": 1.0})
+            rows.append({"ts_code": code, "trade_date": trade_date, "adj_factor": 1.0})
         return pd.DataFrame(rows, columns=["ts_code", "trade_date", "adj_factor"])
 
 
@@ -377,9 +379,69 @@ class DataFetcherTests(unittest.TestCase):
             self.assertTrue((raw_dir / "600519.SH.csv").exists())
             self.assertFalse((raw_dir / "000002.SZ.csv").exists())
             self.assertEqual(int(progress["initial_existing"]), 1)
+            self.assertEqual(int(progress["initial_latest_symbols"]), 1)
             self.assertEqual(int(progress["pending_symbols"]), 2)
             self.assertEqual(int(progress["completed_symbols"]), 1)
             self.assertEqual(int(progress["remaining_symbols"]), 1)
+            self.assertEqual(int(progress["latest_symbols"]), 2)
+            self.assertAlmostEqual(float(progress["latest_coverage"]), 2 / 3)
+
+    def test_resumable_update_refreshes_stale_existing_symbols(self) -> None:
+        client = FakeTushareClient()
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "daily_batch_size": 100,
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 9.0,
+                        "high": 9.0,
+                        "low": 9.0,
+                        "close": 9.0,
+                        "vol": 100.0,
+                        "amount": 900.0,
+                        "adj_factor": 1.0,
+                    }
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.TushareHttpClient.from_config", return_value=client):
+                written = update_daily_data_resumable(
+                    stock_codes=["000001.SZ"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                )
+
+            progress = pd.read_json(progress_file, typ="series")
+            updated = pd.read_csv(raw_dir / "000001.SZ.csv", parse_dates=["trade_date"])
+
+            self.assertEqual(set(written), {"000001.SZ"})
+            self.assertEqual(updated["trade_date"].max(), pd.Timestamp("2024-01-03"))
+            self.assertEqual(int(progress["initial_existing"]), 1)
+            self.assertEqual(int(progress["initial_latest_symbols"]), 0)
+            self.assertEqual(int(progress["pending_symbols"]), 1)
+            self.assertEqual(int(progress["latest_symbols"]), 1)
+            self.assertEqual(int(progress["remaining_symbols"]), 0)
 
     def test_resumable_update_marks_error_when_symbol_is_not_written(self) -> None:
         client = EmptyTushareClient()
@@ -445,7 +507,9 @@ class DataFetcherTests(unittest.TestCase):
                 written = {}
                 for code in codes:
                     path = Path(raw_dir) / f"{code}.csv"
-                    path.write_text("", encoding="utf-8")
+                    pd.DataFrame({"ts_code": [code], "trade_date": [end_date], "close": [10.0]}).to_csv(
+                        path, index=False
+                    )
                     written[code] = path
                 return written
 
@@ -492,6 +556,10 @@ class DataFetcherTests(unittest.TestCase):
             def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None):
                 codes = list(stock_codes)
                 calls.append(codes)
+                for code in codes:
+                    pd.DataFrame({"ts_code": [code], "trade_date": [end_date], "close": [10.0]}).to_csv(
+                        Path(raw_dir) / f"{code}.csv", index=False
+                    )
                 return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
 
             with patch("src.data_fetcher.load_config", return_value=config), patch(

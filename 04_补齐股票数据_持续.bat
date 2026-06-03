@@ -20,7 +20,7 @@ set EXIT_CODE=%errorlevel%
 
 echo.
 if %EXIT_CODE% equ 0 (
-  echo Backfill command finished. Check outputs\data_update_progress.json for status.
+  echo Backfill command finished. Run step 05 to check latest coverage.
 ) else (
   echo Backfill command failed with exit code %EXIT_CODE%.
 )

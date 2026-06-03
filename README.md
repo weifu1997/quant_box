@@ -101,7 +101,7 @@ setx TUSHARE_TOKEN "你的token"
 | `02_自动调参并生成信号.bat` | 兼容旧入口：直接运行同一套快速流程 |
 | `03_运行测试.bat` | 运行自动化测试 |
 | `04_补齐股票数据_持续.bat` | 分步工具：持续补齐缺失主板股票日线数据 |
-| `05_查看补齐进度.bat` | 分步工具：查看本地 raw CSV 数量和补齐进度 JSON |
+| `05_查看补齐进度.bat` | 分步工具：查看 raw 数据是否补到目标日期、最新覆盖率和补齐进度 JSON |
 | `06_转换数据.bat` | 分步工具：将 `data/raw/*.csv` 转为 Qlib 数据和价格面板 |
 | `07_计算因子.bat` | 分步工具：计算或读取 Alpha158 因子缓存 |
 | `08_参数优化.bat` | 分步工具：运行 walk-forward 参数优化 |
@@ -156,16 +156,10 @@ run_all.bat                    自动全流程：刷新已有数据 + data healt
 .\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 10 --max-chunks 1
 ```
 
-查看本地 CSV 数量：
+查看 raw 数据最新覆盖率和补齐进度：
 
 ```powershell
-(Get-ChildItem data\raw -Filter *.csv).Count
-```
-
-查看进度：
-
-```powershell
-Get-Content outputs\data_update_progress.json
+.\.venv\Scripts\python.exe scripts\show_update_progress.py
 ```
 
 ## 数据处理与回测流程
@@ -333,6 +327,6 @@ outputs/
 
 - 本项目只生成手动交易信号，不负责自动下单。
 - 不要提交 `config/settings.local.yaml`、`config/account.yaml`、`config/current_holdings.csv`。
-- 如果数据补齐窗口长时间没有新增文件，先双击 `05_查看补齐进度.bat` 看 `current_symbol`、`last_error` 和 raw CSV 数量。
+- 如果数据补齐窗口长时间没有新增文件，先双击 `05_查看补齐进度.bat` 看 `latest_symbols`、`stale_or_missing_symbols`、`current_symbol` 和 `last_error`。
 - 如果 `auto_signal_report.json` 里的 `is_executable` 是 `false`，不要按候选信号交易，先看 `block_reasons`。
 - 大批量补齐数据是小时级任务，建议保持小批次可恢复模式运行。

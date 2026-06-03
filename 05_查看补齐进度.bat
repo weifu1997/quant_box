@@ -3,16 +3,10 @@ setlocal
 
 cd /d "%~dp0"
 
-echo Local raw CSV count:
-powershell -NoProfile -Command "(Get-ChildItem data\raw -Filter *.csv | Measure-Object).Count"
-echo.
+set PYTHON=python
+if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.exe
 
-echo Progress file:
-if exist outputs\data_update_progress.json (
-  type outputs\data_update_progress.json
-) else (
-  echo outputs\data_update_progress.json does not exist yet.
-)
+"%PYTHON%" scripts\show_update_progress.py
 
 echo.
 pause
