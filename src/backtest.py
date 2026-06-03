@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import weakref
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ from src.strategy import select_stocks
 
 
 LOT_SIZE = 100
+_PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str], dict[str, pd.DataFrame]]] = {}
 
 
 @dataclass
@@ -398,28 +400,58 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
 
 
 def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
-    prices = price_df.copy()
-    prices.index = pd.to_datetime(prices.index)
+    prices = price_df
+    normalized_index = pd.to_datetime(prices.index)
     if isinstance(prices.columns, pd.MultiIndex):
         if prices.columns.nlevels != 2:
             raise ValueError("price_df MultiIndex columns must be field/instrument.")
-        prices.columns = pd.MultiIndex.from_arrays(
+        normalized_columns = pd.MultiIndex.from_arrays(
             [
                 prices.columns.get_level_values(0).astype(str).str.lower(),
                 prices.columns.get_level_values(1).astype(str),
             ],
             names=["field", "instrument"],
         )
-        return prices.sort_index()
+        columns_need_normalization = (
+            not prices.columns.equals(normalized_columns)
+            or list(prices.columns.names) != ["field", "instrument"]
+        )
+        if not prices.index.equals(normalized_index) or columns_need_normalization:
+            prices = prices.copy(deep=False)
+            prices.index = normalized_index
+            prices.columns = normalized_columns
+        if not prices.index.is_monotonic_increasing:
+            return prices.sort_index()
+        return prices
 
+    prices = prices.copy(deep=False)
+    prices.index = normalized_index
     prices.columns = pd.MultiIndex.from_product([["close"], prices.columns.astype(str)], names=["field", "instrument"])
-    return prices.sort_index()
+    if not prices.index.is_monotonic_increasing:
+        return prices.sort_index()
+    return prices
 
 
 def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
-    if field not in prices.columns.get_level_values("field"):
-        return pd.DataFrame(index=prices.index)
-    return prices.xs(field, level="field", axis=1)
+    field = str(field).lower()
+    cache_key = id(prices)
+    cached = _PRICE_FIELD_CACHE.get(cache_key)
+    if cached is None or cached[0]() is not prices:
+        field_names = set(prices.columns.get_level_values("field"))
+        cache: dict[str, pd.DataFrame] = {}
+        _PRICE_FIELD_CACHE[cache_key] = (weakref.ref(prices), field_names, cache)
+    else:
+        _, field_names, cache = cached
+    if field in cache:
+        return cache[field]
+
+    if field not in field_names:
+        frame = pd.DataFrame(index=prices.index)
+    else:
+        frame = prices.xs(field, level="field", axis=1)
+    frame.attrs = {}
+    cache[field] = frame
+    return frame
 
 
 def _field_on_date(prices: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Series:

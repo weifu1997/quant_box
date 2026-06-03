@@ -49,12 +49,13 @@ def load_or_compute_factors(
     end_date: str,
     cache_file: str | Path | None = None,
     force: bool = False,
+    columns: list[str] | None = None,
 ) -> pd.DataFrame:
     config = load_config()
     end = resolve_target_date_value(end_date, config=config)
     path = resolve_path(cache_file or config["factors"]["cache_file"])
     if path.exists() and not force:
-        cached = pd.read_parquet(path)
+        cached = _read_factor_cache(path, columns=columns)
         if _factor_cache_matches_request(cached, start_date, end, config, cache_file=path):
             return cached
 
@@ -62,7 +63,38 @@ def load_or_compute_factors(
     factors = compute_alpha158_factors(start_date, end)
     factors.to_parquet(path)
     _write_factor_cache_meta(path, factors, start_date, end, config)
+    if columns is not None:
+        factors = factors[[column for column in columns if column in factors.columns]]
     return factors
+
+
+def factor_cache_columns(cache_file: str | Path | None = None) -> list[str]:
+    config = load_config()
+    path = resolve_path(cache_file or config["factors"]["cache_file"])
+    if not path.exists():
+        return []
+    try:
+        import pyarrow.parquet as pq
+
+        names = pq.ParquetFile(path).schema.names
+    except Exception:
+        try:
+            names = list(pd.read_parquet(path).columns)
+        except Exception:
+            return []
+    return [str(name) for name in names if str(name) not in {"datetime", "instrument"}]
+
+
+def _read_factor_cache(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
+    if columns is None:
+        return pd.read_parquet(path)
+    requested = [str(column) for column in columns]
+    parquet_columns = [*requested, "datetime", "instrument"]
+    try:
+        return pd.read_parquet(path, columns=parquet_columns)
+    except (KeyError, ValueError):
+        cached = pd.read_parquet(path)
+        return cached[[column for column in requested if column in cached.columns]]
 
 
 def _factor_cache_matches_request(

@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.strategy import composite_factor, generate_holdings_by_day, resample_signals, select_stocks
+from src.strategy import composite_factor, factor_columns_for_method, generate_holdings_by_day, resample_signals, select_stocks
 
 
 class StrategyTests(unittest.TestCase):
@@ -94,6 +94,66 @@ class StrategyTests(unittest.TestCase):
         scores = composite_factor(factors, method="momentum")
 
         self.assertTrue(pd.notna(scores.loc[(pd.Timestamp("2024-01-02"), "C")]))
+
+    def test_composite_factor_selects_group_columns_before_scoring(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame(
+            {
+                "STD5": [1, 2, 3, 4, 5],
+                "VOLUME0": [10, 9, 8, 7, 6],
+                "ROC5": [5, 4, 3, 2, 1],
+            },
+            index=index,
+        )
+
+        scores = composite_factor(factors, method="volatility")
+        expected = composite_factor(factors[["STD5"]], method="volatility")
+
+        pd.testing.assert_series_equal(scores, expected)
+
+    def test_composite_factor_supports_inverse_factor_group(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame(
+            {
+                "STD5": [1, 2, 3, 4, 5],
+                "ROC5": [5, 4, 3, 2, 1],
+            },
+            index=index,
+        )
+
+        high_scores = composite_factor(factors, method="volatility")
+        low_scores = composite_factor(factors, method="low_volatility")
+
+        pd.testing.assert_series_equal(low_scores, (high_scores * -1).rename("score"))
+        self.assertEqual(factor_columns_for_method(factors.columns, "low_volatility"), ["STD5"])
+
+    def test_composite_factor_supports_exact_single_factor_group(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame(
+            {
+                "STD5": [1, 2, 3, 4, 5],
+                "VSTD5": [5, 4, 3, 2, 1],
+                "ROC5": [1, 1, 1, 1, 1],
+            },
+            index=index,
+        )
+
+        scores = composite_factor(factors, method="factor:STD5")
+        expected = composite_factor(factors[["STD5"]], method="volatility")
+        inverse = composite_factor(factors, method="low_factor:STD5")
+
+        pd.testing.assert_series_equal(scores, expected)
+        pd.testing.assert_series_equal(inverse, (expected * -1).rename("score"))
+        self.assertEqual(factor_columns_for_method(factors.columns, "factor:STD5"), ["STD5"])
 
     def test_resample_signals_supports_monthly_with_pandas_me_alias(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-31", "2024-02-01", "2024-02-29"])

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from itertools import product
+import logging
 from typing import Iterable
 
 import pandas as pd
@@ -9,6 +11,9 @@ from src.backtest import run_backtest
 from src.factor_ic import calculate_factor_ic, calculate_rolling_ic, make_ic_weights, make_rolling_ic_weights, summarize_ic
 from src.scoring import build_strategy_scores
 from src.strategy import composite_factor, resample_signals
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_GRID = {
@@ -38,6 +43,7 @@ def run_parameter_grid(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     grid = grid or DEFAULT_GRID
     dynamic_weights = None
@@ -65,17 +71,28 @@ def run_parameter_grid(
         rebalance_freq = str(params.get("rebalance_freq", "daily"))
         cache_key = (factor_group, rebalance_freq)
         if cache_key not in score_cache:
+            logger.info("Building scores for factor_group=%s rebalance_freq=%s.", factor_group, rebalance_freq)
             weights = ic_weights if factor_group == "ic_weighted" else None
             dynamic = dynamic_weights if factor_group == "ic_weighted" else None
             scores = composite_factor(factor_df, method=factor_group, factor_weights=weights, factor_weights_dynamic=dynamic)
             score_cache[cache_key] = resample_signals(scores, rebalance_freq)
 
         bt_config = {**base_config, **params}
+        logger.info(
+            "Running optimization combo: factor_group=%s top_n=%s max_turnover=%s rank_buffer=%s rebalance_freq=%s.",
+            factor_group,
+            params.get("top_n"),
+            params.get("max_turnover"),
+            params.get("rank_buffer"),
+            rebalance_freq,
+        )
         result = run_backtest(score_cache[cache_key], price_df, start_date, end_date, bt_config)
-        rows.append({**params, **result.metrics, "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty)})
+        row = {**params, **result.metrics, "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty)}
+        rows.append(row)
+        if on_result is not None:
+            on_result(row, _sorted_results(rows))
 
-    result_df = pd.DataFrame(rows)
-    return result_df.sort_values(["optimization_score", "sharpe", "annual_return", "max_drawdown"], ascending=[False, False, False, False])
+    return _sorted_results(rows)
 
 
 def run_walk_forward_optimization(
@@ -98,6 +115,7 @@ def run_walk_forward_optimization(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     price_df = price_df.copy()
     price_df.index = pd.to_datetime(price_df.index)
@@ -184,17 +202,18 @@ def run_walk_forward_optimization(
             test_end.strftime("%Y-%m-%d"),
             {**base_config, **params},
         )
-        rows.append(
-            {
-                "train_start": train_start,
-                "train_end": train_end,
-                "test_start": test_start,
-                "test_end": test_end,
-                **params,
-                **result.metrics,
-                "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty),
-            }
-        )
+        row = {
+            "train_start": train_start,
+            "train_end": train_end,
+            "test_start": test_start,
+            "test_end": test_end,
+            **params,
+            **result.metrics,
+            "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty),
+        }
+        rows.append(row)
+        if on_result is not None:
+            on_result(row, pd.DataFrame(rows))
         train_start += pd.DateOffset(months=step_months)
 
     return pd.DataFrame(rows)
@@ -220,6 +239,7 @@ def run_walk_forward_grid_validation(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     """Evaluate every parameter combination on rolling out-of-sample windows."""
     price_df = price_df.copy()
@@ -249,6 +269,7 @@ def run_walk_forward_grid_validation(
         static_ic_weights = None
         dynamic_ic_weights = None
         if "ic_weighted" in set(grid.get("factor_group", [])):
+            logger.info("Preparing IC weights for validation window %s to %s.", test_start.date(), test_end.date())
             if use_rolling_ic:
                 rolling_ic = calculate_rolling_ic(train_factors, train_prices, window=ic_window, min_periods=ic_min_periods)
                 train_dynamic_weights = make_rolling_ic_weights(
@@ -276,6 +297,13 @@ def run_walk_forward_grid_validation(
             rebalance_freq = str(params.get("rebalance_freq", "daily"))
             cache_key = (factor_group, rebalance_freq)
             if cache_key not in score_cache:
+                logger.info(
+                    "Building validation scores for window %s to %s: factor_group=%s rebalance_freq=%s.",
+                    test_start.date(),
+                    test_end.date(),
+                    factor_group,
+                    rebalance_freq,
+                )
                 if factor_group == "ic_weighted":
                     scores = composite_factor(
                         test_factors,
@@ -294,17 +322,18 @@ def run_walk_forward_grid_validation(
                 test_end.strftime("%Y-%m-%d"),
                 {**base_config, **params},
             )
-            rows.append(
-                {
-                    "train_start": train_start,
-                    "train_end": train_end,
-                    "test_start": test_start,
-                    "test_end": test_end,
-                    **params,
-                    **result.metrics,
-                    "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty),
-                }
-            )
+            row = {
+                "train_start": train_start,
+                "train_end": train_end,
+                "test_start": test_start,
+                "test_end": test_end,
+                **params,
+                **result.metrics,
+                "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty),
+            }
+            rows.append(row)
+            if on_result is not None:
+                on_result(row, pd.DataFrame(rows))
         train_start += pd.DateOffset(months=step_months)
 
     return pd.DataFrame(rows)
@@ -332,6 +361,16 @@ def _optimization_score(metrics: dict, turnover_penalty: float = 0.02, cost_pena
     annual_turnover = _metric_float(metrics, "annual_turnover")
     annual_trade_cost_ratio = _metric_float(metrics, "annual_trade_cost_ratio")
     return sharpe - turnover_penalty * annual_turnover - cost_penalty * annual_trade_cost_ratio
+
+
+def _sorted_results(rows: list[dict[str, object]]) -> pd.DataFrame:
+    result_df = pd.DataFrame(rows)
+    if result_df.empty:
+        return result_df
+    sort_columns = [column for column in ["optimization_score", "sharpe", "annual_return", "max_drawdown"] if column in result_df.columns]
+    if not sort_columns:
+        return result_df
+    return result_df.sort_values(sort_columns, ascending=[False] * len(sort_columns)).reset_index(drop=True)
 
 
 def _metric_float(metrics: dict, key: str) -> float:

@@ -11,9 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.config_loader import load_config, resolve_path
-from src.factor_calculator import load_or_compute_factors
+from src.factor_calculator import factor_cache_columns, load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
 from src.optimizer import DEFAULT_GRID, run_parameter_grid, run_walk_forward_optimization
+from src.strategy import factor_columns_for_method
 from src.trading_calendar import resolve_target_date_value
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
@@ -55,9 +56,6 @@ def main() -> None:
     end_date = resolve_target_date_value(args.end_date, config=config)
     config["data"]["end_date"] = end_date
 
-    factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file)
-    prices = pd.read_parquet(resolve_path(args.price_file))
-
     grid = {
         **DEFAULT_GRID,
         "factor_group": _csv_values(args.factor_groups, str),
@@ -66,6 +64,17 @@ def main() -> None:
         "rank_buffer": _csv_values(args.rank_buffer, int),
         "rebalance_freq": _csv_values(args.rebalance_freq, str),
     }
+    factor_columns = _requested_factor_columns(args.factor_file, grid["factor_group"])
+    if factor_columns is None:
+        logger.info("Loading all factor columns.")
+    else:
+        logger.info("Loading %s factor columns for groups: %s", len(factor_columns), ",".join(grid["factor_group"]))
+    factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file, columns=factor_columns)
+    prices = pd.read_parquet(resolve_path(args.price_file))
+
+    output_path = resolve_path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    on_result = _progress_writer(output_path)
 
     ic_weights = None
     if "ic_weighted" in grid["factor_group"] and not args.walk_forward and not args.rolling_ic:
@@ -98,6 +107,7 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            on_result=on_result,
         )
     else:
         results = run_parameter_grid(
@@ -118,12 +128,53 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            on_result=on_result,
         )
-    output_path = resolve_path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(output_path, index=False, encoding="utf-8-sig")
     logger.info("Optimization results saved to %s", output_path)
     logger.info("Top results:\n%s", results.head(10).to_string(index=False))
+
+
+def _requested_factor_columns(factor_file: str, factor_groups: list[str]) -> list[str] | None:
+    groups = {group.strip().lower() for group in factor_groups}
+    if not groups or groups.intersection({"all", "ic_weighted"}):
+        return None
+    available_columns = factor_cache_columns(factor_file)
+    if not available_columns:
+        return None
+    requested: set[str] = set()
+    for group in groups:
+        requested.update(str(column) for column in factor_columns_for_method(available_columns, group))
+    return sorted(requested) if requested else None
+
+
+def _progress_writer(output_path: Path):
+    count = 0
+
+    def write_progress(row: dict[str, object], results: pd.DataFrame) -> None:
+        nonlocal count
+        count += 1
+        results.to_csv(output_path, index=False, encoding="utf-8-sig")
+        logger.info(
+            "Finished optimization row %s: factor_group=%s top_n=%s max_turnover=%s rank_buffer=%s rebalance_freq=%s annual_return=%.4f sharpe=%.4f",
+            count,
+            row.get("factor_group"),
+            row.get("top_n"),
+            row.get("max_turnover"),
+            row.get("rank_buffer"),
+            row.get("rebalance_freq"),
+            _number(row.get("annual_return")),
+            _number(row.get("sharpe")),
+        )
+
+    return write_progress
+
+
+def _number(value: object) -> float:
+    parsed = pd.to_numeric(value, errors="coerce")
+    if pd.isna(parsed):
+        return 0.0
+    return float(parsed)
 
 
 if __name__ == "__main__":

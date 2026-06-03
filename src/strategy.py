@@ -11,6 +11,7 @@ FACTOR_GROUP_KEYWORDS = {
     "volatility": ("std", "var", "volatility"),
     "volume": ("volume", "vol", "vwap", "amount"),
 }
+INVERSE_FACTOR_PREFIXES = ("low_", "inverse_", "short_")
 
 
 def composite_factor(
@@ -27,16 +28,20 @@ def composite_factor(
     if numeric.empty:
         raise ValueError("factor_df has no numeric factor columns.")
 
+    method, direction = _factor_method_parts(method)
+    numeric = _select_factor_columns(numeric, method, factor_weights, factor_weights_dynamic)
+    if numeric.empty:
+        raise ValueError(f"No factor columns matched factor_group='{method}'.")
+
     clean = _cross_sectional_zscore(numeric)
     if factor_directions is not None:
         directions = pd.Series(factor_directions, dtype=float)
         common = [col for col in clean.columns if col in directions.index]
         clean = clean.copy()
         clean[common] = clean[common].mul(directions.loc[common], axis=1)
-    method = method.lower()
     if method == "ic_weighted":
         if factor_weights_dynamic is not None:
-            return _dynamic_ic_weighted_score(clean, factor_weights_dynamic, factor_weights)
+            return (_dynamic_ic_weighted_score(clean, factor_weights_dynamic, factor_weights) * direction).rename("score")
         if factor_weights is None:
             raise ValueError("factor_weights is required when method='ic_weighted'.")
         weights = pd.Series(factor_weights, dtype=float)
@@ -46,17 +51,74 @@ def composite_factor(
         selected = clean[common]
         aligned_weights = weights.loc[common]
         score = selected.mul(aligned_weights, axis=1).sum(axis=1, min_count=len(common)) / aligned_weights.abs().sum()
-        return score.rename("score")
+        return (score * direction).rename("score")
 
+    return (_row_mean_with_min_count(clean) * direction).rename("score")
+
+
+def _select_factor_columns(
+    numeric: pd.DataFrame,
+    method: str,
+    factor_weights: pd.Series | dict[str, float] | None = None,
+    factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
+) -> pd.DataFrame:
+    selected_cols = factor_columns_for_method(numeric.columns, method, factor_weights, factor_weights_dynamic)
+    return numeric[selected_cols]
+
+
+def factor_columns_for_method(
+    columns: Iterable[object],
+    method: str,
+    factor_weights: pd.Series | dict[str, float] | None = None,
+    factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
+) -> list[object]:
+    method, _ = _factor_method_parts(method)
+    column_list = list(columns)
     if method == "all":
-        selected = clean
-    else:
-        keywords = FACTOR_GROUP_KEYWORDS.get(method, (method,))
-        selected_cols = [col for col in clean.columns if any(key in str(col).lower() for key in keywords)]
-        if not selected_cols:
-            raise ValueError(f"No factor columns matched factor_group='{method}'.")
-        selected = clean[selected_cols]
-    return _row_mean_with_min_count(selected).rename("score")
+        return column_list
+    if method == "ic_weighted":
+        weighted_cols = _weighted_factor_columns(factor_weights, factor_weights_dynamic)
+        if not weighted_cols:
+            return column_list
+        return [col for col in column_list if str(col) in weighted_cols]
+
+    exact_column = _exact_factor_column(method)
+    if exact_column is not None:
+        return [col for col in column_list if str(col).lower() == exact_column]
+
+    keywords = FACTOR_GROUP_KEYWORDS.get(method, (method,))
+    return [col for col in column_list if any(key in str(col).lower() for key in keywords)]
+
+
+def _exact_factor_column(method: str) -> str | None:
+    for prefix in ("factor:", "column:"):
+        if method.startswith(prefix):
+            name = method[len(prefix) :].strip().lower()
+            return name or None
+    return None
+
+
+def _factor_method_parts(method: str) -> tuple[str, float]:
+    method = str(method).strip().lower()
+    for prefix in INVERSE_FACTOR_PREFIXES:
+        if method.startswith(prefix):
+            return method[len(prefix) :], -1.0
+    return method, 1.0
+
+
+def _weighted_factor_columns(
+    factor_weights: pd.Series | dict[str, float] | None = None,
+    factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
+) -> set[str]:
+    columns: set[str] = set()
+    if factor_weights is not None:
+        weights = pd.Series(factor_weights, dtype=float)
+        columns.update(str(col) for col, value in weights.items() if value != 0)
+    if factor_weights_dynamic is not None:
+        for weights in factor_weights_dynamic.values():
+            series = pd.Series(weights, dtype=float)
+            columns.update(str(col) for col, value in series.items() if value != 0)
+    return columns
 
 
 def _dynamic_ic_weighted_score(
