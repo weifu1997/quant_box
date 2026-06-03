@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -16,6 +17,10 @@ from src.trading_calendar import _configured_file_calendar, resolve_target_date_
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Show resumable raw data update progress.")
+    parser.add_argument("--scan-raw", action="store_true", help="Scan raw CSV files to recompute latest-date coverage.")
+    args = parser.parse_args()
+
     config = load_config()
     data_cfg = config.get("data", {})
     progress_path = resolve_path(data_cfg.get("update_progress_file", "outputs/data_update_progress.json"))
@@ -27,14 +32,24 @@ def main() -> None:
     target_symbols = _target_symbols(config, target_end)
     raw_symbols = _raw_symbols(raw_dir)
     raw_target_symbols = raw_symbols & target_symbols if target_symbols else raw_symbols
-    latest_dates = _raw_latest_dates(raw_dir, raw_target_symbols)
-    latest_symbols = sum(1 for value in latest_dates.values() if value >= target_ts)
     target_count = len(target_symbols)
-    stale_or_missing = max(target_count - latest_symbols, 0)
-    latest_coverage = latest_symbols / target_count if target_count else 0.0
-    raw_latest = min(latest_dates.values()) if latest_dates else None
+    progress_freshness = _progress_freshness(progress, target_end)
+    if args.scan_raw or progress_freshness is None:
+        latest_dates = _raw_latest_dates(raw_dir, raw_target_symbols)
+        latest_symbols = sum(1 for value in latest_dates.values() if value >= target_ts)
+        stale_or_missing = max(target_count - latest_symbols, 0)
+        latest_coverage = latest_symbols / target_count if target_count else 0.0
+        raw_latest = _date_text(min(latest_dates.values()) if latest_dates else None)
+        freshness_source = "raw_scan"
+    else:
+        latest_symbols = int(progress_freshness["latest_symbols"])
+        stale_or_missing = int(progress_freshness["stale_or_missing_symbols"])
+        latest_coverage = float(progress_freshness["latest_coverage"])
+        raw_latest = "not_scanned"
+        freshness_source = "progress_file"
 
     print("Raw data freshness:")
+    print(f"  freshness_source: {freshness_source}")
     print(f"  target_end_date: {target_end}")
     print(f"  target_symbols: {target_count}")
     print(f"  raw_stock_files: {len(raw_symbols)}")
@@ -42,7 +57,7 @@ def main() -> None:
     print(f"  latest_symbols: {latest_symbols}")
     print(f"  stale_or_missing_symbols: {stale_or_missing}")
     print(f"  latest_coverage: {latest_coverage:.2%}")
-    print(f"  earliest_latest_date: {_date_text(raw_latest)}")
+    print(f"  earliest_latest_date: {raw_latest}")
     print()
 
     print(f"Progress file: {progress_path}")
@@ -80,6 +95,15 @@ def _load_progress(path: Path) -> dict[str, object] | None:
         print(f"Progress file parse error: {exc}")
         return None
     return value if isinstance(value, dict) else None
+
+
+def _progress_freshness(progress: dict[str, object] | None, target_end: str) -> dict[str, object] | None:
+    if not progress or str(progress.get("target_end_date", "")) != target_end:
+        return None
+    keys = ["latest_symbols", "stale_or_missing_symbols", "latest_coverage"]
+    if not all(key in progress for key in keys):
+        return None
+    return {key: progress[key] for key in keys}
 
 
 def _resolve_target_end(config: dict, progress: dict[str, object] | None, raw_dir: Path) -> str:

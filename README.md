@@ -100,7 +100,7 @@ setx TUSHARE_TOKEN "你的token"
 | `02_快速更新并生成信号.bat` | 日常快速入口：更新数据、转换、重算因子，跳过重调参与完整回测并生成最新信号 |
 | `02_自动调参并生成信号.bat` | 兼容旧入口：直接运行同一套快速流程 |
 | `03_运行测试.bat` | 运行自动化测试 |
-| `04_补齐股票数据_持续.bat` | 分步工具：持续补齐缺失主板股票日线数据 |
+| `04_补齐股票数据_持续.bat` | 分步工具：增量补齐缺失或过期的主板股票日线数据 |
 | `05_查看补齐进度.bat` | 分步工具：查看 raw 数据是否补到目标日期、最新覆盖率和补齐进度 JSON |
 | `06_转换数据.bat` | 分步工具：将 `data/raw/*.csv` 转为 Qlib 数据和价格面板 |
 | `07_计算因子.bat` | 分步工具：计算或读取 Alpha158 因子缓存 |
@@ -108,14 +108,15 @@ setx TUSHARE_TOKEN "你的token"
 | `09_运行回测.bat` | 分步工具：运行当前配置下的回测 |
 | `10_生成最新信号.bat` | 分步工具：基于最新因子生成候选手动交易信号；如需覆盖正式持仓，传入 `--official` |
 | `11_旧版全流程_补数据到信号.bat` | 兼容旧入口：调用 `run_all.bat`，自动刷新、校验、回测并生成候选信号 |
-| `run_all.bat` | 命令行自动全流程入口：刷新已有和缺失股票、转换、重算因子、data health、回测、候选信号；不含 walk-forward 参数优化 |
+| `12_全量重刷股票数据.bat` | 维护工具：从配置起始日或上市日全量重刷 raw 股票数据，慢于 `04`，仅在历史数据疑似损坏时使用 |
+| `run_all.bat` | 命令行自动全流程入口：刷新缺失和过期股票、转换、重算因子、data health、回测、候选信号；不含 walk-forward 参数优化 |
 
 最常用的三个入口：
 
 ```text
 02_快速更新并生成信号.bat      日常更新并生成信号
 03_运行测试.bat                只跑自动化测试
-run_all.bat                    自动全流程：刷新已有数据 + data health + 回测 + 候选信号
+run_all.bat                    自动全流程：刷新缺失和过期数据 + data health + 回测 + 候选信号
 04 -> 06 -> 07 -> 08 -> 09 -> 10  完整研究流程
 ```
 
@@ -134,26 +135,28 @@ run_all.bat                    自动全流程：刷新已有数据 + data healt
 默认参数：
 
 ```powershell
---chunk-size 15 --sleep-seconds 1
+--chunk-size 300 --sleep-seconds 1
 ```
 
 含义：
 
-- 每批补 15 只缺失股票
+- 每批补 300 只缺失或过期股票
 - 批间等待 1 秒
 - 自动记录进度到 `outputs/data_update_progress.json`
-- 中断后再次双击，会继续补缺失股票，不会从头开始
+- 中断后再次双击，会继续补缺失或过期股票，不会从头开始
+- `04` 是增量补齐，不是全量拉取；它会跳过已经补到目标交易日的股票
+- 如需从头重刷历史 raw 数据，双击 `12_全量重刷股票数据.bat`，或命令行增加 `--force-full`
 
 命令行等价写法：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 1
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 300 --sleep-seconds 1
 ```
 
 只跑一批确认状态：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 1 --max-chunks 1
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 300 --sleep-seconds 1 --max-chunks 1
 ```
 
 查看 raw 数据最新覆盖率和补齐进度：
@@ -161,6 +164,8 @@ run_all.bat                    自动全流程：刷新已有数据 + data healt
 ```powershell
 .\.venv\Scripts\python.exe scripts\show_update_progress.py
 ```
+
+默认会读取最近一次更新写入的 freshness 统计，速度更快；如需现场重新扫描 raw CSV，追加 `--scan-raw`。
 
 ## 数据处理与回测流程
 
@@ -179,9 +184,16 @@ run_all.bat                    自动全流程：刷新已有数据 + data healt
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_convert_data.py
 .\.venv\Scripts\python.exe scripts\run_calc_factors.py
+.\.venv\Scripts\python.exe scripts\run_optimize.py
 .\.venv\Scripts\python.exe scripts\run_backtest.py
 .\.venv\Scripts\python.exe scripts\run_daily_signal.py --date latest
 # 如需写入正式 signal_*.csv 和 latest_holdings.csv，加 --official
+```
+
+`08_参数优化.bat` 和 `scripts\run_optimize.py` 默认使用快速基线 walk-forward 网格：只跑 `momentum` 轻量因子、2 个参数组合、12 个月滚动步长，避免日常调参跑到几十分钟。需要 IC 加权时可传 `--factor-groups ic_weighted,momentum`；需要完整 24 组合网格时，使用：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_optimize.py --full-grid
 ```
 
 日常快速一键流程：
@@ -192,7 +204,7 @@ run_all.bat                    自动全流程：刷新已有数据 + data healt
 
 注意：快速流程会先更新已有股票并补齐缺失股票，再转换数据、重算因子和生成信号；它会显式跳过 walk-forward 重调参与完整回测。如果需要重调参和回测，先运行 `08_参数优化.bat` 和 `09_运行回测.bat`，或直接用命令行去掉 `--skip-optimize --skip-backtest`。
 
-`02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 15 --sleep-seconds 1`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
+`02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 300 --sleep-seconds 1`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
 
 自动流程会先判断信号是否可执行：
 

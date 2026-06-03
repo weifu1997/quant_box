@@ -6,7 +6,7 @@ cd /d "%~dp0"
 set PYTHON=python
 if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.exe
 
-set CHUNK_SIZE=15
+set CHUNK_SIZE=300
 set SLEEP_SECONDS=1
 set HELP_REQUESTED=0
 for %%A in (%*) do (
@@ -15,7 +15,7 @@ for %%A in (%*) do (
 )
 
 echo Running automatic full pipeline without walk-forward optimization:
-echo 1/6 refresh existing and missing raw data
+echo 1/6 refresh missing and stale raw data
 echo 2/6 convert data
 echo 3/6 calculate factors
 echo 4/6 check data health

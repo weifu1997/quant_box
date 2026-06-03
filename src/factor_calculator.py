@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+import warnings
 
+import numpy as np
 import pandas as pd
 
 from src.config_loader import load_config, resolve_path
@@ -11,6 +13,7 @@ from src.trading_calendar import resolve_target_date_value
 
 logger = logging.getLogger(__name__)
 _QLIB_INIT_STATE: tuple[str, str] | None = None
+warnings.filterwarnings("ignore", message="divide by zero encountered in log", category=RuntimeWarning)
 
 
 def compute_alpha158_factors(
@@ -34,18 +37,21 @@ def compute_alpha158_factors(
     instruments = instruments or qlib_cfg.get("instruments", "csi300")
 
     _ensure_qlib_initialized(qlib, provider, region)
-    handler = Alpha158(
-        instruments=instruments,
-        start_time=start_date,
-        end_time=end,
-        fit_start_time=start_date,
-        fit_end_time=end,
-    )
-    dataset = DatasetH(handler, segments={"full": (start_date, end)})
-    factors = dataset.prepare("full", col_set="feature")
+    with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore"):
+        # Alpha158 may emit noisy log(0) RuntimeWarnings while producing NaN feature values.
+        warnings.filterwarnings("ignore", message="divide by zero encountered in log", category=RuntimeWarning)
+        handler = Alpha158(
+            instruments=instruments,
+            start_time=start_date,
+            end_time=end,
+            fit_start_time=start_date,
+            fit_end_time=end,
+        )
+        dataset = DatasetH(handler, segments={"full": (start_date, end)})
+        factors = dataset.prepare("full", col_set="feature")
     if not isinstance(factors.index, pd.MultiIndex):
         raise ValueError("Expected Alpha158 result to use a MultiIndex of datetime/instrument.")
-    return factors.sort_index()
+    return factors.replace([np.inf, -np.inf], np.nan).sort_index()
 
 
 def _ensure_qlib_initialized(qlib_module, provider: Path, region: str) -> None:

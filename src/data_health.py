@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from src.config_loader import load_config, resolve_path
-from src.data_fetcher import filter_universe_frame
+from src.data_fetcher import _raw_latest_date, filter_universe_frame
 from src.trading_calendar import latest_trade_date, resolve_target_date_value
 
 
@@ -166,18 +166,9 @@ def _raw_latest_dates(raw_dir: Path, symbols: set[str]) -> dict[str, pd.Timestam
     latest_dates: dict[str, pd.Timestamp] = {}
     for symbol in symbols:
         path = raw_dir / f"{symbol}.csv"
-        if not path.exists():
-            continue
-        try:
-            dates = pd.read_csv(path, usecols=["trade_date"], parse_dates=["trade_date"])
-        except (OSError, ValueError):
-            continue
-        if dates.empty:
-            continue
-        current = pd.to_datetime(dates["trade_date"], errors="coerce").max()
-        if pd.isna(current):
-            continue
-        latest_dates[symbol] = pd.Timestamp(current).normalize()
+        current = _raw_latest_date(path)
+        if current is not None:
+            latest_dates[symbol] = current
     return latest_dates
 
 

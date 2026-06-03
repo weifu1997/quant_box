@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.optimizer import _optimization_score, run_walk_forward_grid_validation, run_walk_forward_optimization
+from src.optimizer import BASELINE_GRID, DEFAULT_GRID, _optimization_score, run_walk_forward_grid_validation, run_walk_forward_optimization
 
 
 class OptimizerTests(unittest.TestCase):
@@ -16,6 +16,10 @@ class OptimizerTests(unittest.TestCase):
 
     def test_optimization_score_treats_missing_metrics_as_zero(self) -> None:
         self.assertEqual(_optimization_score({"sharpe": float("nan")}), 0.0)
+
+    def test_baseline_grid_is_smaller_than_full_grid(self) -> None:
+        self.assertLess(_grid_size(BASELINE_GRID), _grid_size(DEFAULT_GRID))
+        self.assertEqual(BASELINE_GRID["factor_group"], ["momentum"])
 
     def test_run_walk_forward_optimization_returns_out_of_sample_window(self) -> None:
         factors, prices = _walk_forward_data()
@@ -88,6 +92,13 @@ def _small_grid() -> dict[str, list]:
         "rank_buffer": [0],
         "rebalance_freq": ["daily", "weekly"],
     }
+
+
+def _grid_size(grid: dict[str, list]) -> int:
+    size = 1
+    for values in grid.values():
+        size *= len(values)
+    return size
 
 
 def _base_backtest_config() -> dict:

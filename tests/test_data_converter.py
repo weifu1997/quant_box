@@ -119,6 +119,55 @@ class DataConverterTests(unittest.TestCase):
             self.assertAlmostEqual(float(adjusted_panel.loc[first_date, ("volume", "000001.sz")]), 4000.0)
             self.assertAlmostEqual(float(qlib_features.loc[0, "close"]), 5.0)
 
+    def test_convert_to_qlib_format_sanitizes_nonpositive_market_values(self) -> None:
+        config = {
+            "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},
+            "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            qlib_dir = root / "qlib"
+            raw_dir.mkdir()
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 10.0,
+                        "high": 10.0,
+                        "low": 10.0,
+                        "close": 10.0,
+                        "vol": 0.0,
+                        "amount": 0.0,
+                        "adj_factor": 1.0,
+                    }
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+
+            def fake_resolve_path(value: str | Path) -> Path:
+                if str(value) == "data/prices":
+                    return root / "prices"
+                path = Path(value)
+                return path if path.is_absolute() else root / path
+
+            with patch("src.data_converter.load_config", return_value=config), patch(
+                "src.data_converter.resolve_path",
+                side_effect=fake_resolve_path,
+            ):
+                result = convert_to_qlib_format(raw_dir=raw_dir, qlib_dir=qlib_dir)
+
+            raw_panel = pd.read_parquet(result["ohlcv_price_file"])
+            qlib_features = pd.read_parquet(qlib_dir / "features" / "000001.sz" / "day.parquet")
+            date = pd.Timestamp("2024-01-02")
+
+            self.assertTrue(pd.isna(raw_panel.loc[date, ("volume", "000001.sz")]))
+            self.assertTrue(pd.isna(raw_panel.loc[date, ("amount", "000001.sz")]))
+            self.assertTrue(pd.isna(qlib_features.loc[0, "volume"]))
+            self.assertTrue(pd.isna(qlib_features.loc[0, "amount"]))
+            self.assertTrue(pd.isna(qlib_features.loc[0, "vwap"]))
+
     def test_convert_to_qlib_format_removes_stale_price_files_when_no_stock_remains(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

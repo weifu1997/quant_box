@@ -23,12 +23,18 @@ def main() -> None:
     parser.add_argument("--sleep-seconds", type=float, help="Seconds to sleep between resumable chunks when --codes is omitted.")
     parser.add_argument("--max-chunks", type=int, help="Stop after this many resumable chunks.")
     parser.add_argument("--include-existing", action="store_true", help="Also update existing raw files in resumable mode.")
+    parser.add_argument("--force-full", action="store_true", help="Refetch each selected symbol from start/list date instead of incremental start.")
     parser.add_argument("--progress-file", help="Progress JSON path for resumable mode.")
     args = parser.parse_args()
 
     try:
         if args.codes:
-            written = update_daily_data(stock_codes=args.codes, start_date=args.start_date, end_date=args.end_date)
+            written = update_daily_data(
+                stock_codes=args.codes,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                force_full=args.force_full,
+            )
         else:
             written = update_daily_data_resumable(
                 start_date=args.start_date,
@@ -38,6 +44,7 @@ def main() -> None:
                 progress_file=args.progress_file,
                 max_chunks=args.max_chunks,
                 include_existing=args.include_existing,
+                force_full=args.force_full,
             )
     except RuntimeError as exc:
         logger.error("%s", exc)

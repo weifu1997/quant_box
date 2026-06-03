@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import datetime
+import io
 import json
 import logging
 from urllib.parse import urlparse
@@ -647,6 +649,7 @@ def update_daily_data(
     start_date: str | None = None,
     end_date: str | None = None,
     raw_dir: str | Path | None = None,
+    force_full: bool = False,
 ) -> dict[str, Path]:
     config = load_config()
     data_cfg = config.get("data", {})
@@ -672,7 +675,7 @@ def update_daily_data(
     for code in codes:
         path = target_dir / f"{code}.csv"
         needs_adj_backfill = _needs_adj_factor_backfill(path)
-        actual_start = start if needs_adj_backfill else _incremental_start(path, start)
+        actual_start = start if force_full or needs_adj_backfill else _incremental_start(path, start)
         if pd.Timestamp(actual_start) > pd.Timestamp(end):
             written[code] = path
             continue
@@ -710,7 +713,7 @@ def update_daily_data(
                 if new_df.empty:
                     failed[code] = "empty_or_failed_fetch"
                     continue
-                if path.exists() and not needs_adj_backfill:
+                if path.exists() and not needs_adj_backfill and not force_full:
                     old_df = pd.read_csv(path, parse_dates=["trade_date"])
                     new_df = pd.concat([old_df, new_df], ignore_index=True)
                 new_df = normalize_daily_frame(new_df, default_ts_code=code)
@@ -739,6 +742,7 @@ def update_daily_data_resumable(
     progress_file: str | Path | None = None,
     max_chunks: int | None = None,
     include_existing: bool = False,
+    force_full: bool = False,
 ) -> dict[str, Path]:
     config = load_config()
     data_cfg = config.get("data", {})
@@ -756,7 +760,7 @@ def update_daily_data_resumable(
     target_code_set = set(codes)
     initial_existing = _existing_stock_codes(target_dir) & target_code_set
     initial_latest = _fresh_stock_codes(target_dir, target_code_set, end)
-    pending_codes = codes if include_existing else [
+    pending_codes = codes if include_existing or force_full else [
         code
         for code in codes
         if code not in initial_latest or _needs_adj_factor_backfill(target_dir / f"{code}.csv")
@@ -787,6 +791,7 @@ def update_daily_data_resumable(
             "pending_symbols": len(pending_codes),
             "chunk_size": chunk_size,
             "sleep_seconds": sleep_seconds,
+            "force_full": force_full,
             "completed_symbols": 0,
             "failed_symbols": 0,
             "remaining_symbols": len(pending_codes),
@@ -810,7 +815,10 @@ def update_daily_data_resumable(
             chunks_run,
             ",".join(batch_codes[:5]) + ("..." if len(batch_codes) > 5 else ""),
         )
-        chunk_starts = {code: _symbol_start_date(start, list_dates.get(code)) for code in batch_codes}
+        chunk_starts = {
+            code: _symbol_start_date(start, list_dates.get(code)) if force_full or not (target_dir / f"{code}.csv").exists() else start
+            for code in batch_codes
+        }
         for code_start, grouped_codes in _group_chunk_codes_by_start(chunk_starts).items():
             try:
                 batch_written = update_daily_data(
@@ -818,6 +826,7 @@ def update_daily_data_resumable(
                     start_date=code_start,
                     end_date=end,
                     raw_dir=target_dir,
+                    force_full=force_full,
                 )
                 written.update(batch_written)
             except Exception as exc:
@@ -856,6 +865,7 @@ def update_daily_data_resumable(
                     "pending_symbols": len(pending_codes),
                     "chunk_size": chunk_size,
                     "sleep_seconds": sleep_seconds,
+                    "force_full": force_full,
                     "completed_symbols": completed,
                     "failed_symbols": len(failed),
                     "remaining_symbols": remaining,
@@ -898,6 +908,7 @@ def update_daily_data_resumable(
             "pending_symbols": len(pending_codes),
             "chunk_size": chunk_size,
             "sleep_seconds": sleep_seconds,
+            "force_full": force_full,
             "completed_symbols": completed_final,
             "failed_symbols": len(failed),
             "remaining_symbols": remaining_final,
@@ -968,6 +979,9 @@ def _fresh_stock_codes(raw_dir: Path, codes: set[str], end_date: str) -> set[str
 def _raw_latest_date(path: Path) -> pd.Timestamp | None:
     if not path.exists():
         return None
+    latest = _raw_latest_date_from_tail(path)
+    if latest is not None:
+        return latest
     try:
         dates = pd.read_csv(path, usecols=["trade_date"], parse_dates=["trade_date"])
     except (OSError, ValueError):
@@ -978,6 +992,42 @@ def _raw_latest_date(path: Path) -> pd.Timestamp | None:
     if pd.isna(latest):
         return None
     return pd.Timestamp(latest).normalize()
+
+
+def _raw_latest_date_from_tail(path: Path, tail_bytes: int = 16384) -> pd.Timestamp | None:
+    try:
+        with path.open("rb") as handle:
+            header_bytes = handle.readline()
+            header = header_bytes.decode("utf-8-sig", errors="ignore").strip()
+            if "trade_date" not in header:
+                return None
+            handle.seek(0, 2)
+            file_size = handle.tell()
+            start = max(len(header_bytes), file_size - tail_bytes)
+            handle.seek(start)
+            chunk = handle.read().decode("utf-8-sig", errors="ignore")
+    except OSError:
+        return None
+
+    lines = chunk.splitlines()
+    if start > len(header_bytes) and lines:
+        lines = lines[1:]
+    if not lines:
+        return None
+
+    latest: pd.Timestamp | None = None
+    reader = csv.DictReader(io.StringIO("\n".join([header, *lines[-50:]])))
+    for row in reader:
+        value = row.get("trade_date")
+        if not value:
+            continue
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            continue
+        current = pd.Timestamp(parsed).normalize()
+        if latest is None or current > latest:
+            latest = current
+    return latest
 
 
 def _coverage_ratio(part: int, whole: int) -> float:

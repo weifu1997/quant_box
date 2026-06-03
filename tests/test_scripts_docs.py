@@ -16,7 +16,7 @@ class ScriptsDocsTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("--skip-optimize --skip-backtest", quick)
-        self.assertIn("CHUNK_SIZE=15", quick)
+        self.assertIn("CHUNK_SIZE=300", quick)
         self.assertIn("SLEEP_SECONDS=1", quick)
         self.assertIn("chcp 65001 >nul", quick)
         self.assertIn("chcp 65001 >nul", legacy)
@@ -45,11 +45,11 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("--skip-optimize", run_all)
         self.assertNotIn("--skip-backtest", run_all)
         self.assertIn("without walk-forward optimization", run_all)
-        self.assertIn("refresh existing and missing raw data", run_all)
+        self.assertIn("refresh missing and stale raw data", run_all)
         self.assertIn("check data health", run_all)
         self.assertIn("latest candidate signal", run_all)
         self.assertIn("without walk-forward optimization", legacy)
-        self.assertIn("刷新已有和缺失股票", readme)
+        self.assertIn("刷新缺失和过期股票", readme)
         self.assertIn("data health", readme)
 
     def test_bat_files_are_utf8_and_use_crlf_line_endings(self) -> None:

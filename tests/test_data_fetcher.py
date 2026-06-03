@@ -13,6 +13,7 @@ from src.data_fetcher import (
     fetch_daily_stocks,
     fetch_stock_universe,
     filter_universe_frame,
+    _raw_latest_date,
     update_daily_data,
     update_daily_data_resumable,
 )
@@ -89,6 +90,19 @@ class FailingTushareClient(FakeTushareClient):
 
 
 class DataFetcherTests(unittest.TestCase):
+    def test_raw_latest_date_reads_latest_value_from_csv_tail(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "000001.SZ.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "000001.SZ", "000001.SZ"],
+                    "trade_date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+                    "close": [10.0, 10.5, 11.0],
+                }
+            ).to_csv(path, index=False)
+
+            self.assertEqual(_raw_latest_date(path), pd.Timestamp("2024-01-04"))
+
     def test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait(self) -> None:
         client = FailingTushareClient()
 
@@ -501,7 +515,7 @@ class DataFetcherTests(unittest.TestCase):
             raw_dir.mkdir()
             progress_file = root / "progress.json"
 
-            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None):
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
                 codes = list(stock_codes)
                 calls.append(codes)
                 written = {}
@@ -532,6 +546,99 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(progress["status"], "complete")
             self.assertEqual(int(progress["completed_symbols"]), 3)
 
+    def test_resumable_update_batches_existing_stale_symbols_despite_different_list_dates(self) -> None:
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+        calls: list[tuple[list[str], str | None]] = []
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            for code in ["000001.SZ", "600519.SH"]:
+                pd.DataFrame({"ts_code": [code], "trade_date": ["2024-01-02"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                    raw_dir / f"{code}.csv", index=False
+                )
+
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                codes = list(stock_codes)
+                calls.append((codes, start_date))
+                for code in codes:
+                    pd.DataFrame({"ts_code": [code], "trade_date": [end_date], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                        Path(raw_dir) / f"{code}.csv", index=False
+                    )
+                return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher._load_universe_list_dates", return_value={"000001.SZ": "2020-01-01", "600519.SH": "2021-01-01"}), patch(
+                "src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data
+            ):
+                update_daily_data_resumable(
+                    stock_codes=["000001.SZ", "600519.SH"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                    max_chunks=1,
+                )
+
+            self.assertEqual(calls, [(["000001.SZ", "600519.SH"], "2024-01-01")])
+
+    def test_resumable_update_force_full_uses_list_dates_for_existing_symbols(self) -> None:
+        config = {
+            "data": {
+                "start_date": "2019-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+        calls: list[tuple[list[str], str | None, bool]] = []
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            for code in ["000001.SZ", "600519.SH"]:
+                pd.DataFrame({"ts_code": [code], "trade_date": ["2024-01-03"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                    raw_dir / f"{code}.csv", index=False
+                )
+
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                codes = list(stock_codes)
+                calls.append((codes, start_date, force_full))
+                return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher._load_universe_list_dates", return_value={"000001.SZ": "2020-01-01", "600519.SH": "2021-01-01"}), patch(
+                "src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data
+            ):
+                update_daily_data_resumable(
+                    stock_codes=["000001.SZ", "600519.SH"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                    max_chunks=1,
+                    force_full=True,
+                )
+
+            self.assertEqual(calls, [(["000001.SZ"], "2020-01-01", True), (["600519.SH"], "2021-01-01", True)])
+
     def test_resumable_update_include_existing_tracks_processed_symbols(self) -> None:
         config = {
             "data": {
@@ -553,7 +660,7 @@ class DataFetcherTests(unittest.TestCase):
             for code in ["000001.SZ", "600519.SH"]:
                 (raw_dir / f"{code}.csv").write_text("", encoding="utf-8")
 
-            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None):
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
                 codes = list(stock_codes)
                 calls.append(codes)
                 for code in codes:

@@ -28,7 +28,7 @@ from src.data_fetcher import update_daily_data_resumable
 from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
 from src.manual_orders import generate_manual_orders, load_account_state, load_current_holdings, save_manual_orders
-from src.optimizer import DEFAULT_GRID, run_walk_forward_grid_validation
+from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_walk_forward_grid_validation
 from src.reporting import archive_run, signal_action_summary, write_daily_signal_report
 from src.scoring import build_strategy_scores
 from src.signal_generator import generate_signal, read_previous_holdings, save_signal
@@ -41,6 +41,12 @@ logger = logging.getLogger(__name__)
 
 def _csv_values(value: str, cast):
     return [cast(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def _grid_values(value: str | None, defaults: list, cast):
+    if value is None:
+        return list(defaults)
+    return _csv_values(value, cast)
 
 
 def main() -> None:
@@ -65,14 +71,16 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=base_config["data"].get("update_chunk_size", 20))
     parser.add_argument("--sleep-seconds", type=float, default=base_config["data"].get("update_sleep_seconds", 1))
     parser.add_argument("--max-chunks", type=int)
-    parser.add_argument("--factor-groups", default="ic_weighted,momentum")
-    parser.add_argument("--top-n", default="5,7,10")
-    parser.add_argument("--max-turnover", default="1")
-    parser.add_argument("--rank-buffer", default="10,20")
-    parser.add_argument("--rebalance-freq", default="weekly,monthly")
+    parser.add_argument("--include-existing", action="store_true", help="Refresh all existing raw files, even if already latest.")
+    parser.add_argument("--factor-groups", help="Comma-separated factor groups. Defaults to the fast baseline grid.")
+    parser.add_argument("--top-n", help="Comma-separated portfolio sizes. Defaults to the fast baseline grid.")
+    parser.add_argument("--max-turnover", help="Comma-separated max turnover values. Defaults to the fast baseline grid.")
+    parser.add_argument("--rank-buffer", help="Comma-separated rank buffer values. Defaults to the fast baseline grid.")
+    parser.add_argument("--rebalance-freq", help="Comma-separated rebalance frequencies. Defaults to the fast baseline grid.")
+    parser.add_argument("--full-grid", action="store_true", help="Use the full default grid instead of the fast baseline grid.")
     parser.add_argument("--train-years", type=int, default=3)
     parser.add_argument("--test-months", type=int, default=12)
-    parser.add_argument("--step-months", type=int, default=6)
+    parser.add_argument("--step-months", type=int, default=12)
     parser.add_argument("--turnover-penalty", type=float, default=0.02)
     parser.add_argument("--cost-penalty", type=float, default=1.0)
     args = parser.parse_args()
@@ -105,14 +113,14 @@ def main() -> None:
         )
         if not args.skip_update:
             _stage(status, out_dir, "update_data", "running")
-            logger.info("Updating raw stock data, including existing files.")
+            logger.info("Updating raw stock data that is missing or stale.")
             update_daily_data_resumable(
                 start_date=args.start_date,
                 end_date=end_date,
                 chunk_size=args.chunk_size,
                 sleep_seconds=args.sleep_seconds,
                 max_chunks=args.max_chunks,
-                include_existing=True,
+                include_existing=args.include_existing,
             )
             _stage(status, out_dir, "update_data", "complete")
         else:
@@ -156,14 +164,19 @@ def main() -> None:
         summary = pd.DataFrame()
         if not args.skip_optimize:
             _stage(status, out_dir, "optimize_params", "running")
+            grid_defaults = DEFAULT_GRID if args.full_grid else BASELINE_GRID
             grid = {
-                **DEFAULT_GRID,
-                "factor_group": _csv_values(args.factor_groups, str),
-                "top_n": _csv_values(args.top_n, int),
-                "max_turnover": _csv_values(args.max_turnover, int),
-                "rank_buffer": _csv_values(args.rank_buffer, int),
-                "rebalance_freq": _csv_values(args.rebalance_freq, str),
+                **grid_defaults,
+                "factor_group": _grid_values(args.factor_groups, grid_defaults["factor_group"], str),
+                "top_n": _grid_values(args.top_n, grid_defaults["top_n"], int),
+                "max_turnover": _grid_values(args.max_turnover, grid_defaults["max_turnover"], int),
+                "rank_buffer": _grid_values(args.rank_buffer, grid_defaults["rank_buffer"], int),
+                "rebalance_freq": _grid_values(args.rebalance_freq, grid_defaults["rebalance_freq"], str),
             }
+            total_combinations = 1
+            for values in grid.values():
+                total_combinations *= len(values)
+            logger.info("Automatic validation grid has %s combinations: %s", total_combinations, grid)
             logger.info("Running automatic walk-forward grid validation.")
             validation = run_walk_forward_grid_validation(
                 factors,

@@ -24,6 +24,14 @@ DEFAULT_GRID = {
     "rebalance_freq": ["weekly", "monthly"],
 }
 
+BASELINE_GRID = {
+    "factor_group": ["momentum"],
+    "top_n": [5, 10],
+    "max_turnover": [1],
+    "rank_buffer": [20],
+    "rebalance_freq": ["monthly"],
+}
+
 
 def run_parameter_grid(
     factor_df: pd.DataFrame,

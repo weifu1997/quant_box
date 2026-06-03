@@ -22,7 +22,8 @@ def convert_to_qlib_format(
     data_cfg = config.get("data", {})
     source_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
     target_dir = resolve_path(qlib_dir or config["qlib"]["provider_uri"])
-    missing_value = float(config.get("qlib", {}).get("missing_value", -1.0))
+    missing_value = config.get("qlib", {}).get("missing_value", np.nan)
+    missing_value = float(missing_value) if missing_value is not None else np.nan
     calendar_dir = target_dir / "calendars"
     feature_dir = target_dir / "features"
     instrument_dir = target_dir / "instruments"
@@ -131,6 +132,7 @@ def convert_to_qlib_format(
 
 def _prepare_feature_frame(df: pd.DataFrame, adjusted: bool) -> pd.DataFrame:
     feature_df = df.rename(columns={"trade_date": "date", "vol": "volume"}).copy()
+    feature_df = _sanitize_market_values(feature_df)
     feature_df["vwap"] = np.where(
         feature_df["volume"].astype(float) > 0,
         feature_df["amount"].astype(float) * 10 / feature_df["volume"].astype(float),
@@ -139,6 +141,16 @@ def _prepare_feature_frame(df: pd.DataFrame, adjusted: bool) -> pd.DataFrame:
     if adjusted:
         feature_df = _apply_adjustment(feature_df)
     return feature_df[FEATURE_COLUMNS]
+
+
+def _sanitize_market_values(feature_df: pd.DataFrame) -> pd.DataFrame:
+    sanitized = feature_df.copy()
+    for col in ["open", "high", "low", "close", "volume", "amount"]:
+        if col not in sanitized.columns:
+            continue
+        values = pd.to_numeric(sanitized[col], errors="coerce")
+        sanitized[col] = values.where(values > 0)
+    return sanitized
 
 
 def _load_tradable_codes(path_value: str | Path) -> set[str]:
@@ -212,6 +224,8 @@ def _write_qlib_bin_features(
     date_slice = calendar[start_idx : end_idx + 1]
     for field in ["open", "high", "low", "close", "volume", "amount", "vwap"]:
         values = indexed[field].reindex(date_slice).astype("float32").to_numpy()
-        values = np.nan_to_num(values, nan=missing_value, posinf=missing_value, neginf=missing_value)
+        values = np.where(np.isfinite(values), values, np.nan)
+        if not pd.isna(missing_value):
+            values = np.nan_to_num(values, nan=missing_value, posinf=missing_value, neginf=missing_value)
         payload = np.hstack([[start_idx], values]).astype("<f")
         payload.tofile(stock_dir / f"{field}.day.bin")
