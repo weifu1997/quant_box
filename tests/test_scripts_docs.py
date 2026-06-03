@@ -17,7 +17,7 @@ class ScriptsDocsTests(unittest.TestCase):
 
         self.assertIn("--skip-optimize --skip-backtest", quick)
         self.assertIn("CHUNK_SIZE=15", quick)
-        self.assertIn("SLEEP_SECONDS=10", quick)
+        self.assertIn("SLEEP_SECONDS=1", quick)
         self.assertIn("chcp 65001 >nul", quick)
         self.assertIn("chcp 65001 >nul", legacy)
         self.assertIn("02_快速更新并生成信号.bat", legacy)

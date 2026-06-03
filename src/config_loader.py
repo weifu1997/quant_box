@@ -29,7 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "daily_window_days": 500,
         "max_new_symbols_per_run": None,
         "update_chunk_size": 20,
-        "update_sleep_seconds": 90,
+        "update_sleep_seconds": 1,
         "update_progress_file": "outputs/data_update_progress.json",
         "retries": 5,
         "retry_max_wait": 30,

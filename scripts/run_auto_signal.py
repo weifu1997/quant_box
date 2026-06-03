@@ -63,7 +63,7 @@ def main() -> None:
     parser.add_argument("--end-date", default=base_config["data"]["end_date"])
     parser.add_argument("--date", default="latest", help="Signal date, YYYY-MM-DD, or latest.")
     parser.add_argument("--chunk-size", type=int, default=base_config["data"].get("update_chunk_size", 20))
-    parser.add_argument("--sleep-seconds", type=float, default=base_config["data"].get("update_sleep_seconds", 90))
+    parser.add_argument("--sleep-seconds", type=float, default=base_config["data"].get("update_sleep_seconds", 1))
     parser.add_argument("--max-chunks", type=int)
     parser.add_argument("--factor-groups", default="ic_weighted,momentum")
     parser.add_argument("--top-n", default="5,7,10")

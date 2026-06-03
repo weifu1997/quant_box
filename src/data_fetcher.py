@@ -750,7 +750,7 @@ def update_daily_data_resumable(
     codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe(date=end)
     codes = [str(code).upper() for code in dict.fromkeys(codes)]
     chunk_size = max(1, int(chunk_size or data_cfg.get("update_chunk_size", 20)))
-    sleep_seconds = float(sleep_seconds if sleep_seconds is not None else data_cfg.get("update_sleep_seconds", 90))
+    sleep_seconds = float(sleep_seconds if sleep_seconds is not None else data_cfg.get("update_sleep_seconds", 1))
     progress_path = resolve_path(progress_file or data_cfg.get("update_progress_file", "outputs/data_update_progress.json"))
 
     target_code_set = set(codes)

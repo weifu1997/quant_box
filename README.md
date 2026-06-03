@@ -134,26 +134,26 @@ run_all.bat                    自动全流程：刷新已有数据 + data healt
 默认参数：
 
 ```powershell
---chunk-size 15 --sleep-seconds 10
+--chunk-size 15 --sleep-seconds 1
 ```
 
 含义：
 
 - 每批补 15 只缺失股票
-- 批间等待 10 秒
+- 批间等待 1 秒
 - 自动记录进度到 `outputs/data_update_progress.json`
 - 中断后再次双击，会继续补缺失股票，不会从头开始
 
 命令行等价写法：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 10
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 1
 ```
 
 只跑一批确认状态：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 10 --max-chunks 1
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 15 --sleep-seconds 1 --max-chunks 1
 ```
 
 查看 raw 数据最新覆盖率和补齐进度：
@@ -192,7 +192,7 @@ run_all.bat                    自动全流程：刷新已有数据 + data healt
 
 注意：快速流程会先更新已有股票并补齐缺失股票，再转换数据、重算因子和生成信号；它会显式跳过 walk-forward 重调参与完整回测。如果需要重调参和回测，先运行 `08_参数优化.bat` 和 `09_运行回测.bat`，或直接用命令行去掉 `--skip-optimize --skip-backtest`。
 
-`02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 15 --sleep-seconds 10`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
+`02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 15 --sleep-seconds 1`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
 
 自动流程会先判断信号是否可执行：
 
