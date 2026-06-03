@@ -26,6 +26,25 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("直接运行同一套快速流程", readme)
         self.assertIn("data/raw/failed_fetches.csv", readme)
 
+    def test_all_bat_files_are_documented(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        for path in BAT_FILES:
+            self.assertIn(path.name, readme)
+
+        self.assertIn("不用把所有 `.bat` 顺序执行", readme)
+        self.assertIn("04 -> 06 -> 07 -> 08 -> 09 -> 10", readme)
+        self.assertIn("不含 walk-forward 参数优化", readme)
+
+    def test_legacy_run_all_bat_is_explicit_about_optimization(self) -> None:
+        run_all = (ROOT / "run_all.bat").read_text(encoding="utf-8")
+        legacy = (ROOT / "11_旧版全流程_补数据到信号.bat").read_text(encoding="utf-8")
+
+        self.assertIn("without walk-forward optimization", run_all)
+        self.assertIn("backtest current config", run_all)
+        self.assertIn("latest candidate signal", run_all)
+        self.assertIn("without walk-forward optimization", legacy)
+
     def test_bat_files_are_utf8_and_use_crlf_line_endings(self) -> None:
         for path in BAT_FILES:
             data = path.read_bytes()
