@@ -28,6 +28,20 @@ if exist ".venv\Scripts\python.exe" (
 set PYTHON=%~dp0.venv\Scripts\python.exe
 
 echo.
+echo Checking pip...
+"%PYTHON%" -m pip --version >nul 2>&1
+if errorlevel 1 (
+  echo pip is missing in .venv. Bootstrapping pip with ensurepip...
+  "%PYTHON%" -m ensurepip --upgrade
+  if errorlevel 1 (
+    echo Failed to bootstrap pip with ensurepip.
+    echo Please delete .venv and run this script again.
+    pause
+    exit /b 1
+  )
+)
+
+echo.
 echo Upgrading pip...
 "%PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 (
