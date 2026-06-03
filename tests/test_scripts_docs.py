@@ -17,8 +17,15 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("CHUNK_SIZE=15", quick)
         self.assertIn("SLEEP_SECONDS=10", quick)
         self.assertIn("02_快速更新并生成信号.bat", legacy)
+        self.assertIn("--skip-optimize --skip-backtest", legacy)
         self.assertIn("02_快速更新并生成信号.bat", readme)
         self.assertIn("data/raw/failed_fetches.csv", readme)
+
+    def test_02_bat_files_use_crlf_line_endings(self) -> None:
+        for name in ["02_快速更新并生成信号.bat", "02_自动调参并生成信号.bat"]:
+            data = (ROOT / name).read_bytes()
+            self.assertGreater(data.count(b"\r\n"), 0)
+            self.assertEqual(data.count(b"\n"), data.count(b"\r\n"))
 
 
 if __name__ == "__main__":
