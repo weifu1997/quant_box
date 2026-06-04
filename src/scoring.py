@@ -204,14 +204,18 @@ def _dynamic_ic_selector_weights(
     min_score = float(min_score) if min_score is not None else None
 
     weights: dict[pd.Timestamp, pd.Series] = {}
+    top_k = max(1, int(selector_cfg.get("top_k", 1)))
     for date, row in scores.iterrows():
         candidates = row.dropna()
         if min_score is not None:
             candidates = candidates[candidates >= min_score]
         if candidates.empty:
             continue
-        selected = str(candidates.sort_values(ascending=False).index[0])
-        weights[pd.Timestamp(date).normalize()] = pd.Series({selected: 1.0}, dtype=float)
+        selected = candidates.sort_values(ascending=False).head(top_k)
+        selected_weights = selected.clip(lower=0.0)
+        if float(selected_weights.sum()) <= 0:
+            selected_weights = pd.Series(1.0, index=selected.index, dtype=float)
+        weights[pd.Timestamp(date).normalize()] = (selected_weights / selected_weights.sum()).astype(float)
     return weights
 
 
@@ -255,27 +259,27 @@ def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg:
     side = str(filter_cfg.get("side", "low")).strip().lower()
     quantile = float(filter_cfg.get("quantile", 0.35))
 
+    if side not in {"low", "high"}:
+        raise ValueError(f"Unsupported liquidity filter side: {side}")
+
     date_level = scores.index.names[0] or 0
-    filtered_parts: list[pd.Series] = []
-    for date, daily_scores in scores.groupby(level=date_level, sort=False):
-        signal_date = pd.Timestamp(date).normalize()
-        if signal_date not in adv.index:
-            filtered_parts.append(pd.Series(pd.NA, index=daily_scores.index, name=scores.name, dtype="float64"))
-            continue
-        daily_adv = adv.loc[signal_date]
-        instruments = daily_scores.index.get_level_values(1).astype(str)
-        aligned_adv = daily_adv.reindex(instruments)
-        threshold = aligned_adv.quantile(quantile)
-        if pd.isna(threshold):
-            mask = pd.Series(False, index=daily_scores.index)
-        elif side == "low":
-            mask = pd.Series(aligned_adv.to_numpy() <= threshold, index=daily_scores.index)
-        elif side == "high":
-            mask = pd.Series(aligned_adv.to_numpy() >= threshold, index=daily_scores.index)
-        else:
-            raise ValueError(f"Unsupported liquidity filter side: {side}")
-        filtered_parts.append(daily_scores.where(mask))
-    return pd.concat(filtered_parts).sort_index().rename(scores.name)
+    instrument_level = scores.index.names[1] or 1
+    score_dates = pd.to_datetime(scores.index.get_level_values(date_level)).normalize()
+    score_instruments = scores.index.get_level_values(instrument_level).astype(str)
+    lookup_index = pd.MultiIndex.from_arrays([score_dates, score_instruments], names=["datetime", "instrument"])
+
+    adv_stack = adv.stack(future_stack=True).rename("adv")
+    adv_stack.index = adv_stack.index.set_names(["datetime", "instrument"])
+    aligned_adv = adv_stack.reindex(lookup_index).to_numpy()
+    thresholds = adv.quantile(quantile, axis=1).reindex(score_dates).to_numpy()
+
+    if side == "low":
+        mask_values = aligned_adv <= thresholds
+    else:
+        mask_values = aligned_adv >= thresholds
+    mask_values &= pd.notna(aligned_adv) & pd.notna(thresholds)
+    mask = pd.Series(mask_values, index=scores.index)
+    return scores.where(mask).sort_index().rename(scores.name)
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:

@@ -67,6 +67,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_obs": 20,
         "method": "spearman",
         "metric": "mean",
+        "top_k": 1,
         "fallback_candidate": "factor:LOW0",
     },
     "liquidity_filter": {

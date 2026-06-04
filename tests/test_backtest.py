@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import gc
 import unittest
+import weakref
 
 import numpy as np
 import pandas as pd
 
-from src.backtest import _lot_size, _max_drawdown_duration, calculate_metrics, run_backtest
+from src.backtest import _PRICE_FIELD_CACHE, _field, _lot_size, _max_drawdown_duration, calculate_metrics, run_backtest
 
 
 class BacktestTests(unittest.TestCase):
@@ -49,6 +51,25 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(_lot_size("688001.SH", config), 200)
         self.assertEqual(_lot_size("300001.SZ", config), 100)
         self.assertEqual(_lot_size("830001.BJ", config), 100)
+
+    def test_price_field_cache_prunes_dead_price_frames(self) -> None:
+        dead_key = -12345
+        dead_frame = pd.DataFrame({"A": [1.0]})
+        _PRICE_FIELD_CACHE[dead_key] = (weakref.ref(dead_frame), set(), {})
+        del dead_frame
+        gc.collect()
+        prices = pd.concat(
+            {"close": pd.DataFrame({"A": [1.0]}, index=[pd.Timestamp("2024-01-02")])},
+            axis=1,
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+
+        try:
+            _field(prices, "close")
+
+            self.assertNotIn(dead_key, _PRICE_FIELD_CACHE)
+        finally:
+            _PRICE_FIELD_CACHE.pop(dead_key, None)
 
     def test_run_backtest_produces_equity_curve(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])

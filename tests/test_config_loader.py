@@ -36,6 +36,10 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(strategy["circuit_breaker_drawdown"], 0.12)
         self.assertEqual(strategy["circuit_breaker_cooldown_days"], 20)
 
+    def test_default_scoring_uses_low_liquidity_bucket_and_winner_take_all_dynamic_ic(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "low")
+        self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["top_k"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

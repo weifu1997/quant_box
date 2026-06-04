@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.scoring import build_latest_strategy_scores, build_strategy_scores
+from src.scoring import _dynamic_ic_selector_weights, build_latest_strategy_scores, build_strategy_scores
 
 
 class ScoringTests(unittest.TestCase):
@@ -83,6 +83,23 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(scores.loc[(pd.Timestamp("2024-01-02"), "E")], scores.loc[(pd.Timestamp("2024-01-02"), "A")])
         calc.assert_called_once()
 
+    def test_dynamic_ic_selector_uses_configured_top_k_weights(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": range(5), "F2": range(5), "F3": range(5)}, index=index)
+        prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+        rolling_ic = pd.DataFrame({"F1": [0.10], "F2": [0.05], "F3": [0.01]}, index=[pd.Timestamp("2024-01-02")])
+
+        with patch("src.scoring.calculate_rolling_ic", return_value=rolling_ic):
+            weights = _dynamic_ic_selector_weights(factors, prices, {"top_k": 2, "min_periods": 1})
+
+        latest = weights[pd.Timestamp("2024-01-02")]
+        self.assertEqual(set(latest.index), {"F1", "F2"})
+        self.assertAlmostEqual(float(latest.sum()), 1.0)
+        self.assertGreater(float(latest["F1"]), float(latest["F2"]))
+
     def test_build_strategy_scores_applies_low_liquidity_filter(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
         instruments = ["A", "B", "C", "D", "E"]
@@ -111,6 +128,35 @@ class ScoringTests(unittest.TestCase):
         daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
         self.assertFalse(daily.loc[["A", "B"]].isna().any())
         self.assertTrue(daily.loc[["C", "D", "E"]].isna().all())
+
+    def test_build_strategy_scores_applies_high_liquidity_filter(self) -> None:
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
+        instruments = ["A", "B", "C", "D", "E"]
+        index = pd.MultiIndex.from_product([[dates[-1]], instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0, 5.0]}, index=index)
+        amount = pd.DataFrame(
+            {
+                "A": [1.0, 1.0],
+                "B": [2.0, 2.0],
+                "C": [3.0, 3.0],
+                "D": [4.0, 4.0],
+                "E": [5.0, 5.0],
+            },
+            index=dates,
+        )
+        close = pd.DataFrame(10.0, index=dates, columns=instruments)
+        prices = pd.concat({"close": close, "amount": amount}, axis=1)
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        config = {
+            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
+            "liquidity_filter": {"enabled": True, "field": "amount", "window": 2, "min_periods": 1, "quantile": 0.4, "side": "high"},
+        }
+
+        scores = build_strategy_scores(factors, config, price_df=prices)
+
+        daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
+        self.assertTrue(daily.loc[["A", "B"]].isna().all())
+        self.assertFalse(daily.loc[["C", "D", "E"]].isna().any())
 
     def test_build_strategy_scores_passes_ic_stability_config(self) -> None:
         index = pd.MultiIndex.from_product(

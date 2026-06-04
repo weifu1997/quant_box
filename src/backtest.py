@@ -460,6 +460,7 @@ def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
     cache_key = id(prices)
     cached = _PRICE_FIELD_CACHE.get(cache_key)
     if cached is None or cached[0]() is not prices:
+        _prune_price_field_cache()
         field_names = set(prices.columns.get_level_values("field"))
         cache: dict[str, pd.DataFrame] = {}
         _PRICE_FIELD_CACHE[cache_key] = (weakref.ref(prices), field_names, cache)
@@ -475,6 +476,12 @@ def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
     frame.attrs = {}
     cache[field] = frame
     return frame
+
+
+def _prune_price_field_cache() -> None:
+    dead_keys = [key for key, (prices_ref, _fields, _cache) in _PRICE_FIELD_CACHE.items() if prices_ref() is None]
+    for key in dead_keys:
+        _PRICE_FIELD_CACHE.pop(key, None)
 
 
 def _field_on_date(prices: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Series:
