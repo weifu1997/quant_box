@@ -51,10 +51,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "weights_cache_file": "data/factors/rolling_ic_weights.pkl",
     },
     "strategy": {
-        "top_n": 20,
+        "top_n": 50,
         "max_turnover": 1,
         "rank_buffer": 20,
-        "factor_group": "momentum",
+        "factor_group": "factor:LOW0",
         "rebalance_freq": "monthly",
         "take_profit_pct": 1.0,
         "min_cross_section_obs": 5,

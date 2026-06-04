@@ -19,7 +19,7 @@ class OptimizerTests(unittest.TestCase):
 
     def test_baseline_grid_is_smaller_than_full_grid(self) -> None:
         self.assertLess(_grid_size(BASELINE_GRID), _grid_size(DEFAULT_GRID))
-        self.assertEqual(BASELINE_GRID["factor_group"], ["momentum"])
+        self.assertEqual(BASELINE_GRID["factor_group"], ["momentum", "factor:LOW0"])
 
     def test_run_walk_forward_optimization_returns_out_of_sample_window(self) -> None:
         factors, prices = _walk_forward_data()

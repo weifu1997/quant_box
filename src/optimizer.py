@@ -25,8 +25,8 @@ DEFAULT_GRID = {
 }
 
 BASELINE_GRID = {
-    "factor_group": ["momentum"],
-    "top_n": [10, 20],
+    "factor_group": ["momentum", "factor:LOW0"],
+    "top_n": [20, 50],
     "max_turnover": [1],
     "rank_buffer": [20],
     "rebalance_freq": ["monthly"],
