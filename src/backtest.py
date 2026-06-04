@@ -329,8 +329,8 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
     excess_daily = returns - risk_free_rate / annual_days
     volatility = returns.std(ddof=1) * np.sqrt(annual_days) if len(returns) > 1 else 0.0
     sharpe = excess_daily.mean() / returns.std(ddof=1) * np.sqrt(annual_days) if len(returns) > 1 and returns.std(ddof=1) else 0.0
-    downside = excess_daily[excess_daily < 0].std(ddof=1)
-    sortino = excess_daily.mean() / downside * np.sqrt(annual_days) if len(excess_daily) > 1 and downside else 0.0
+    downside = float(np.sqrt(np.mean(np.minimum(excess_daily.to_numpy(), 0.0) ** 2))) if len(excess_daily) else 0.0
+    sortino = excess_daily.mean() / downside * np.sqrt(annual_days) if len(excess_daily) > 1 and downside > 0 else 0.0
     drawdown = equity_curve / equity_curve.cummax() - 1
     max_drawdown = float(drawdown.min())
     max_dd_duration = float(_max_drawdown_duration(equity_curve))

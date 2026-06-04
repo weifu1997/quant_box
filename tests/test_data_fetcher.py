@@ -261,6 +261,14 @@ class DataFetcherTests(unittest.TestCase):
         self.assertIn("adj_factor", df.columns)
         self.assertFalse(df["adj_factor"].isna().any())
 
+    def test_fetch_daily_stock_drops_rows_with_missing_adj_factor(self) -> None:
+        client = MissingAdjFactorClient()
+
+        df = fetch_daily_stock("600519.SH", "2024-01-01", "2024-01-03", client=client, retries=1)
+
+        self.assertTrue(df.empty)
+        self.assertIn("adj_factor", df.columns)
+
     def test_update_daily_data_records_failed_symbol_when_adj_factor_is_incomplete(self) -> None:
         client = MissingAdjFactorClient()
         config = {

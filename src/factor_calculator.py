@@ -195,11 +195,11 @@ def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cac
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    if "qlib" not in config:
-        return False
-
     expected = _factor_cache_meta_payload(None, start_date, end_date, config)
-    for key in ["provider_uri", "region", "instruments", "start_date", "end_date"]:
+    keys = ["start_date", "end_date"]
+    if "qlib" in config:
+        keys = ["provider_uri", "region", "instruments", *keys]
+    for key in keys:
         if meta.get(key) != expected.get(key):
             return False
     return True

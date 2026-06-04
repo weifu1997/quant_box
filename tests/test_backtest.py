@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from src.backtest import _lot_size, _max_drawdown_duration, calculate_metrics, run_backtest
@@ -23,6 +24,19 @@ class BacktestTests(unittest.TestCase):
         metrics = calculate_metrics(equity, trades, {"annual_trading_days": 252, "top_n": 1})
 
         self.assertEqual(metrics["turnover_count"], 3.0)
+
+    def test_calculate_metrics_sortino_uses_downside_deviation_over_all_returns(self) -> None:
+        equity = pd.Series(
+            [100.0, 110.0, 104.5, 104.5],
+            index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]),
+        )
+        returns = equity.pct_change().dropna()
+        downside = np.sqrt(np.mean(np.minimum(returns, 0.0) ** 2))
+        expected = returns.mean() / downside * np.sqrt(252)
+
+        metrics = calculate_metrics(equity, pd.DataFrame(), {"annual_trading_days": 252, "top_n": 1})
+
+        self.assertAlmostEqual(metrics["sortino"], float(expected))
 
     def test_max_drawdown_duration_matches_longest_underwater_run(self) -> None:
         equity = pd.Series([100.0, 90.0, 95.0, 101.0, 99.0, 98.0, 102.0])

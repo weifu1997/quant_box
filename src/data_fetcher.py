@@ -442,8 +442,15 @@ def merge_adj_factor(daily: pd.DataFrame, adj_factor: pd.DataFrame, default_ts_c
     adj = _normalize_adj_factor_frame(adj_factor, default_ts_code=default_ts_code)
     merged = daily.merge(adj, on=["ts_code", "trade_date"], how="left")
     if merged["adj_factor"].isna().any():
-        missing_count = int(merged["adj_factor"].isna().sum())
-        raise ValueError(f"Missing adj_factor for {missing_count} daily rows.")
+        missing = merged["adj_factor"].isna()
+        missing_count = int(missing.sum())
+        missing_codes = sorted(merged.loc[missing, "ts_code"].dropna().astype(str).unique())
+        logger.warning(
+            "Dropping %d daily rows with missing adj_factor for symbols: %s",
+            missing_count,
+            ",".join(missing_codes[:10]),
+        )
+        merged = merged.loc[~missing].copy()
     return merged
 
 

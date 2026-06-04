@@ -86,6 +86,22 @@ class FactorICTests(unittest.TestCase):
                 else:
                     self.assertAlmostEqual(float(actual), float(expected))
 
+    def test_calculate_factor_ic_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([dates[:2], ["a", "b", "c"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": range(6)}, index=index)
+        prices = pd.DataFrame(
+            {
+                "open": [10.0, 10.1, 10.2],
+                "close": [10.0, 10.2, 10.4],
+                "volume": [1000.0, 1200.0, 1300.0],
+            },
+            index=dates,
+        )
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            calculate_factor_ic(factors, prices, min_obs=2)
+
 
 if __name__ == "__main__":
     unittest.main()

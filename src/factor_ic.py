@@ -280,4 +280,8 @@ def _close_prices(price_df: pd.DataFrame) -> pd.DataFrame:
         close = price_df.loc[:, fields == "close"].copy()
         close.columns = close.columns.get_level_values(1).astype(str)
         return close
+    field_like_columns = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor"}
+    column_names = {str(column).strip().lower() for column in price_df.columns}
+    if len(price_df.columns) > 1 and column_names & field_like_columns:
+        raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
     return price_df.copy()

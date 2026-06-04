@@ -124,7 +124,7 @@ class FactorCalculatorTests(unittest.TestCase):
         compute.assert_called_once()
         self.assertEqual(float(factors.iloc[0]["F1"]), 3.0)
 
-    def test_load_or_compute_factors_recomputes_when_meta_exists_but_qlib_config_is_missing(self) -> None:
+    def test_load_or_compute_factors_reuses_cache_when_meta_exists_but_qlib_config_is_missing(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -146,16 +146,15 @@ class FactorCalculatorTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            recomputed = pd.DataFrame({"F1": [3.0, 4.0]}, index=index)
             config = {"factors": {"cache_file": str(cache_path)}, "ic": {"price_file": str(price_path)}}
 
             with patch("src.factor_calculator.load_config", return_value=config), patch(
                 "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
-            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=recomputed) as compute:
+            ), patch("src.factor_calculator.compute_alpha158_factors") as compute:
                 factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path)
 
-        compute.assert_called_once()
-        self.assertEqual(float(factors.iloc[0]["F1"]), 3.0)
+        compute.assert_not_called()
+        self.assertEqual(float(factors.iloc[0]["F1"]), 1.0)
 
 
 if __name__ == "__main__":
