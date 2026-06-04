@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.scoring import _dynamic_ic_selector_weights, build_latest_strategy_scores, build_strategy_scores
+from src.scoring import _dynamic_ic_selector_weights, _latest_dynamic_ic_selector_weights, build_latest_strategy_scores, build_strategy_scores
 
 
 class ScoringTests(unittest.TestCase):
@@ -99,6 +99,52 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(set(latest.index), {"F1", "F2"})
         self.assertAlmostEqual(float(latest.sum()), 1.0)
         self.assertGreater(float(latest["F1"]), float(latest["F2"]))
+
+    def test_dynamic_ic_selector_falls_back_when_top_scores_are_negative(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": range(5), "F2": range(5)}, index=index)
+        prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+        rolling_ic = pd.DataFrame({"F1": [-0.01], "F2": [-0.02]}, index=[pd.Timestamp("2024-01-02")])
+
+        with patch("src.scoring.calculate_rolling_ic", return_value=rolling_ic):
+            weights = _dynamic_ic_selector_weights(
+                factors,
+                prices,
+                {"top_k": 2, "min_periods": 1, "fallback_candidate": "factor:F2"},
+            )
+
+        latest = weights[pd.Timestamp("2024-01-02")]
+        self.assertEqual(latest.to_dict(), {"F2": 1.0})
+
+    def test_latest_dynamic_ic_selector_weights_uses_recent_history_only(self) -> None:
+        dates = pd.date_range("2024-01-01", periods=10, freq="D")
+        index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": range(len(index))}, index=index)
+        prices = pd.DataFrame(10.0, index=dates, columns=["A", "B", "C", "D", "E"])
+        captured_dates: list[pd.Timestamp] = []
+
+        def fake_rolling_ic(factor_history: pd.DataFrame, *_args, **_kwargs) -> pd.DataFrame:
+            captured_dates.extend(pd.to_datetime(factor_history.index.get_level_values("datetime")).unique())
+            return pd.DataFrame({"F1": [0.1]}, index=[dates[-1]])
+
+        config = {
+            "dynamic_ic_selector": {
+                "candidates": ["factor:F1"],
+                "fallback_candidate": "factor:F1",
+                "latest_weight_lookback_sessions": 4,
+                "window": 3,
+                "min_periods": 2,
+                "horizon": 1,
+            }
+        }
+        with patch("src.scoring.calculate_rolling_ic", side_effect=fake_rolling_ic):
+            weights = _latest_dynamic_ic_selector_weights(factors, prices, config, dates[-1])
+
+        self.assertEqual(weights.to_dict(), {"F1": 1.0})
+        self.assertEqual(set(captured_dates), set(dates[-4:]))
 
     def test_build_strategy_scores_applies_low_liquidity_filter(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])

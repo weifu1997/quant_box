@@ -128,11 +128,18 @@ def _latest_dynamic_ic_selector_weights(
     config: dict,
     target_date: pd.Timestamp,
 ) -> pd.Series:
-    signed_factors = _signed_candidate_factors(factors, _dynamic_ic_candidates(config))
-    dynamic_weights = _dynamic_ic_selector_weights(signed_factors, prices, config.get("dynamic_ic_selector", {}))
+    selector_cfg = config.get("dynamic_ic_selector", {})
+    horizon = max(1, int(selector_cfg.get("horizon", 20)))
+    window = int(selector_cfg.get("window", 504))
+    min_periods = int(selector_cfg.get("min_periods", 120))
+    lookback_sessions = int(selector_cfg.get("latest_weight_lookback_sessions", window + min_periods + horizon + 5))
+    factor_history = _slice_recent_factor_history(factors, target_date, lookback_sessions)
+    price_history = _slice_price_history(prices, target_date, lookback_sessions)
+    signed_factors = _signed_candidate_factors(factor_history, _dynamic_ic_candidates(config))
+    dynamic_weights = _dynamic_ic_selector_weights(signed_factors, price_history, selector_cfg)
     eligible_dates = [date for date in dynamic_weights if pd.Timestamp(date).normalize() <= target_date]
     if not eligible_dates:
-        return _dynamic_ic_fallback_weights(signed_factors, config.get("dynamic_ic_selector", {}))
+        return _dynamic_ic_fallback_weights(signed_factors, selector_cfg)
     return dynamic_weights[max(eligible_dates)]
 
 
@@ -204,6 +211,7 @@ def _dynamic_ic_selector_weights(
     min_score = float(min_score) if min_score is not None else None
 
     weights: dict[pd.Timestamp, pd.Series] = {}
+    fallback = _dynamic_ic_fallback_weights(signed_factors, selector_cfg)
     top_k = max(1, int(selector_cfg.get("top_k", 1)))
     for date, row in scores.iterrows():
         candidates = row.dropna()
@@ -214,7 +222,9 @@ def _dynamic_ic_selector_weights(
         selected = candidates.sort_values(ascending=False).head(top_k)
         selected_weights = selected.clip(lower=0.0)
         if float(selected_weights.sum()) <= 0:
-            selected_weights = pd.Series(1.0, index=selected.index, dtype=float)
+            if not fallback.empty:
+                weights[pd.Timestamp(date).normalize()] = fallback
+            continue
         weights[pd.Timestamp(date).normalize()] = (selected_weights / selected_weights.sum()).astype(float)
     return weights
 

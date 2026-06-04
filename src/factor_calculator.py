@@ -13,7 +13,6 @@ from src.trading_calendar import resolve_target_date_value
 
 logger = logging.getLogger(__name__)
 _QLIB_INIT_STATE: tuple[str, str] | None = None
-warnings.filterwarnings("ignore", message="divide by zero encountered in log", category=RuntimeWarning)
 
 
 def compute_alpha158_factors(
