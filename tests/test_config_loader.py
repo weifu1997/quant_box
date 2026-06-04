@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from src.config_loader import _expand_env_values
+from src.config_loader import DEFAULT_CONFIG, _expand_env_values
 
 
 class ConfigLoaderTests(unittest.TestCase):
@@ -29,6 +29,12 @@ class ConfigLoaderTests(unittest.TestCase):
     def test_expand_env_values_missing_variable_becomes_empty_string(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(_expand_env_values("http://${MISSING_HOST}:8020/"), "http://:8020/")
+
+    def test_default_strategy_includes_portfolio_circuit_breaker(self) -> None:
+        strategy = DEFAULT_CONFIG["strategy"]
+
+        self.assertEqual(strategy["circuit_breaker_drawdown"], 0.12)
+        self.assertEqual(strategy["circuit_breaker_cooldown_days"], 20)
 
 
 if __name__ == "__main__":

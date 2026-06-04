@@ -84,6 +84,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "factor_group": "dynamic_ic_selector",
         "rebalance_freq": "monthly",
         "take_profit_pct": 0.5,
+        "circuit_breaker_drawdown": 0.12,
+        "circuit_breaker_cooldown_days": 20,
         "min_cross_section_obs": 5,
     },
     "backtest": {
