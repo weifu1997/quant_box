@@ -52,6 +52,14 @@ class RollingICTests(unittest.TestCase):
 
         self.assertAlmostEqual(float(original.loc[date, "F1"]), float(mutated.loc[date, "F1"]))
 
+    def test_rolling_ic_lags_by_forward_horizon(self) -> None:
+        factors, prices = _factor_price_fixture(days=14)
+        daily_ic = calculate_factor_ic(factors, prices, horizon=3, min_obs=3)
+        rolling_ic = calculate_rolling_ic(factors, prices, horizon=3, window=5, min_periods=3, min_obs=3)
+
+        expected = daily_ic.iloc[0:3]["F1"].mean()
+        self.assertAlmostEqual(float(rolling_ic.iloc[5]["F1"]), float(expected))
+
     def test_cluster_correlated_factors_keeps_one_representative(self) -> None:
         frame = pd.DataFrame(
             {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 import weakref
@@ -73,17 +74,21 @@ def run_backtest(
 
     previous_date: pd.Timestamp | None = None
     peak_equity = capital
-    for trade_date in price_dates:
+    circuit_breaker_until: pd.Timestamp | None = None
+    circuit_breaker_cooldown_days = config.get("circuit_breaker_cooldown_days")
+    for date_pos, trade_date in enumerate(price_dates):
         close = _price_row(prices, valuation_price_field, trade_date)
         trade_prices = _price_row(prices, trade_price_field, trade_date)
-        last_prices.update({str(code): float(price) for code, price in close.dropna().items()})
+        close_values = _row_price_dict(close)
+        trade_price_values = _row_price_dict(trade_prices)
+        last_prices.update(close_values)
         tradability = _tradability(prices, trade_date, previous_date, config)
         capital = _execute_stale_price_exits(
             holdings,
             entry_prices,
             stale_unpriced_days,
             capital,
-            close,
+            close_values,
             last_prices,
             tradability,
             trade_rows,
@@ -100,7 +105,7 @@ def run_backtest(
             holdings,
             entry_prices,
             capital,
-            close,
+            close_values,
             last_prices,
             tradability,
             trade_rows,
@@ -113,15 +118,23 @@ def run_backtest(
             prices,
             config,
         )
-        total_before_signal = _portfolio_value(capital, holdings, close, last_prices)
-        peak_equity = max(peak_equity, total_before_signal)
-        risk_off = _drawdown_breached(total_before_signal, peak_equity, config)
+        total_before_signal = _portfolio_value(capital, holdings, close_values, last_prices)
+        if circuit_breaker_until is not None and pd.Timestamp(trade_date) <= circuit_breaker_until:
+            risk_off = True
+        else:
+            if circuit_breaker_until is not None:
+                circuit_breaker_until = None
+                peak_equity = total_before_signal
+            peak_equity = max(peak_equity, total_before_signal)
+            risk_off = _drawdown_breached(total_before_signal, peak_equity, config)
+            if risk_off and circuit_breaker_cooldown_days is not None:
+                circuit_breaker_until = _cooldown_until(price_dates, date_pos, int(circuit_breaker_cooldown_days))
         if risk_off:
             capital = _liquidate_portfolio(
                 holdings,
                 entry_prices,
                 capital,
-                close,
+                close_values,
                 last_prices,
                 tradability,
                 trade_rows,
@@ -149,13 +162,13 @@ def run_backtest(
                 max_turnover=max_turnover,
                 rank_buffer=rank_buffer,
             )
-            total_before_trade = _portfolio_value(capital, holdings, close, last_prices)
+            total_before_trade = _portfolio_value(capital, holdings, close_values, last_prices)
             exposure_scale = _exposure_scale(equity_rows, config)
             target_value = _target_value(total_before_trade, target_holdings, max_weight, exposure_scale)
 
             desired_shares = {}
             for stock in target_holdings:
-                price = _price_for(stock, trade_prices, last_prices)
+                price = _price_for(stock, trade_price_values, last_prices)
                 desired_shares[stock] = _round_lot(target_value / price if price > 0 else 0, stock, config)
 
             for stock in list(holdings):
@@ -167,7 +180,7 @@ def run_backtest(
                 if stock not in tradability["sellable"]:
                     trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "SELL", sell_shares, "not_sellable"))
                     continue
-                price = _price_for(stock, trade_prices, last_prices) * (1 - slippage)
+                price = _price_for(stock, trade_price_values, last_prices) * (1 - slippage)
                 capacity = _capacity(prices, trade_date, stock, sell_shares * price, config)
                 filled_shares, status, reason = _apply_capacity_limit(sell_shares, price, stock, prices, trade_date, config)
                 if filled_shares <= 0:
@@ -200,7 +213,7 @@ def run_backtest(
                         commission_cost=commission_cost,
                         tax_cost=tax_cost,
                         transfer_fee_cost=transfer_fee_cost,
-                        slippage_cost=sell_shares * _price_for(stock, trade_prices, last_prices) * slippage,
+                        slippage_cost=sell_shares * _price_for(stock, trade_price_values, last_prices) * slippage,
                         capacity=capacity,
                     )
                 )
@@ -214,7 +227,7 @@ def run_backtest(
                 if stock not in tradability["buyable"]:
                     trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "BUY", buy_shares, "not_buyable"))
                     continue
-                price = _price_for(stock, trade_prices, last_prices) * (1 + slippage)
+                price = _price_for(stock, trade_price_values, last_prices) * (1 + slippage)
                 capacity = _capacity(prices, trade_date, stock, buy_shares * price, config)
                 buy_shares, status, reason = _apply_capacity_limit(buy_shares, price, stock, prices, trade_date, config)
                 if buy_shares <= 0:
@@ -250,15 +263,15 @@ def run_backtest(
                         commission_cost=commission_cost,
                         tax_cost=0.0,
                         transfer_fee_cost=transfer_fee_cost,
-                        slippage_cost=buy_shares * _price_for(stock, trade_prices, last_prices) * slippage,
+                        slippage_cost=buy_shares * _price_for(stock, trade_price_values, last_prices) * slippage,
                         capacity=capacity,
                     )
                 )
 
-        total = _portfolio_value(capital, holdings, close, last_prices)
+        total = _portfolio_value(capital, holdings, close_values, last_prices)
         equity_rows.append((pd.Timestamp(trade_date), total))
         for stock, shares in holdings.items():
-            price = _price_for(stock, close, last_prices)
+            price = _price_for(stock, close_values, last_prices)
             holding_rows.append(
                 {
                     "date": trade_date,
@@ -514,17 +527,35 @@ def _tradability(
     return {"priced": priced, "buyable": buyable, "sellable": sellable}
 
 
-def _portfolio_value(capital: float, holdings: dict[str, int], close: pd.Series, last_prices: dict[str, float]) -> float:
+def _portfolio_value(
+    capital: float,
+    holdings: dict[str, int],
+    close: pd.Series | Mapping[str, float],
+    last_prices: dict[str, float],
+) -> float:
     total = capital
     for stock, shares in holdings.items():
         total += shares * _price_for(stock, close, last_prices)
     return float(total)
 
 
-def _price_for(stock: str, close: pd.Series, last_prices: dict[str, float]) -> float:
+def _price_for(stock: str, close: pd.Series | Mapping[str, float], last_prices: dict[str, float]) -> float:
+    if isinstance(close, Mapping):
+        price = close.get(stock)
+        if price is not None and pd.notna(price):
+            return float(price)
+        return float(last_prices.get(stock, 0.0))
     if stock in close.index and pd.notna(close.loc[stock]):
         return float(close.loc[stock])
     return float(last_prices.get(stock, 0.0))
+
+
+def _row_price_dict(row: pd.Series | Mapping[str, float]) -> Mapping[str, float]:
+    if isinstance(row, Mapping):
+        return row
+    if row.empty:
+        return {}
+    return row.dropna().to_dict()
 
 
 def _target_value(total: float, target_holdings: list[str], max_weight: float | None, exposure_scale: float = 1.0) -> float:
@@ -630,7 +661,7 @@ def _execute_risk_exits(
     holdings: dict[str, int],
     entry_prices: dict[str, float],
     capital: float,
-    close: pd.Series,
+    close: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
     tradability: dict[str, set[str]],
     trade_rows: list[dict[str, object]],
@@ -648,9 +679,9 @@ def _execute_risk_exits(
     if stop_loss is None and take_profit is None:
         return capital
 
-    open_prices = _field_on_date(prices, "open", trade_date)
-    high_prices = _field_on_date(prices, "high", trade_date)
-    low_prices = _field_on_date(prices, "low", trade_date)
+    open_prices = _row_price_dict(_field_on_date(prices, "open", trade_date))
+    high_prices = _row_price_dict(_field_on_date(prices, "high", trade_date))
+    low_prices = _row_price_dict(_field_on_date(prices, "low", trade_date))
     for stock, shares in list(holdings.items()):
         entry = entry_prices.get(stock)
         if entry is None or entry <= 0 or shares <= 0:
@@ -698,7 +729,7 @@ def _execute_stale_price_exits(
     entry_prices: dict[str, float],
     stale_unpriced_days: dict[str, int],
     capital: float,
-    close: pd.Series,
+    close: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
     tradability: dict[str, set[str]],
     trade_rows: list[dict[str, object]],
@@ -716,10 +747,11 @@ def _execute_stale_price_exits(
     if threshold <= 0 or not holdings:
         return capital
 
-    volume = _field_on_date(prices, "volume", trade_date)
+    close_values = _row_price_dict(close)
+    volume_values = _row_price_dict(_field_on_date(prices, "volume", trade_date))
     for stock, shares in list(holdings.items()):
-        has_price = stock in close.index and pd.notna(close.loc[stock])
-        has_volume = stock in volume.index and pd.notna(volume.loc[stock]) and float(volume.loc[stock]) > 0
+        has_price = stock in close_values
+        has_volume = volume_values.get(stock, 0.0) > 0
         if has_price and has_volume:
             stale_unpriced_days[stock] = 0
             continue
@@ -756,7 +788,7 @@ def _liquidate_portfolio(
     holdings: dict[str, int],
     entry_prices: dict[str, float],
     capital: float,
-    close: pd.Series,
+    close: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
     tradability: dict[str, set[str]],
     trade_rows: list[dict[str, object]],
@@ -801,7 +833,7 @@ def _sell_all(
     holdings: dict[str, int],
     entry_prices: dict[str, float],
     capital: float,
-    close: pd.Series,
+    close: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
     trade_rows: list[dict[str, object]],
     trade_date: pd.Timestamp,
@@ -867,6 +899,13 @@ def _drawdown_breached(total: float, peak_equity: float, config: dict) -> bool:
     return drawdown <= -abs(float(threshold))
 
 
+def _cooldown_until(price_dates: pd.Index, current_pos: int, cooldown_days: int) -> pd.Timestamp:
+    if len(price_dates) == 0:
+        return pd.NaT
+    target_pos = min(max(current_pos + max(cooldown_days, 0), current_pos), len(price_dates) - 1)
+    return pd.Timestamp(price_dates[target_pos])
+
+
 def _exposure_scale(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> float:
     target_vol = config.get("target_vol")
     if target_vol is None:
@@ -917,7 +956,7 @@ def _risk_exit_decision(
     entry: float,
     trade_date: pd.Timestamp,
     prices: pd.DataFrame,
-    close: pd.Series,
+    close: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
     stop_loss: float | None,
     take_profit: float | None,
@@ -938,10 +977,10 @@ def _risk_exit_decision(
 def _risk_exit_decision_from_rows(
     stock: str,
     entry: float,
-    close: pd.Series,
-    open_prices: pd.Series,
-    high_prices: pd.Series,
-    low_prices: pd.Series,
+    close: pd.Series | Mapping[str, float],
+    open_prices: pd.Series | Mapping[str, float],
+    high_prices: pd.Series | Mapping[str, float],
+    low_prices: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
     stop_loss: float | None,
     take_profit: float | None,
@@ -972,7 +1011,7 @@ def _risk_exit_decision_from_rows(
 
 def _risk_exit_market_price(
     stock: str,
-    close: pd.Series,
+    close: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
     trade_date: pd.Timestamp,
     prices: pd.DataFrame,

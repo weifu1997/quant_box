@@ -74,10 +74,12 @@ def calculate_rolling_ic(
     min_obs: int = 20,
 ) -> pd.DataFrame:
     daily_ic = calculate_factor_ic(factor_df, price_df, horizon=horizon, method=method, min_obs=min_obs)
-    rolling_ic = daily_ic.shift(1).rolling(window=window, min_periods=min_periods).mean()
+    realized_lag = max(1, int(horizon))
+    rolling_ic = daily_ic.shift(realized_lag).rolling(window=window, min_periods=min_periods).mean()
     rolling_ic.attrs["daily_ic"] = daily_ic
     rolling_ic.attrs["window"] = window
     rolling_ic.attrs["min_periods"] = min_periods
+    rolling_ic.attrs["horizon"] = realized_lag
     return rolling_ic
 
 
@@ -125,7 +127,8 @@ def make_rolling_ic_weights(
     if not isinstance(daily_ic, pd.DataFrame):
         raise ValueError("rolling_ic_df must be produced by calculate_rolling_ic and include attrs['daily_ic'].")
     window = int(rolling_ic_df.attrs.get("window", 252))
-    source = daily_ic.shift(1)
+    horizon = max(1, int(rolling_ic_df.attrs.get("horizon", 1)))
+    source = daily_ic.shift(horizon)
     rolling_std = source.rolling(window=window, min_periods=min_periods).std(ddof=0)
     rolling_count = source.rolling(window=window, min_periods=min_periods).count()
 

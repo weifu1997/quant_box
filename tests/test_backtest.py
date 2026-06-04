@@ -354,6 +354,43 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(stale_trade["status"], "risk_exit")
         self.assertAlmostEqual(float(stale_trade["price"]), 5.0)
 
+    def test_circuit_breaker_cooldown_allows_reentry(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09"])
+        index = pd.MultiIndex.from_product([dates[:-1], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series(10, index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 9.0, 9.0, 9.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-09",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "circuit_breaker_drawdown": 0.05,
+                "circuit_breaker_cooldown_days": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+            },
+        )
+
+        circuit_sell = result.trades[result.trades["reason"] == "circuit_breaker"].iloc[0]
+        later_buys = result.trades[
+            (result.trades["side"] == "BUY")
+            & (pd.to_datetime(result.trades["date"]) > pd.Timestamp(circuit_sell["date"]))
+        ]
+        self.assertFalse(later_buys.empty)
+
 
 if __name__ == "__main__":
     unittest.main()
