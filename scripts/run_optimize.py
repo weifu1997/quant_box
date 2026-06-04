@@ -125,6 +125,7 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            scoring_config=config,
             on_result=on_result,
         )
     elif args.walk_forward:
@@ -148,6 +149,7 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            scoring_config=config,
             on_result=on_result,
         )
     else:
@@ -169,6 +171,7 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            scoring_config=config,
             on_result=on_result,
         )
     results.to_csv(output_path, index=False, encoding="utf-8-sig")

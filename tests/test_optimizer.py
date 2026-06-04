@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -63,6 +64,40 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(len(result), 4)
         self.assertEqual(set(result["top_n"]), {1, 2})
         self.assertEqual(set(result["rebalance_freq"]), {"daily", "weekly"})
+
+    def test_grid_validation_passes_full_scoring_config(self) -> None:
+        factors, prices = _walk_forward_data()
+        grid = {
+            "factor_group": ["dynamic_ic_selector"],
+            "top_n": [1],
+            "max_turnover": [1],
+            "rank_buffer": [0],
+            "rebalance_freq": ["monthly"],
+        }
+        captured: list[dict] = []
+
+        def fake_build_scores(factor_df: pd.DataFrame, config: dict, price_df: pd.DataFrame | None = None) -> pd.Series:
+            captured.append(config)
+            return factor_df["ROC5"].rename("score")
+
+        with patch("src.optimizer.build_strategy_scores", side_effect=fake_build_scores):
+            result = run_walk_forward_grid_validation(
+                factors,
+                prices,
+                base_config=_base_backtest_config(),
+                start_date="2023-01-02",
+                end_date="2024-02-15",
+                grid=grid,
+                train_years=1,
+                test_months=1,
+                step_months=12,
+                use_rolling_ic=False,
+                scoring_config={"strategy": {"factor_group": "old"}, "liquidity_filter": {"enabled": True}},
+            )
+
+        self.assertFalse(result.empty)
+        self.assertEqual(captured[0]["strategy"]["factor_group"], "dynamic_ic_selector")
+        self.assertTrue(captured[0]["liquidity_filter"]["enabled"])
 
 
 def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:

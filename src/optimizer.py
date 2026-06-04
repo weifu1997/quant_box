@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from itertools import product
 import logging
 from typing import Iterable
@@ -51,6 +52,7 @@ def run_parameter_grid(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    scoring_config: dict | None = None,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     grid = grid or DEFAULT_GRID
@@ -82,7 +84,10 @@ def run_parameter_grid(
             logger.info("Building scores for factor_group=%s rebalance_freq=%s.", factor_group, rebalance_freq)
             weights = ic_weights if factor_group == "ic_weighted" else None
             dynamic = dynamic_weights if factor_group == "ic_weighted" else None
-            scores = composite_factor(factor_df, method=factor_group, factor_weights=weights, factor_weights_dynamic=dynamic)
+            if factor_group == "ic_weighted":
+                scores = composite_factor(factor_df, method=factor_group, factor_weights=weights, factor_weights_dynamic=dynamic)
+            else:
+                scores = build_strategy_scores(factor_df, _scoring_config(scoring_config, params), price_df=price_df)
             score_cache[cache_key] = resample_signals(scores, rebalance_freq)
 
         bt_config = {**base_config, **params}
@@ -247,6 +252,7 @@ def run_walk_forward_grid_validation(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    scoring_config: dict | None = None,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     """Evaluate every parameter combination on rolling out-of-sample windows."""
@@ -268,9 +274,11 @@ def run_walk_forward_grid_validation(
 
         train_factors = _slice_factor_dates(factor_df, train_start, train_end)
         test_factors = _slice_factor_dates(factor_df, test_start, test_end)
+        scoring_factors = _slice_factor_dates(factor_df, train_start, test_end)
         train_prices = price_df.loc[(price_df.index >= train_start) & (price_df.index <= train_end)]
         test_prices = price_df.loc[(price_df.index >= test_start) & (price_df.index <= test_end)]
-        if train_factors.empty or test_factors.empty or train_prices.empty or test_prices.empty:
+        scoring_prices = price_df.loc[(price_df.index >= train_start) & (price_df.index <= test_end)]
+        if train_factors.empty or test_factors.empty or scoring_factors.empty or train_prices.empty or test_prices.empty or scoring_prices.empty:
             train_start += pd.DateOffset(months=step_months)
             continue
 
@@ -320,7 +328,8 @@ def run_walk_forward_grid_validation(
                         factor_weights_dynamic=dynamic_ic_weights,
                     )
                 else:
-                    scores = build_strategy_scores(test_factors, {"strategy": {"factor_group": factor_group}}, price_df=test_prices)
+                    scores = build_strategy_scores(scoring_factors, _scoring_config(scoring_config, params), price_df=scoring_prices)
+                    scores = _slice_score_dates(scores, test_start, test_end)
                 score_cache[cache_key] = resample_signals(scores, rebalance_freq)
 
             result = run_backtest(
@@ -355,6 +364,15 @@ def _slice_factor_dates(factor_df: pd.DataFrame, start: pd.Timestamp, end: pd.Ti
 def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
     dates = pd.to_datetime(score_panel.index.get_level_values(0))
     return score_panel[(dates >= start) & (dates <= end)]
+
+
+def _scoring_config(config: dict | None, params: dict[str, object]) -> dict:
+    result = deepcopy(config) if config is not None else {"strategy": {}}
+    result.setdefault("strategy", {})
+    for key in ["factor_group", "top_n", "max_turnover", "rank_buffer", "rebalance_freq"]:
+        if key in params:
+            result["strategy"][key] = params[key]
+    return result
 
 
 def _last_dynamic_weights(weights_by_date: dict[pd.Timestamp, pd.Series]) -> pd.Series:

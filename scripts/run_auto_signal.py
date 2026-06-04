@@ -198,6 +198,7 @@ def main() -> None:
                 ic_top_k=int(config.get("ic", {}).get("top_k", 30)),
                 ic_weight_smoothing=float(config.get("ic", {}).get("weight_smoothing", 0.0)),
                 ic_max_weight_turnover=config.get("ic", {}).get("max_weight_turnover"),
+                scoring_config=config,
             )
             validation_path = out_dir / "auto_validation_windows.csv"
             validation.to_csv(validation_path, index=False, encoding="utf-8-sig")
