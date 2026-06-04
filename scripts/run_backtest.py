@@ -13,9 +13,9 @@ sys.path.insert(0, str(ROOT))
 
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
-from src.factor_calculator import load_or_compute_factors
+from src.factor_calculator import factor_cache_columns, load_or_compute_factors
 from src.scoring import build_strategy_scores
-from src.strategy import resample_signals
+from src.strategy import factor_columns_for_method, resample_signals
 from src.trading_calendar import resolve_target_date_value
 from src.universe_coverage import summarize_universe_coverage
 
@@ -39,7 +39,12 @@ def main() -> None:
     if not price_file.exists():
         raise FileNotFoundError(f"Price file not found: {price_file}. Run scripts/run_convert_data.py first.")
     prices = pd.read_parquet(price_file)
-    factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file)
+    factor_columns = _requested_factor_columns(args.factor_file, str(config.get("strategy", {}).get("factor_group", "momentum")))
+    if factor_columns is None:
+        logger.info("Loading all factor columns.")
+    else:
+        logger.info("Loading %s factor columns for factor_group=%s.", len(factor_columns), config.get("strategy", {}).get("factor_group"))
+    factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file, columns=factor_columns)
     scores = build_strategy_scores(factors, config, price_df=prices)
     scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
 
@@ -74,6 +79,17 @@ def main() -> None:
         coverage["target_symbols"],
         coverage["price_target_coverage"] * 100,
     )
+
+
+def _requested_factor_columns(factor_file: str, factor_group: str) -> list[str] | None:
+    group = factor_group.strip().lower()
+    if group in {"all", "ic_weighted"}:
+        return None
+    available_columns = factor_cache_columns(factor_file)
+    if not available_columns:
+        return None
+    requested = [str(column) for column in factor_columns_for_method(available_columns, group)]
+    return sorted(requested) if requested else None
 
 
 if __name__ == "__main__":

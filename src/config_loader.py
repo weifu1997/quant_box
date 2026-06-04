@@ -36,7 +36,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "exclude_st": True,
         "st_calendar_file": None,
     },
-    "qlib": {"provider_uri": "data/qlib_data", "region": "cn", "instruments": "mainboard_a", "missing_value": -1.0},
+    "qlib": {"provider_uri": "data/qlib_data", "region": "cn", "instruments": "mainboard_a", "missing_value": None},
     "factors": {"cache_file": "data/factors/alpha158.parquet"},
     "ic": {
         "window": 252,
@@ -51,11 +51,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "weights_cache_file": "data/factors/rolling_ic_weights.pkl",
     },
     "strategy": {
-        "top_n": 7,
+        "top_n": 20,
         "max_turnover": 1,
-        "rank_buffer": 10,
-        "factor_group": "ic_weighted",
-        "rebalance_freq": "weekly",
+        "rank_buffer": 20,
+        "factor_group": "momentum",
+        "rebalance_freq": "monthly",
+        "take_profit_pct": 1.0,
         "min_cross_section_obs": 5,
     },
     "backtest": {

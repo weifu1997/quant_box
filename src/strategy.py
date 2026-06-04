@@ -322,14 +322,30 @@ def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:
         if len(df) < min_obs:
             return pd.DataFrame(np.nan, index=df.index, columns=df.columns)
         std = df.std(ddof=0).replace(0, pd.NA)
-        return ((df - df.mean()) / std).replace([np.inf, -np.inf], np.nan)
+        return _mask_nonfinite((df - df.mean()) / std)
 
     date_level = df.index.names[0] or 0
-    grouped = df.groupby(level=date_level)
-    counts = grouped.transform("count")
-    means = grouped.transform("mean")
-    mean_squares = df.pow(2).groupby(level=date_level).transform("mean")
-    stds = np.sqrt((mean_squares - means.pow(2)).clip(lower=0)).replace(0, np.nan)
-    scaled = (df - means) / stds
-    scaled = scaled.where(counts >= min_obs)
-    return scaled.astype(float).replace([np.inf, -np.inf], np.nan)
+    parts: list[pd.DataFrame] = []
+    for _date, daily in df.groupby(level=date_level, sort=False):
+        counts = daily.count()
+        valid_columns = counts[counts >= min_obs].index
+        if len(valid_columns) == 0:
+            parts.append(pd.DataFrame(np.nan, index=daily.index, columns=daily.columns, dtype="float32"))
+            continue
+
+        numeric = daily.astype("float32", copy=False)
+        stds = numeric[valid_columns].std(ddof=0).replace(0, np.nan)
+        scaled = pd.DataFrame(np.nan, index=daily.index, columns=daily.columns, dtype="float32")
+        scaled[valid_columns] = (numeric[valid_columns] - numeric[valid_columns].mean()) / stds
+        parts.append(_mask_nonfinite(scaled).astype("float32", copy=False))
+
+    if not parts:
+        return pd.DataFrame(index=df.index, columns=df.columns, dtype="float32")
+    return pd.concat(parts).sort_index()
+
+
+def _mask_nonfinite(df: pd.DataFrame) -> pd.DataFrame:
+    values = df.to_numpy(copy=False)
+    if np.isfinite(values).all():
+        return df
+    return df.mask(~np.isfinite(values))
