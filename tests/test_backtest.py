@@ -426,6 +426,66 @@ class BacktestTests(unittest.TestCase):
         ]
         self.assertFalse(later_buys.empty)
 
+    def test_exposure_schedule_change_rebalances_with_latest_signal(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+        exposure = pd.Series([1.0, 1.0, 0.5], index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "exposure_schedule": exposure,
+                "exposure_rebalance_threshold": 0.1,
+            },
+        )
+
+        sells = result.trades[result.trades["side"] == "SELL"]
+        self.assertFalse(sells.empty)
+        self.assertEqual(pd.Timestamp(sells.iloc[0]["date"]), dates[-1])
+
+    def test_score_weighted_backtest_allocates_more_to_higher_scores(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A", "B"]], names=["datetime", "instrument"])
+        scores = pd.Series([10.0, 1.0], index=index, name="score")
+        prices = pd.DataFrame({"A": [10.0, 10.0], "B": [10.0, 10.0]}, index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {
+                "initial_capital": 100000,
+                "top_n": 2,
+                "max_turnover": 2,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "score_weighted": True,
+            },
+        )
+
+        buys = result.trades[result.trades["side"] == "BUY"].set_index("instrument")
+        self.assertGreater(int(buys.loc["A", "shares"]), int(buys.loc["B", "shares"]))
+
 
 if __name__ == "__main__":
     unittest.main()

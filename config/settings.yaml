@@ -35,6 +35,47 @@ qlib:
 factors:
   cache_file: "data/factors/alpha158.parquet"
 
+ml_strategy:
+  enabled: false
+  model_type: "auto"
+  fallback_on_missing_model: true
+  train_years: 3
+  label_horizon_sessions: 20
+  rebalance_freq: "monthly"
+  feature_columns: null
+  feature_limit: 64
+  min_feature_fraction: 0.5
+  min_train_rows: 20000
+  max_train_rows: 80000
+  random_state: 42
+  label_clip: 0.30
+  ridge_alpha: 10.0
+  top_n: 15
+  score_weighted: false
+  fundamental_lag_days: 90
+
+market_regime:
+  enabled: true
+  benchmark_file: null
+  benchmark_symbol: null
+  ma_window: 120
+  momentum_window: 20
+  volatility_window: 20
+  min_periods: 60
+  bull_momentum_min: 0.0
+  bear_momentum_max: 0.0
+  high_volatility_threshold: null
+  volatility_quantile_window: 252
+  high_volatility_quantile: 0.75
+  lag_days: 1
+
+defensive_timing:
+  enabled: true
+  bull_exposure: 1.0
+  sideways_exposure: 0.85
+  bear_exposure: 0.55
+  exposure_rebalance_threshold: 0.05
+
 ic:
   window: 252
   min_periods: 60

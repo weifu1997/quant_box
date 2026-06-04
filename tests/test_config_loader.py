@@ -47,6 +47,15 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(quality["min_backtest_annual_return"], 0.20)
         self.assertEqual(quality["max_backtest_drawdown_limit"], -0.40)
 
+    def test_default_ml_strategy_is_configured_but_disabled_for_existing_pipeline(self) -> None:
+        ml = DEFAULT_CONFIG["ml_strategy"]
+
+        self.assertFalse(ml["enabled"])
+        self.assertEqual(ml["model_type"], "auto")
+        self.assertEqual(ml["label_horizon_sessions"], 20)
+        self.assertEqual(ml["fundamental_lag_days"], 90)
+        self.assertTrue(DEFAULT_CONFIG["defensive_timing"]["enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()

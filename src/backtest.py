@@ -49,6 +49,7 @@ def run_backtest(
         trade_date = _next_price_date(price_dates, signal_date, end)
         if trade_date is not None:
             trade_schedule[trade_date] = signal_date
+    exposure_schedule = _normalize_exposure_schedule(config.get("exposure_schedule"), price_dates)
 
     capital = float(config.get("initial_capital", 1_000_000))
     commission = float(config.get("commission", 0.0003))
@@ -73,6 +74,7 @@ def run_backtest(
     trade_rows: list[dict[str, object]] = []
 
     previous_date: pd.Timestamp | None = None
+    last_signal_date: pd.Timestamp | None = None
     peak_equity = capital
     circuit_breaker_until: pd.Timestamp | None = None
     circuit_breaker_cooldown_days = config.get("circuit_breaker_cooldown_days")
@@ -150,8 +152,12 @@ def run_backtest(
             )
 
         signal_date = trade_schedule.get(pd.Timestamp(trade_date))
-        if signal_date is not None and not risk_off:
-            daily_scores = score_panel.xs(signal_date, level=0, drop_level=True)
+        if signal_date is not None:
+            last_signal_date = signal_date
+        exposure_rebalance = _scheduled_exposure_rebalance_needed(exposure_schedule, trade_date, previous_date, config)
+        rebalance_signal_date = signal_date if signal_date is not None else last_signal_date if exposure_rebalance else None
+        if rebalance_signal_date is not None and not risk_off:
+            daily_scores = score_panel.xs(rebalance_signal_date, level=0, drop_level=True)
             daily_scores.index = daily_scores.index.astype(str)
             daily_scores = daily_scores[daily_scores.index.isin(tradability["priced"])]
 
@@ -163,12 +169,13 @@ def run_backtest(
                 rank_buffer=rank_buffer,
             )
             total_before_trade = _portfolio_value(capital, holdings, close_values, last_prices)
-            exposure_scale = _exposure_scale(equity_rows, config)
-            target_value = _target_value(total_before_trade, target_holdings, max_weight, exposure_scale)
+            exposure_scale = _exposure_scale(equity_rows, config) * _scheduled_exposure_scale(exposure_schedule, trade_date)
+            target_values = _target_values(total_before_trade, target_holdings, daily_scores, max_weight, exposure_scale, config)
 
             desired_shares = {}
             for stock in target_holdings:
                 price = _price_for(stock, trade_price_values, last_prices)
+                target_value = target_values.get(stock, 0.0)
                 desired_shares[stock] = _round_lot(target_value / price if price > 0 else 0, stock, config)
 
             for stock in list(holdings):
@@ -178,13 +185,13 @@ def run_backtest(
                 if sell_shares <= 0:
                     continue
                 if stock not in tradability["sellable"]:
-                    trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "SELL", sell_shares, "not_sellable"))
+                    trade_rows.append(_blocked_trade(rebalance_signal_date, trade_date, stock, "SELL", sell_shares, "not_sellable"))
                     continue
                 price = _price_for(stock, trade_price_values, last_prices) * (1 - slippage)
                 capacity = _capacity(prices, trade_date, stock, sell_shares * price, config)
                 filled_shares, status, reason = _apply_capacity_limit(sell_shares, price, stock, prices, trade_date, config)
                 if filled_shares <= 0:
-                    trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "SELL", sell_shares, "capacity_limited"))
+                    trade_rows.append(_blocked_trade(rebalance_signal_date, trade_date, stock, "SELL", sell_shares, "capacity_limited"))
                     continue
                 sell_shares = filled_shares
                 gross = sell_shares * price
@@ -201,7 +208,7 @@ def run_backtest(
                     entry_prices.pop(stock, None)
                 trade_rows.append(
                     _trade(
-                        signal_date,
+                        rebalance_signal_date,
                         trade_date,
                         stock,
                         "SELL",
@@ -225,13 +232,13 @@ def run_backtest(
                 if buy_shares <= 0:
                     continue
                 if stock not in tradability["buyable"]:
-                    trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "BUY", buy_shares, "not_buyable"))
+                    trade_rows.append(_blocked_trade(rebalance_signal_date, trade_date, stock, "BUY", buy_shares, "not_buyable"))
                     continue
                 price = _price_for(stock, trade_price_values, last_prices) * (1 + slippage)
                 capacity = _capacity(prices, trade_date, stock, buy_shares * price, config)
                 buy_shares, status, reason = _apply_capacity_limit(buy_shares, price, stock, prices, trade_date, config)
                 if buy_shares <= 0:
-                    trade_rows.append(_blocked_trade(signal_date, trade_date, stock, "BUY", desired - current, "capacity_limited"))
+                    trade_rows.append(_blocked_trade(rebalance_signal_date, trade_date, stock, "BUY", desired - current, "capacity_limited"))
                     continue
                 gross = buy_shares * price
                 commission_cost = _commission_cost(gross, commission, min_commission)
@@ -251,7 +258,7 @@ def run_backtest(
                 entry_prices[stock] = _average_entry_price(entry_prices.get(stock), old_shares, price, buy_shares)
                 trade_rows.append(
                     _trade(
-                        signal_date,
+                        rebalance_signal_date,
                         trade_date,
                         stock,
                         "BUY",
@@ -571,6 +578,46 @@ def _target_value(total: float, target_holdings: list[str], max_weight: float | 
     equal_weight = 1 / len(target_holdings)
     weight = min(equal_weight, max_weight) if max_weight is not None else equal_weight
     return total * weight * exposure_scale
+
+
+def _target_values(
+    total: float,
+    target_holdings: list[str],
+    scores: pd.Series,
+    max_weight: float | None,
+    exposure_scale: float,
+    config: dict,
+) -> dict[str, float]:
+    if not target_holdings:
+        return {}
+
+    weighting = str(config.get("weighting_method", "")).strip().lower()
+    score_weighted = bool(config.get("score_weighted", False)) or weighting in {"score", "score_weighted"}
+    if score_weighted:
+        weights = _score_weights(scores, target_holdings)
+    else:
+        weights = pd.Series(1.0 / len(target_holdings), index=target_holdings, dtype=float)
+
+    if max_weight is not None:
+        weights = weights.clip(upper=max_weight)
+    scale = max(float(exposure_scale), 0.0)
+    return {stock: float(total) * float(weight) * scale for stock, weight in weights.items()}
+
+
+def _score_weights(scores: pd.Series, target_holdings: list[str]) -> pd.Series:
+    selected = pd.to_numeric(scores.reindex(target_holdings), errors="coerce").replace([np.inf, -np.inf], np.nan)
+    if selected.notna().sum() == 0:
+        return pd.Series(1.0 / len(target_holdings), index=target_holdings, dtype=float)
+
+    values = selected.to_numpy(dtype=float)
+    finite = np.isfinite(values)
+    min_value = float(np.nanmin(values[finite])) if finite.any() else 0.0
+    shifted = values - min_value if min_value <= 0 else values.copy()
+    shifted = np.where(finite, shifted, 0.0)
+    shifted = np.maximum(shifted, 0.0)
+    if float(shifted.sum()) <= 0:
+        return pd.Series(1.0 / len(target_holdings), index=target_holdings, dtype=float)
+    return pd.Series(shifted / shifted.sum(), index=target_holdings, dtype=float)
 
 
 def _round_lot(shares: float, stock: str, config: dict) -> int:
@@ -926,6 +973,56 @@ def _exposure_scale(equity_rows: list[tuple[pd.Timestamp, float]], config: dict)
     if not realized_vol or pd.isna(realized_vol):
         return min(1.0, max_leverage)
     return max(0.0, min(float(target_vol) / float(realized_vol), max_leverage))
+
+
+def _normalize_exposure_schedule(schedule: object, price_dates: pd.Index) -> pd.Series | None:
+    if schedule is None:
+        return None
+    if isinstance(schedule, pd.Series):
+        series = schedule.copy()
+    elif isinstance(schedule, Mapping):
+        series = pd.Series(schedule, dtype=float)
+    else:
+        try:
+            series = pd.Series(schedule, dtype=float)
+        except (TypeError, ValueError):
+            return None
+    if series.empty:
+        return None
+
+    series.index = pd.to_datetime(series.index).normalize()
+    series = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    series = series[~series.index.duplicated(keep="last")]
+    if series.empty:
+        return None
+
+    aligned_dates = pd.DatetimeIndex(pd.to_datetime(price_dates).normalize())
+    aligned = series.reindex(aligned_dates, method="ffill").fillna(1.0)
+    return aligned.clip(lower=0.0).rename("exposure_scale")
+
+
+def _scheduled_exposure_scale(exposure_schedule: pd.Series | None, trade_date: pd.Timestamp) -> float:
+    if exposure_schedule is None or exposure_schedule.empty:
+        return 1.0
+    date = pd.Timestamp(trade_date).normalize()
+    if date not in exposure_schedule.index:
+        eligible = exposure_schedule.loc[exposure_schedule.index <= date]
+        return float(eligible.iloc[-1]) if not eligible.empty else 1.0
+    return float(exposure_schedule.loc[date])
+
+
+def _scheduled_exposure_rebalance_needed(
+    exposure_schedule: pd.Series | None,
+    trade_date: pd.Timestamp,
+    previous_date: pd.Timestamp | None,
+    config: dict,
+) -> bool:
+    if exposure_schedule is None or previous_date is None:
+        return False
+    threshold = float(config.get("exposure_rebalance_threshold", 0.05))
+    current = _scheduled_exposure_scale(exposure_schedule, trade_date)
+    previous = _scheduled_exposure_scale(exposure_schedule, previous_date)
+    return abs(current - previous) >= max(threshold, 0.0)
 
 
 def _average_entry_price(old_entry: float | None, old_shares: int, price: float, buy_shares: int) -> float:

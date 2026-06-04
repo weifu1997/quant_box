@@ -39,7 +39,12 @@ def main() -> None:
     if not price_file.exists():
         raise FileNotFoundError(f"Price file not found: {price_file}. Run scripts/run_convert_data.py first.")
     prices = pd.read_parquet(price_file)
-    factor_columns = _requested_factor_columns(args.factor_file, config.get("strategy", {}), config.get("dynamic_ic_selector", {}))
+    factor_columns = _requested_factor_columns(
+        args.factor_file,
+        config.get("strategy", {}),
+        config.get("dynamic_ic_selector", {}),
+        config.get("ml_strategy", {}),
+    )
     if factor_columns is None:
         logger.info("Loading all factor columns.")
     else:
@@ -81,7 +86,25 @@ def main() -> None:
     )
 
 
-def _requested_factor_columns(factor_file: str, strategy_cfg: dict, dynamic_cfg: dict | None = None) -> list[str] | None:
+def _requested_factor_columns(
+    factor_file: str,
+    strategy_cfg: dict,
+    dynamic_cfg: dict | None = None,
+    ml_cfg: dict | None = None,
+) -> list[str] | None:
+    if bool((ml_cfg or {}).get("enabled", False)):
+        available_columns = factor_cache_columns(factor_file)
+        if not available_columns:
+            return None
+        configured = (ml_cfg or {}).get("feature_columns")
+        if configured:
+            requested = [str(column) for column in configured]
+            return [column for column in requested if column in available_columns]
+        feature_limit = (ml_cfg or {}).get("feature_limit")
+        if feature_limit is not None:
+            return available_columns[: max(1, int(feature_limit))]
+        return None
+
     group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
     if group in {"all", "ic_weighted"}:
         return None

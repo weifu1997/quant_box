@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.config_loader import resolve_path
 from src.factor_ic import calculate_factor_ic, calculate_rolling_ic, make_ic_weights, make_rolling_ic_weights, summarize_ic
+from src.ml_strategy import build_ml_scores, ml_strategy_enabled
 from src.strategy import composite_factor, factor_columns_for_method
 
 
@@ -36,6 +37,13 @@ def build_strategy_scores(
     ic_cfg = config.get("ic", {})
     price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
     prices = price_df
+
+    if ml_strategy_enabled(config):
+        prices = prices if prices is not None else _load_ic_price_frame(price_path)
+        result = build_ml_scores(factors, prices, config)
+        scores = result.scores
+        scores.attrs["training_diagnostics"] = result.diagnostics
+        return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
     if factor_group in DYNAMIC_IC_SELECTOR_GROUPS:
         prices = prices if prices is not None else _load_ic_price_frame(price_path)
@@ -73,6 +81,15 @@ def build_latest_strategy_scores(
     ic_cfg = config.get("ic", {})
     price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
     prices = price_df
+
+    if ml_strategy_enabled(config):
+        prices = prices if prices is not None else _load_ic_price_frame(price_path)
+        result = build_ml_scores(factors, prices, config, signal_dates=[target_date])
+        if result.scores.empty:
+            raise ValueError(f"No usable ML scores found for signal date {target_date.date()}.")
+        scores = result.scores
+        scores.attrs["training_diagnostics"] = result.diagnostics
+        return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
     if factor_group in DYNAMIC_IC_SELECTOR_GROUPS:
         prices = prices if prices is not None else _load_ic_price_frame(price_path)
