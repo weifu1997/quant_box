@@ -648,11 +648,24 @@ def _execute_risk_exits(
     if stop_loss is None and take_profit is None:
         return capital
 
+    open_prices = _field_on_date(prices, "open", trade_date)
+    high_prices = _field_on_date(prices, "high", trade_date)
+    low_prices = _field_on_date(prices, "low", trade_date)
     for stock, shares in list(holdings.items()):
         entry = entry_prices.get(stock)
         if entry is None or entry <= 0 or shares <= 0:
             continue
-        reason, execution_price = _risk_exit_decision(stock, entry, trade_date, prices, close, last_prices, stop_loss, take_profit)
+        reason, execution_price = _risk_exit_decision_from_rows(
+            stock,
+            entry,
+            close,
+            open_prices,
+            high_prices,
+            low_prices,
+            last_prices,
+            stop_loss,
+            take_profit,
+        )
         if reason is None:
             continue
         if stock not in tradability["sellable"]:
@@ -909,9 +922,33 @@ def _risk_exit_decision(
     stop_loss: float | None,
     take_profit: float | None,
 ) -> tuple[str | None, float | None]:
-    open_price = _price_for(stock, _field_on_date(prices, "open", trade_date), last_prices)
-    high_price = _price_for(stock, _field_on_date(prices, "high", trade_date), last_prices)
-    low_price = _price_for(stock, _field_on_date(prices, "low", trade_date), last_prices)
+    return _risk_exit_decision_from_rows(
+        stock,
+        entry,
+        close,
+        _field_on_date(prices, "open", trade_date),
+        _field_on_date(prices, "high", trade_date),
+        _field_on_date(prices, "low", trade_date),
+        last_prices,
+        stop_loss,
+        take_profit,
+    )
+
+
+def _risk_exit_decision_from_rows(
+    stock: str,
+    entry: float,
+    close: pd.Series,
+    open_prices: pd.Series,
+    high_prices: pd.Series,
+    low_prices: pd.Series,
+    last_prices: dict[str, float],
+    stop_loss: float | None,
+    take_profit: float | None,
+) -> tuple[str | None, float | None]:
+    open_price = _price_for(stock, open_prices, last_prices)
+    high_price = _price_for(stock, high_prices, last_prices)
+    low_price = _price_for(stock, low_prices, last_prices)
 
     if stop_loss is not None:
         stop_price = entry * (1 - abs(float(stop_loss)))
