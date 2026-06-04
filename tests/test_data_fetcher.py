@@ -457,6 +457,119 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(int(progress["latest_symbols"]), 1)
             self.assertEqual(int(progress["remaining_symbols"]), 0)
 
+    def test_resumable_update_marks_existing_empty_fetch_as_confirmed_no_new_data(self) -> None:
+        client = EmptyTushareClient()
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "daily_batch_size": 100,
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 9.0,
+                        "high": 9.0,
+                        "low": 9.0,
+                        "close": 9.0,
+                        "vol": 100.0,
+                        "amount": 900.0,
+                        "adj_factor": 1.0,
+                    }
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.TushareHttpClient.from_config", return_value=client):
+                written = update_daily_data_resumable(
+                    stock_codes=["000001.SZ"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                )
+
+            progress = pd.read_json(progress_file, typ="series")
+
+            self.assertEqual(set(written), {"000001.SZ"})
+            self.assertEqual(progress["status"], "complete")
+            self.assertEqual(int(progress["confirmed_no_new_data_symbols"]), 1)
+            self.assertEqual(int(progress["fresh_or_confirmed_symbols"]), 1)
+            self.assertEqual(int(progress["failed_symbols"]), 0)
+            self.assertEqual(int(progress["remaining_symbols"]), 0)
+            self.assertEqual(int(progress["latest_symbols"]), 0)
+
+    def test_resumable_update_skips_previous_confirmed_no_new_data_symbols(self) -> None:
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "daily_batch_size": 100,
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 9.0,
+                        "high": 9.0,
+                        "low": 9.0,
+                        "close": 9.0,
+                        "vol": 100.0,
+                        "amount": 900.0,
+                        "adj_factor": 1.0,
+                    }
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+            progress_file.write_text(
+                '{"target_end_date":"2024-01-03","confirmed_no_new_data":["000001.SZ"]}',
+                encoding="utf-8",
+            )
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.update_daily_data") as update:
+                update_daily_data_resumable(
+                    stock_codes=["000001.SZ"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                )
+
+            progress = pd.read_json(progress_file, typ="series")
+
+            update.assert_not_called()
+            self.assertEqual(progress["status"], "complete")
+            self.assertEqual(int(progress["pending_symbols"]), 0)
+            self.assertEqual(int(progress["confirmed_no_new_data_symbols"]), 1)
+            self.assertEqual(int(progress["fresh_or_confirmed_symbols"]), 1)
+
     def test_resumable_update_marks_error_when_symbol_is_not_written(self) -> None:
         client = EmptyTushareClient()
         config = {
@@ -580,9 +693,7 @@ class DataFetcherTests(unittest.TestCase):
 
             with patch("src.data_fetcher.load_config", return_value=config), patch(
                 "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
-            ), patch("src.data_fetcher._load_universe_list_dates", return_value={"000001.SZ": "2020-01-01", "600519.SH": "2021-01-01"}), patch(
-                "src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data
-            ):
+            ), patch("src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data):
                 update_daily_data_resumable(
                     stock_codes=["000001.SZ", "600519.SH"],
                     raw_dir=raw_dir,
@@ -594,7 +705,7 @@ class DataFetcherTests(unittest.TestCase):
 
             self.assertEqual(calls, [(["000001.SZ", "600519.SH"], "2024-01-01")])
 
-    def test_resumable_update_force_full_uses_list_dates_for_existing_symbols(self) -> None:
+    def test_resumable_update_force_full_batches_existing_symbols(self) -> None:
         config = {
             "data": {
                 "start_date": "2019-01-01",
@@ -624,9 +735,7 @@ class DataFetcherTests(unittest.TestCase):
 
             with patch("src.data_fetcher.load_config", return_value=config), patch(
                 "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
-            ), patch("src.data_fetcher._load_universe_list_dates", return_value={"000001.SZ": "2020-01-01", "600519.SH": "2021-01-01"}), patch(
-                "src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data
-            ):
+            ), patch("src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data):
                 update_daily_data_resumable(
                     stock_codes=["000001.SZ", "600519.SH"],
                     raw_dir=raw_dir,
@@ -637,7 +746,7 @@ class DataFetcherTests(unittest.TestCase):
                     force_full=True,
                 )
 
-            self.assertEqual(calls, [(["000001.SZ"], "2020-01-01", True), (["600519.SH"], "2021-01-01", True)])
+            self.assertEqual(calls, [(["000001.SZ", "600519.SH"], "2019-01-01", True)])
 
     def test_resumable_update_include_existing_tracks_processed_symbols(self) -> None:
         config = {

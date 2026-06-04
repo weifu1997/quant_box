@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 import io
@@ -754,18 +755,50 @@ def update_daily_data_resumable(
     codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe(date=end)
     codes = [str(code).upper() for code in dict.fromkeys(codes)]
     chunk_size = max(1, int(chunk_size or data_cfg.get("update_chunk_size", 20)))
-    sleep_seconds = float(sleep_seconds if sleep_seconds is not None else data_cfg.get("update_sleep_seconds", 1))
+    sleep_seconds = float(sleep_seconds if sleep_seconds is not None else data_cfg.get("update_sleep_seconds", 0))
     progress_path = resolve_path(progress_file or data_cfg.get("update_progress_file", "outputs/data_update_progress.json"))
 
     target_code_set = set(codes)
+    previous_progress = _read_update_progress(progress_path)
+    if _can_reuse_complete_update_progress(previous_progress, end, len(codes), include_existing, force_full):
+        refreshed_progress = dict(previous_progress or {})
+        refreshed_progress.update(
+            {
+                "status": "complete",
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "chunk_size": chunk_size,
+                "sleep_seconds": sleep_seconds,
+                "force_full": force_full,
+                "last_chunk": [],
+                "current_symbol": "",
+                "last_error": "",
+            }
+        )
+        _write_update_progress(progress_path, refreshed_progress)
+        logger.info("Resumable update already complete for %s; reused %s.", end, progress_path)
+        return {}
+
     initial_existing = _existing_stock_codes(target_dir) & target_code_set
     initial_latest = _fresh_stock_codes(target_dir, target_code_set, end)
+    latest_codes = set(initial_latest)
+    confirmed_no_new_data: set[str] = set()
+    if not include_existing and not force_full and previous_progress and str(previous_progress.get("target_end_date", "")) == end:
+        previous_confirmed = previous_progress.get("confirmed_no_new_data", [])
+        if not isinstance(previous_confirmed, list):
+            previous_confirmed = []
+        confirmed_no_new_data = {
+            str(code).upper()
+            for code in previous_confirmed
+            if str(code).upper() in target_code_set and str(code).upper() not in initial_latest
+        }
     pending_codes = codes if include_existing or force_full else [
         code
         for code in codes
-        if code not in initial_latest or _needs_adj_factor_backfill(target_dir / f"{code}.csv")
+        if (
+            (code not in initial_latest or _needs_adj_factor_backfill(target_dir / f"{code}.csv"))
+            and code not in confirmed_no_new_data
+        )
     ]
-    list_dates = _load_universe_list_dates(config)
     written: dict[str, Path] = {}
     failed: dict[str, str] = {}
     processed_codes: set[str] = set()
@@ -792,12 +825,16 @@ def update_daily_data_resumable(
             "chunk_size": chunk_size,
             "sleep_seconds": sleep_seconds,
             "force_full": force_full,
+            "confirmed_no_new_data_symbols": len(confirmed_no_new_data),
+            "confirmed_no_new_data": sorted(confirmed_no_new_data),
             "completed_symbols": 0,
             "failed_symbols": 0,
             "remaining_symbols": len(pending_codes),
             "latest_symbols": len(initial_latest),
             "stale_or_missing_symbols": len(codes) - len(initial_latest),
             "latest_coverage": _coverage_ratio(len(initial_latest), len(codes)),
+            "fresh_or_confirmed_symbols": len(initial_latest | confirmed_no_new_data),
+            "remaining_unconfirmed_symbols": max(len(codes) - len(initial_latest | confirmed_no_new_data), 0),
             "last_chunk": [],
             "current_symbol": "",
             "last_error": "",
@@ -815,11 +852,9 @@ def update_daily_data_resumable(
             chunks_run,
             ",".join(batch_codes[:5]) + ("..." if len(batch_codes) > 5 else ""),
         )
-        chunk_starts = {
-            code: _symbol_start_date(start, list_dates.get(code)) if force_full or not (target_dir / f"{code}.csv").exists() else start
-            for code in batch_codes
-        }
+        chunk_starts = {code: start for code in batch_codes}
         for code_start, grouped_codes in _group_chunk_codes_by_start(chunk_starts).items():
+            batch_written: dict[str, Path] = {}
             try:
                 batch_written = update_daily_data(
                     stock_codes=grouped_codes,
@@ -838,19 +873,27 @@ def update_daily_data_resumable(
             finally:
                 processed_codes.update(grouped_codes)
 
-            latest_now = _fresh_stock_codes(target_dir, target_code_set, end)
+            grouped_set = set(grouped_codes) & target_code_set
+            latest_group = _fresh_stock_codes(target_dir, grouped_set, end)
+            latest_codes.difference_update(grouped_set)
+            latest_codes.update(latest_group)
+            confirmed_no_new_data -= latest_codes
             for code in grouped_codes:
-                if code not in latest_now and code not in failed:
-                    reason = "not_latest" if (target_dir / f"{code}.csv").exists() else "not_written"
-                    chunk_error = f"{code}: {reason}"
-                    last_error = chunk_error
-                    failed[code] = reason
+                if code not in latest_codes and code not in failed:
+                    if code in batch_written and (target_dir / f"{code}.csv").exists():
+                        confirmed_no_new_data.add(code)
+                        logger.info("%s has no new rows through %s; marking as confirmed no-new-data.", code, end)
+                    else:
+                        reason = "not_latest" if (target_dir / f"{code}.csv").exists() else "not_written"
+                        chunk_error = f"{code}: {reason}"
+                        last_error = chunk_error
+                        failed[code] = reason
 
             if include_existing:
                 completed = len(processed_codes - set(failed))
                 remaining = max(len(pending_codes) - len(processed_codes), 0)
             else:
-                completed = len(latest_now & set(pending_codes))
+                completed = len((latest_codes | confirmed_no_new_data) & set(pending_codes))
                 remaining = max(len(pending_codes) - completed, 0)
             _write_update_progress(
                 progress_path,
@@ -866,12 +909,16 @@ def update_daily_data_resumable(
                     "chunk_size": chunk_size,
                     "sleep_seconds": sleep_seconds,
                     "force_full": force_full,
+                    "confirmed_no_new_data_symbols": len(confirmed_no_new_data),
+                    "confirmed_no_new_data": sorted(confirmed_no_new_data),
                     "completed_symbols": completed,
                     "failed_symbols": len(failed),
                     "remaining_symbols": remaining,
-                    "latest_symbols": len(latest_now),
-                    "stale_or_missing_symbols": len(codes) - len(latest_now),
-                    "latest_coverage": _coverage_ratio(len(latest_now), len(codes)),
+                    "latest_symbols": len(latest_codes),
+                    "stale_or_missing_symbols": len(codes) - len(latest_codes),
+                    "latest_coverage": _coverage_ratio(len(latest_codes), len(codes)),
+                    "fresh_or_confirmed_symbols": len(latest_codes | confirmed_no_new_data),
+                    "remaining_unconfirmed_symbols": max(len(codes) - len(latest_codes | confirmed_no_new_data), 0),
                     "last_chunk": batch_codes,
                     "current_symbol": grouped_codes[-1] if grouped_codes else "",
                     "current_start_date": code_start,
@@ -884,12 +931,13 @@ def update_daily_data_resumable(
             logger.info("Sleeping %.1f seconds before next chunk.", sleep_seconds)
             time.sleep(sleep_seconds)
 
-    latest_final = _fresh_stock_codes(target_dir, target_code_set, end)
+    latest_final = latest_codes
+    confirmed_no_new_data -= latest_final
     if include_existing:
         completed_final = len(processed_codes - set(failed))
         remaining_final = max(len(pending_codes) - len(processed_codes), 0)
     else:
-        completed_final = len(latest_final & set(pending_codes))
+        completed_final = len((latest_final | confirmed_no_new_data) & set(pending_codes))
         remaining_final = max(len(pending_codes) - completed_final, 0)
     status = "error" if failed else ("complete" if remaining_final == 0 else "partial")
     if failed and not last_error:
@@ -909,12 +957,16 @@ def update_daily_data_resumable(
             "chunk_size": chunk_size,
             "sleep_seconds": sleep_seconds,
             "force_full": force_full,
+            "confirmed_no_new_data_symbols": len(confirmed_no_new_data),
+            "confirmed_no_new_data": sorted(confirmed_no_new_data),
             "completed_symbols": completed_final,
             "failed_symbols": len(failed),
             "remaining_symbols": remaining_final,
             "latest_symbols": len(latest_final),
             "stale_or_missing_symbols": len(codes) - len(latest_final),
             "latest_coverage": _coverage_ratio(len(latest_final), len(codes)),
+            "fresh_or_confirmed_symbols": len(latest_final | confirmed_no_new_data),
+            "remaining_unconfirmed_symbols": max(len(codes) - len(latest_final | confirmed_no_new_data), 0),
             "last_chunk": [],
             "current_symbol": "",
             "last_error": last_error,
@@ -968,11 +1020,22 @@ def _existing_stock_codes(raw_dir: Path) -> set[str]:
 
 def _fresh_stock_codes(raw_dir: Path, codes: set[str], end_date: str) -> set[str]:
     target = pd.Timestamp(end_date).normalize()
+    code_list = list(codes)
+
+    def latest_for_code(code: str) -> tuple[str, pd.Timestamp | None]:
+        return code, _raw_latest_date(raw_dir / f"{code}.csv")
+
     fresh: set[str] = set()
-    for code in codes:
-        latest = _raw_latest_date(raw_dir / f"{code}.csv")
-        if latest is not None and latest >= target:
-            fresh.add(code)
+    if len(code_list) >= 100:
+        max_workers = min(32, len(code_list))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for code, latest in executor.map(latest_for_code, code_list):
+                if latest is not None and latest >= target:
+                    fresh.add(code)
+    else:
+        for code, latest in map(latest_for_code, code_list):
+            if latest is not None and latest >= target:
+                fresh.add(code)
     return fresh
 
 
@@ -1021,13 +1084,27 @@ def _raw_latest_date_from_tail(path: Path, tail_bytes: int = 16384) -> pd.Timest
         value = row.get("trade_date")
         if not value:
             continue
-        parsed = pd.to_datetime(value, errors="coerce")
-        if pd.isna(parsed):
+        current = _parse_trade_date_value(value)
+        if current is None:
             continue
-        current = pd.Timestamp(parsed).normalize()
         if latest is None or current > latest:
             latest = current
     return latest
+
+
+def _parse_trade_date_value(value: object) -> pd.Timestamp | None:
+    text = str(value).strip()
+    compact = text.replace("-", "")
+    if len(compact) >= 8 and compact[:8].isdigit():
+        digits = compact[:8]
+        try:
+            return pd.Timestamp(datetime(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))).normalize()
+        except ValueError:
+            return None
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return pd.Timestamp(parsed).normalize()
 
 
 def _coverage_ratio(part: int, whole: int) -> float:
@@ -1037,6 +1114,34 @@ def _coverage_ratio(part: int, whole: int) -> float:
 def _write_update_progress(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _read_update_progress(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _can_reuse_complete_update_progress(
+    progress: dict[str, object] | None,
+    target_end: str,
+    target_symbols: int,
+    include_existing: bool,
+    force_full: bool,
+) -> bool:
+    if include_existing or force_full or not progress:
+        return False
+    if str(progress.get("status", "")) != "complete":
+        return False
+    if str(progress.get("target_end_date", "")) != target_end:
+        return False
+    if int(progress.get("target_symbols", -1)) != target_symbols:
+        return False
+    return int(progress.get("remaining_unconfirmed_symbols", progress.get("remaining_symbols", 1))) == 0
 
 
 def _load_universe_list_dates(config: dict) -> dict[str, str]:
@@ -1082,12 +1187,10 @@ def _date_windows(
 
 
 def _incremental_start(path: Path, configured_start: str) -> str:
-    if not path.exists():
+    latest = _raw_latest_date(path)
+    if latest is None:
         return configured_start
-    df = pd.read_csv(path, usecols=["trade_date"], parse_dates=["trade_date"])
-    if df.empty:
-        return configured_start
-    return (df["trade_date"].max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    return (latest + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 def _needs_adj_factor_backfill(path: Path) -> bool:

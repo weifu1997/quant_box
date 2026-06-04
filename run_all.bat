@@ -7,7 +7,7 @@ set PYTHON=python
 if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.exe
 
 set CHUNK_SIZE=300
-set SLEEP_SECONDS=1
+set SLEEP_SECONDS=0
 set HELP_REQUESTED=0
 for %%A in (%*) do (
   if "%%~A"=="--help" set HELP_REQUESTED=1

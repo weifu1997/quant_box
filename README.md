@@ -135,7 +135,7 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 默认参数：
 
 ```powershell
---chunk-size 300 --sleep-seconds 1
+--chunk-size 300 --sleep-seconds 0
 ```
 
 含义：
@@ -150,13 +150,13 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 命令行等价写法：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 300 --sleep-seconds 1
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 300 --sleep-seconds 0
 ```
 
 只跑一批确认状态：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 300 --sleep-seconds 1 --max-chunks 1
+.\.venv\Scripts\python.exe scripts\run_update_data.py --chunk-size 300 --sleep-seconds 0 --max-chunks 1
 ```
 
 查看 raw 数据最新覆盖率和补齐进度：
@@ -166,6 +166,7 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 ```
 
 默认会读取最近一次更新写入的 freshness 统计，速度更快；如需现场重新扫描 raw CSV，追加 `--scan-raw`。
+如果 `latest_symbols` 略低但 `fresh_or_confirmed_symbols` 等于 `target_symbols`，表示少数停牌或无新行情股票已经查询确认，不会阻塞补齐。
 
 ## 数据处理与回测流程
 
@@ -204,7 +205,7 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 
 注意：快速流程会先更新已有股票并补齐缺失股票，再转换数据、重算因子和生成信号；它会显式跳过 walk-forward 重调参与完整回测。如果需要重调参和回测，先运行 `08_参数优化.bat` 和 `09_运行回测.bat`，或直接用命令行去掉 `--skip-optimize --skip-backtest`。
 
-`02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 300 --sleep-seconds 1`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
+`02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 300 --sleep-seconds 0`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
 
 自动流程会先判断信号是否可执行：
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -164,11 +165,22 @@ def _raw_symbols(raw_dir: Path) -> set[str]:
 
 def _raw_latest_dates(raw_dir: Path, symbols: set[str]) -> dict[str, pd.Timestamp]:
     latest_dates: dict[str, pd.Timestamp] = {}
-    for symbol in symbols:
-        path = raw_dir / f"{symbol}.csv"
-        current = _raw_latest_date(path)
-        if current is not None:
-            latest_dates[symbol] = current
+    symbol_list = list(symbols)
+
+    def latest_for_symbol(symbol: str) -> tuple[str, pd.Timestamp | None]:
+        return symbol, _raw_latest_date(raw_dir / f"{symbol}.csv")
+
+    if len(symbol_list) >= 100:
+        max_workers = min(32, len(symbol_list))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            latest_items = executor.map(latest_for_symbol, symbol_list)
+            for symbol, current in latest_items:
+                if current is not None:
+                    latest_dates[symbol] = current
+    else:
+        for symbol, current in map(latest_for_symbol, symbol_list):
+            if current is not None:
+                latest_dates[symbol] = current
     return latest_dates
 
 

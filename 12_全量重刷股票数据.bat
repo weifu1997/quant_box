@@ -7,7 +7,7 @@ set PYTHON=python
 if exist "%~dp0.venv\Scripts\python.exe" set PYTHON=%~dp0.venv\Scripts\python.exe
 
 set CHUNK_SIZE=100
-set SLEEP_SECONDS=1
+set SLEEP_SECONDS=0
 
 echo Starting full raw stock data refresh from configured/list dates...
 echo This is much slower than step 04. Use it only when historical raw data must be rebuilt.

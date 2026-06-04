@@ -19,10 +19,10 @@ data:
   daily_window_days: 500
   max_new_symbols_per_run: null
   update_chunk_size: 300
-  update_sleep_seconds: 1
+  update_sleep_seconds: 0
   update_progress_file: "outputs/data_update_progress.json"
-  retries: 5
-  retry_max_wait: 30
+  retries: 2
+  retry_max_wait: 1
   exclude_st: true
   st_calendar_file: null
 
