@@ -52,6 +52,12 @@ def run_parameter_grid(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    target_annual_return: float | None = 0.20,
+    min_annual_return: float | None = 0.18,
+    drawdown_limit: float | None = -0.40,
+    drawdown_penalty: float = 2.0,
+    annual_return_weight: float = 0.5,
+    calmar_weight: float = 0.25,
     scoring_config: dict | None = None,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
@@ -100,7 +106,21 @@ def run_parameter_grid(
             rebalance_freq,
         )
         result = run_backtest(score_cache[cache_key], price_df, start_date, end_date, bt_config)
-        row = {**params, **result.metrics, "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty)}
+        row = {
+            **params,
+            **result.metrics,
+            "optimization_score": _optimization_score(
+                result.metrics,
+                turnover_penalty=turnover_penalty,
+                cost_penalty=cost_penalty,
+                target_annual_return=target_annual_return,
+                min_annual_return=min_annual_return,
+                drawdown_limit=drawdown_limit,
+                drawdown_penalty=drawdown_penalty,
+                annual_return_weight=annual_return_weight,
+                calmar_weight=calmar_weight,
+            ),
+        }
         rows.append(row)
         if on_result is not None:
             on_result(row, _sorted_results(rows))
@@ -128,6 +148,12 @@ def run_walk_forward_optimization(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    target_annual_return: float | None = 0.20,
+    min_annual_return: float | None = 0.18,
+    drawdown_limit: float | None = -0.40,
+    drawdown_penalty: float = 2.0,
+    annual_return_weight: float = 0.5,
+    calmar_weight: float = 0.25,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     price_df = price_df.copy()
@@ -169,6 +195,12 @@ def run_walk_forward_optimization(
             ic_max_weight_turnover=ic_max_weight_turnover,
             turnover_penalty=turnover_penalty,
             cost_penalty=cost_penalty,
+            target_annual_return=target_annual_return,
+            min_annual_return=min_annual_return,
+            drawdown_limit=drawdown_limit,
+            drawdown_penalty=drawdown_penalty,
+            annual_return_weight=annual_return_weight,
+            calmar_weight=calmar_weight,
         )
         if train_results.empty:
             train_start += pd.DateOffset(months=step_months)
@@ -222,7 +254,17 @@ def run_walk_forward_optimization(
             "test_end": test_end,
             **params,
             **result.metrics,
-            "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty),
+            "optimization_score": _optimization_score(
+                result.metrics,
+                turnover_penalty=turnover_penalty,
+                cost_penalty=cost_penalty,
+                target_annual_return=target_annual_return,
+                min_annual_return=min_annual_return,
+                drawdown_limit=drawdown_limit,
+                drawdown_penalty=drawdown_penalty,
+                annual_return_weight=annual_return_weight,
+                calmar_weight=calmar_weight,
+            ),
         }
         rows.append(row)
         if on_result is not None:
@@ -252,6 +294,12 @@ def run_walk_forward_grid_validation(
     ic_max_weight_turnover: float | None = None,
     turnover_penalty: float = 0.02,
     cost_penalty: float = 1.0,
+    target_annual_return: float | None = 0.20,
+    min_annual_return: float | None = 0.18,
+    drawdown_limit: float | None = -0.40,
+    drawdown_penalty: float = 2.0,
+    annual_return_weight: float = 0.5,
+    calmar_weight: float = 0.25,
     scoring_config: dict | None = None,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
@@ -346,7 +394,17 @@ def run_walk_forward_grid_validation(
                 "test_end": test_end,
                 **params,
                 **result.metrics,
-                "optimization_score": _optimization_score(result.metrics, turnover_penalty, cost_penalty),
+                "optimization_score": _optimization_score(
+                    result.metrics,
+                    turnover_penalty=turnover_penalty,
+                    cost_penalty=cost_penalty,
+                    target_annual_return=target_annual_return,
+                    min_annual_return=min_annual_return,
+                    drawdown_limit=drawdown_limit,
+                    drawdown_penalty=drawdown_penalty,
+                    annual_return_weight=annual_return_weight,
+                    calmar_weight=calmar_weight,
+                ),
             }
             rows.append(row)
             if on_result is not None:
@@ -382,11 +440,37 @@ def _last_dynamic_weights(weights_by_date: dict[pd.Timestamp, pd.Series]) -> pd.
     return weights_by_date[last_date]
 
 
-def _optimization_score(metrics: dict, turnover_penalty: float = 0.02, cost_penalty: float = 1.0) -> float:
+def _optimization_score(
+    metrics: dict,
+    turnover_penalty: float = 0.02,
+    cost_penalty: float = 1.0,
+    target_annual_return: float | None = 0.20,
+    min_annual_return: float | None = 0.18,
+    drawdown_limit: float | None = -0.40,
+    drawdown_penalty: float = 2.0,
+    annual_return_weight: float = 0.5,
+    calmar_weight: float = 0.25,
+) -> float:
     sharpe = _metric_float(metrics, "sharpe")
     annual_turnover = _metric_float(metrics, "annual_turnover")
     annual_trade_cost_ratio = _metric_float(metrics, "annual_trade_cost_ratio")
-    return sharpe - turnover_penalty * annual_turnover - cost_penalty * annual_trade_cost_ratio
+    score = sharpe - turnover_penalty * annual_turnover - cost_penalty * annual_trade_cost_ratio
+
+    if _has_metric(metrics, "annual_return"):
+        annual_return = _metric_float(metrics, "annual_return")
+        if target_annual_return is not None and target_annual_return > 0:
+            score += annual_return_weight * min(max(annual_return, 0.0), target_annual_return) / target_annual_return
+        if min_annual_return is not None and annual_return < min_annual_return:
+            score -= float(min_annual_return - annual_return)
+
+    if _has_metric(metrics, "max_drawdown") and drawdown_limit is not None:
+        max_drawdown = _metric_float(metrics, "max_drawdown")
+        if max_drawdown < drawdown_limit:
+            score -= drawdown_penalty * abs(max_drawdown - drawdown_limit)
+
+    if _has_metric(metrics, "calmar"):
+        score += calmar_weight * _metric_float(metrics, "calmar")
+    return float(score)
 
 
 def _sorted_results(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -404,3 +488,10 @@ def _metric_float(metrics: dict, key: str) -> float:
     if pd.isna(value):
         return 0.0
     return float(value)
+
+
+def _has_metric(metrics: dict, key: str) -> bool:
+    if key not in metrics:
+        return False
+    value = pd.to_numeric(metrics.get(key), errors="coerce")
+    return not pd.isna(value)

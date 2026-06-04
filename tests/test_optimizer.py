@@ -15,6 +15,19 @@ class OptimizerTests(unittest.TestCase):
 
         self.assertGreater(_optimization_score(cheap), _optimization_score(expensive))
 
+    def test_optimization_score_penalizes_deep_drawdown(self) -> None:
+        stable = {
+            "annual_return": 0.2,
+            "max_drawdown": -0.25,
+            "sharpe": 1.0,
+            "calmar": 0.8,
+            "annual_turnover": 1.0,
+            "annual_trade_cost_ratio": 0.01,
+        }
+        fragile = {**stable, "max_drawdown": -0.55, "calmar": 0.35}
+
+        self.assertGreater(_optimization_score(stable, drawdown_limit=-0.4), _optimization_score(fragile, drawdown_limit=-0.4))
+
     def test_optimization_score_treats_missing_metrics_as_zero(self) -> None:
         self.assertEqual(_optimization_score({"sharpe": float("nan")}), 0.0)
 

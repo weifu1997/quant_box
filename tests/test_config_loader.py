@@ -40,6 +40,13 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "low")
         self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["top_k"], 1)
 
+    def test_default_quality_includes_full_backtest_return_and_drawdown_gates(self) -> None:
+        quality = DEFAULT_CONFIG["quality"]
+
+        self.assertEqual(quality["target_annual_return"], 0.20)
+        self.assertEqual(quality["min_backtest_annual_return"], 0.20)
+        self.assertEqual(quality["max_backtest_drawdown_limit"], -0.40)
+
 
 if __name__ == "__main__":
     unittest.main()

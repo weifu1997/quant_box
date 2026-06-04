@@ -4,7 +4,13 @@ import unittest
 
 import pandas as pd
 
-from src.auto_tuning import apply_strategy_params, assess_parameter_quality, select_stable_params, summarize_parameter_validation
+from src.auto_tuning import (
+    apply_strategy_params,
+    assess_backtest_quality,
+    assess_parameter_quality,
+    select_stable_params,
+    summarize_parameter_validation,
+)
 
 
 class AutoTuningTests(unittest.TestCase):
@@ -107,6 +113,25 @@ class AutoTuningTests(unittest.TestCase):
         self.assertFalse(quality.is_acceptable)
         self.assertIn("validation_windows_below_threshold:2<3", quality.issues)
         self.assertTrue(any(issue.startswith("positive_return_rate_below_threshold") for issue in quality.issues))
+
+    def test_assess_backtest_quality_requires_return_and_drawdown_targets(self) -> None:
+        quality = assess_backtest_quality(
+            {"annual_return": 0.195, "max_drawdown": -0.45, "calmar": 0.43},
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.40},
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertTrue(any(issue.startswith("backtest_annual_return_below_threshold") for issue in quality.issues))
+        self.assertTrue(any(issue.startswith("backtest_max_drawdown_worse_than_limit") for issue in quality.issues))
+
+    def test_assess_backtest_quality_accepts_target_profile(self) -> None:
+        quality = assess_backtest_quality(
+            {"annual_return": 0.205, "max_drawdown": -0.35, "calmar": 0.58},
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.40},
+        )
+
+        self.assertTrue(quality.is_acceptable)
+        self.assertEqual(quality.issues, [])
 
 
 if __name__ == "__main__":

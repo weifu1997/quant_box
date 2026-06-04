@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from src.auto_tuning import (
     ParameterQualityReport,
     apply_strategy_params,
+    assess_backtest_quality,
     assess_parameter_quality,
     select_stable_params,
     summarize_parameter_validation,
@@ -83,6 +84,10 @@ def main() -> None:
     parser.add_argument("--step-months", type=int, default=12)
     parser.add_argument("--turnover-penalty", type=float, default=0.02)
     parser.add_argument("--cost-penalty", type=float, default=1.0)
+    parser.add_argument("--target-annual-return", type=float, default=base_config.get("quality", {}).get("target_annual_return", 0.20))
+    parser.add_argument("--min-annual-return", type=float, default=base_config.get("quality", {}).get("min_optimizer_annual_return", 0.18))
+    parser.add_argument("--drawdown-limit", type=float, default=base_config.get("quality", {}).get("max_backtest_drawdown_limit", -0.40))
+    parser.add_argument("--drawdown-penalty", type=float, default=2.0)
     args = parser.parse_args()
 
     config = deepcopy(base_config)
@@ -190,6 +195,10 @@ def main() -> None:
                 step_months=args.step_months,
                 turnover_penalty=args.turnover_penalty,
                 cost_penalty=args.cost_penalty,
+                target_annual_return=args.target_annual_return,
+                min_annual_return=args.min_annual_return,
+                drawdown_limit=args.drawdown_limit,
+                drawdown_penalty=args.drawdown_penalty,
                 use_rolling_ic=True,
                 ic_window=int(config.get("ic", {}).get("window", 252)),
                 ic_min_periods=int(config.get("ic", {}).get("min_periods", 60)),
@@ -221,7 +230,7 @@ def main() -> None:
         quality_path = out_dir / "auto_parameter_quality.json"
         _write_json(quality_path, parameter_quality.to_dict())
         artifacts.append(quality_path)
-        quality_gate = parameter_quality.is_acceptable or args.allow_low_quality
+        parameter_quality_gate = parameter_quality.is_acceptable or args.allow_low_quality
 
         logger.info("Selected strategy params: %s", selected_params)
         equity_path = out_dir / "auto_backtest_equity.csv"
@@ -255,6 +264,11 @@ def main() -> None:
         artifacts.append(metrics_path)
         if not args.skip_backtest:
             artifacts.extend([equity_path, holdings_bt_path, trades_path])
+        backtest_quality = assess_backtest_quality(result.metrics, config.get("quality", {}))
+        backtest_quality_path = out_dir / "auto_backtest_quality.json"
+        _write_json(backtest_quality_path, backtest_quality.to_dict())
+        artifacts.append(backtest_quality_path)
+        backtest_quality_gate = backtest_quality.is_acceptable or args.allow_low_quality
 
         _stage(status, out_dir, "generate_signal", "running")
         previous = read_previous_holdings(selected_config["outputs"]["holdings_file"])
@@ -276,8 +290,10 @@ def main() -> None:
         block_reasons = []
         if not data_gate:
             block_reasons.extend([f"data:{issue}" for issue in data_health.issues])
-        if not quality_gate:
+        if not parameter_quality_gate:
             block_reasons.extend([f"params:{issue}" for issue in parameter_quality.issues])
+        if not backtest_quality_gate:
+            block_reasons.extend([f"backtest:{issue}" for issue in backtest_quality.issues])
         is_executable = not block_reasons
 
         if is_executable:
@@ -312,6 +328,7 @@ def main() -> None:
             "target_date_resolution": target_resolution.to_dict(),
             "selected_params": selected_params,
             "parameter_quality": parameter_quality.to_dict(),
+            "backtest_quality": backtest_quality.to_dict(),
             "data_health": data_health.to_dict(),
             "backtest_metrics": result.metrics,
             "account": account.to_dict(),
@@ -329,6 +346,7 @@ def main() -> None:
                 "data_health": str(health_json),
                 "parameter_quality": str(quality_path),
                 "backtest_metrics": str(metrics_path),
+                "backtest_quality": str(backtest_quality_path),
             },
         }
         report_path = out_dir / "auto_signal_report.json"

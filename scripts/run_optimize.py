@@ -54,6 +54,10 @@ def main() -> None:
     parser.add_argument("--ic-max-weight-turnover", type=float, default=config.get("ic", {}).get("max_weight_turnover"))
     parser.add_argument("--turnover-penalty", type=float, default=0.02)
     parser.add_argument("--cost-penalty", type=float, default=1.0)
+    parser.add_argument("--target-annual-return", type=float, default=config.get("quality", {}).get("target_annual_return", 0.20))
+    parser.add_argument("--min-annual-return", type=float, default=config.get("quality", {}).get("min_optimizer_annual_return", 0.18))
+    parser.add_argument("--drawdown-limit", type=float, default=config.get("quality", {}).get("max_backtest_drawdown_limit", -0.40))
+    parser.add_argument("--drawdown-penalty", type=float, default=2.0)
     parser.add_argument("--rolling-ic", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--walk-forward", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
@@ -125,6 +129,10 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            target_annual_return=args.target_annual_return,
+            min_annual_return=args.min_annual_return,
+            drawdown_limit=args.drawdown_limit,
+            drawdown_penalty=args.drawdown_penalty,
             scoring_config=config,
             on_result=on_result,
         )
@@ -149,6 +157,10 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            target_annual_return=args.target_annual_return,
+            min_annual_return=args.min_annual_return,
+            drawdown_limit=args.drawdown_limit,
+            drawdown_penalty=args.drawdown_penalty,
             scoring_config=config,
             on_result=on_result,
         )
@@ -171,6 +183,10 @@ def main() -> None:
             ic_max_weight_turnover=args.ic_max_weight_turnover,
             turnover_penalty=args.turnover_penalty,
             cost_penalty=args.cost_penalty,
+            target_annual_return=args.target_annual_return,
+            min_annual_return=args.min_annual_return,
+            drawdown_limit=args.drawdown_limit,
+            drawdown_penalty=args.drawdown_penalty,
             scoring_config=config,
             on_result=on_result,
         )

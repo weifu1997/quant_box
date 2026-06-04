@@ -40,6 +40,20 @@ class ParameterQualityReport:
         return asdict(self)
 
 
+@dataclass
+class BacktestQualityReport:
+    is_acceptable: bool
+    issues: list[str]
+    annual_return: float
+    max_drawdown: float
+    calmar: float
+    min_backtest_annual_return: float
+    max_backtest_drawdown_limit: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def summarize_parameter_validation(
     validation: pd.DataFrame,
     param_columns: Iterable[str] = PARAM_COLUMNS,
@@ -172,6 +186,43 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
         max_drawdown_limit=max_drawdown,
         max_annual_turnover=max_turnover,
         max_annual_trade_cost_ratio=max_cost,
+    )
+
+
+def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None = None) -> BacktestQualityReport:
+    cfg = quality_config or {}
+    min_return = float(cfg.get("min_backtest_annual_return", cfg.get("target_annual_return", 0.20)))
+    max_drawdown = float(cfg.get("max_backtest_drawdown_limit", -0.40))
+    issues: list[str] = []
+
+    if not metrics or bool(metrics.get("backtest_skipped", False)):
+        return BacktestQualityReport(
+            is_acceptable=False,
+            issues=["backtest_skipped"],
+            annual_return=0.0,
+            max_drawdown=0.0,
+            calmar=0.0,
+            min_backtest_annual_return=min_return,
+            max_backtest_drawdown_limit=max_drawdown,
+        )
+
+    annual_return = _number(metrics.get("annual_return"), 0.0)
+    observed_drawdown = _number(metrics.get("max_drawdown"), 0.0)
+    calmar = _number(metrics.get("calmar"), 0.0)
+
+    if annual_return < min_return:
+        issues.append(f"backtest_annual_return_below_threshold:{annual_return:.4f}<{min_return:.4f}")
+    if observed_drawdown < max_drawdown:
+        issues.append(f"backtest_max_drawdown_worse_than_limit:{observed_drawdown:.4f}<{max_drawdown:.4f}")
+
+    return BacktestQualityReport(
+        is_acceptable=not issues,
+        issues=issues,
+        annual_return=annual_return,
+        max_drawdown=observed_drawdown,
+        calmar=calmar,
+        min_backtest_annual_return=min_return,
+        max_backtest_drawdown_limit=max_drawdown,
     )
 
 
