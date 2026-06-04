@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import factor_cache_columns, load_or_compute_factors
-from src.scoring import build_strategy_scores
+from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS, build_strategy_scores
 from src.strategy import factor_columns_for_method, resample_signals
 from src.trading_calendar import resolve_target_date_value
 from src.universe_coverage import summarize_universe_coverage
@@ -39,7 +39,7 @@ def main() -> None:
     if not price_file.exists():
         raise FileNotFoundError(f"Price file not found: {price_file}. Run scripts/run_convert_data.py first.")
     prices = pd.read_parquet(price_file)
-    factor_columns = _requested_factor_columns(args.factor_file, str(config.get("strategy", {}).get("factor_group", "momentum")))
+    factor_columns = _requested_factor_columns(args.factor_file, config.get("strategy", {}), config.get("dynamic_ic_selector", {}))
     if factor_columns is None:
         logger.info("Loading all factor columns.")
     else:
@@ -81,15 +81,30 @@ def main() -> None:
     )
 
 
-def _requested_factor_columns(factor_file: str, factor_group: str) -> list[str] | None:
-    group = factor_group.strip().lower()
+def _requested_factor_columns(factor_file: str, strategy_cfg: dict, dynamic_cfg: dict | None = None) -> list[str] | None:
+    group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
     if group in {"all", "ic_weighted"}:
         return None
     available_columns = factor_cache_columns(factor_file)
     if not available_columns:
         return None
+    if group in DYNAMIC_IC_SELECTOR_GROUPS:
+        candidates = (dynamic_cfg or {}).get("candidates", DEFAULT_DYNAMIC_IC_CANDIDATES)
+        requested: set[str] = set()
+        for candidate in candidates:
+            method = _strip_direction_prefix(str(candidate))
+            requested.update(str(column) for column in factor_columns_for_method(available_columns, method))
+        return sorted(requested) if requested else None
     requested = [str(column) for column in factor_columns_for_method(available_columns, group)]
     return sorted(requested) if requested else None
+
+
+def _strip_direction_prefix(value: str) -> str:
+    lowered = value.strip().lower()
+    for prefix in ("low_", "inverse_", "short_"):
+        if lowered.startswith(prefix):
+            return value.strip()[len(prefix) :]
+    return value
 
 
 if __name__ == "__main__":

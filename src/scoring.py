@@ -8,7 +8,20 @@ import pandas as pd
 
 from src.config_loader import resolve_path
 from src.factor_ic import calculate_factor_ic, calculate_rolling_ic, make_ic_weights, make_rolling_ic_weights, summarize_ic
-from src.strategy import composite_factor
+from src.strategy import composite_factor, factor_columns_for_method
+
+
+DYNAMIC_IC_SELECTOR_GROUPS = {"dynamic_ic_selector", "dynamic_ic"}
+DEFAULT_DYNAMIC_IC_CANDIDATES = [
+    "factor:LOW0",
+    "inverse_factor:KUP",
+    "inverse_factor:KLEN",
+    "inverse_factor:KLOW",
+    "inverse_factor:CORR5",
+    "factor:ROC20",
+    "factor:ROC30",
+    "factor:RSV5",
+]
 
 
 def build_strategy_scores(
@@ -18,16 +31,28 @@ def build_strategy_scores(
     price_file: str | Path | None = None,
 ) -> pd.Series:
     strategy_cfg = config.get("strategy", {})
-    factor_group = strategy_cfg.get("factor_group", "momentum")
+    factor_group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
     min_obs = int(strategy_cfg.get("min_cross_section_obs", 5))
-    if factor_group != "ic_weighted":
-        return composite_factor(factors, method=factor_group, min_obs=min_obs)
-
     ic_cfg = config.get("ic", {})
     price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
-    prices = price_df if price_df is not None else _load_ic_price_frame(price_path)
+    prices = price_df
+
+    if factor_group in DYNAMIC_IC_SELECTOR_GROUPS:
+        prices = prices if prices is not None else _load_ic_price_frame(price_path)
+        scores = _build_dynamic_ic_selector_scores(factors, prices, config, min_obs=min_obs)
+        return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+
+    if factor_group != "ic_weighted":
+        scores = composite_factor(factors, method=factor_group, min_obs=min_obs)
+        if _liquidity_filter_enabled(config.get("liquidity_filter", {})):
+            prices = prices if prices is not None else _load_ic_price_frame(price_path)
+            scores = _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+        return scores
+
+    prices = prices if prices is not None else _load_ic_price_frame(price_path)
     dynamic_weights = _load_or_compute_dynamic_weights(factors, prices, ic_cfg)
-    return composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights, min_obs=min_obs)
+    scores = composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights, min_obs=min_obs)
+    return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
 
 def build_latest_strategy_scores(
@@ -38,23 +63,39 @@ def build_latest_strategy_scores(
     price_file: str | Path | None = None,
 ) -> pd.Series:
     strategy_cfg = config.get("strategy", {})
-    factor_group = strategy_cfg.get("factor_group", "momentum")
+    factor_group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
     min_obs = int(strategy_cfg.get("min_cross_section_obs", 5))
     target_date = _resolve_score_date(factors, signal_date)
     latest_factors = _slice_factor_date(factors, target_date)
     if latest_factors.empty:
         raise ValueError(f"No factor rows found for signal date {target_date.date()}.")
 
-    if factor_group != "ic_weighted":
-        return composite_factor(latest_factors, method=factor_group, min_obs=min_obs)
-
     ic_cfg = config.get("ic", {})
     price_path = price_file or ic_cfg.get("price_file", "data/prices/ohlcv_adjusted.parquet")
-    prices = price_df if price_df is not None else _load_ic_price_frame(price_path)
+    prices = price_df
+
+    if factor_group in DYNAMIC_IC_SELECTOR_GROUPS:
+        prices = prices if prices is not None else _load_ic_price_frame(price_path)
+        weights = _latest_dynamic_ic_selector_weights(factors, prices, config, target_date)
+        if weights.empty:
+            raise ValueError(f"No usable dynamic IC selector weights found for signal date {target_date.date()}.")
+        signed_factors = _signed_candidate_factors(latest_factors, _dynamic_ic_candidates(config))
+        scores = composite_factor(signed_factors, method="ic_weighted", factor_weights=weights, min_obs=min_obs)
+        return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+
+    if factor_group != "ic_weighted":
+        scores = composite_factor(latest_factors, method=factor_group, min_obs=min_obs)
+        if _liquidity_filter_enabled(config.get("liquidity_filter", {})):
+            prices = prices if prices is not None else _load_ic_price_frame(price_path)
+            scores = _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+        return scores
+
+    prices = prices if prices is not None else _load_ic_price_frame(price_path)
     weights = _latest_ic_weights(factors, prices, ic_cfg, target_date)
     if weights.empty:
         raise ValueError(f"No usable IC weights found for signal date {target_date.date()}.")
-    return composite_factor(latest_factors, method=factor_group, factor_weights=weights, min_obs=min_obs)
+    scores = composite_factor(latest_factors, method=factor_group, factor_weights=weights, min_obs=min_obs)
+    return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
 
 def _load_ic_price_frame(path_value: str | Path) -> pd.DataFrame:
@@ -67,6 +108,186 @@ def _load_ic_price_frame(path_value: str | Path) -> pd.DataFrame:
     if not price_path.exists():
         raise FileNotFoundError(f"Price file not found for rolling IC weights: {price_path}")
     return pd.read_parquet(price_path)
+
+
+def _build_dynamic_ic_selector_scores(
+    factors: pd.DataFrame,
+    prices: pd.DataFrame,
+    config: dict,
+    min_obs: int,
+) -> pd.Series:
+    signed_factors = _signed_candidate_factors(factors, _dynamic_ic_candidates(config))
+    weights = _dynamic_ic_selector_weights(signed_factors, prices, config.get("dynamic_ic_selector", {}))
+    fallback = _dynamic_ic_fallback_weights(signed_factors, config.get("dynamic_ic_selector", {}))
+    return composite_factor(signed_factors, method="ic_weighted", factor_weights=fallback, factor_weights_dynamic=weights, min_obs=min_obs)
+
+
+def _latest_dynamic_ic_selector_weights(
+    factors: pd.DataFrame,
+    prices: pd.DataFrame,
+    config: dict,
+    target_date: pd.Timestamp,
+) -> pd.Series:
+    signed_factors = _signed_candidate_factors(factors, _dynamic_ic_candidates(config))
+    dynamic_weights = _dynamic_ic_selector_weights(signed_factors, prices, config.get("dynamic_ic_selector", {}))
+    eligible_dates = [date for date in dynamic_weights if pd.Timestamp(date).normalize() <= target_date]
+    if not eligible_dates:
+        return _dynamic_ic_fallback_weights(signed_factors, config.get("dynamic_ic_selector", {}))
+    return dynamic_weights[max(eligible_dates)]
+
+
+def _dynamic_ic_candidates(config: dict) -> list[str]:
+    selector_cfg = config.get("dynamic_ic_selector", {})
+    candidates = selector_cfg.get("candidates", DEFAULT_DYNAMIC_IC_CANDIDATES)
+    return [str(candidate) for candidate in candidates]
+
+
+def _dynamic_ic_fallback_weights(signed_factors: pd.DataFrame, selector_cfg: dict) -> pd.Series:
+    fallback_candidate = selector_cfg.get("fallback_candidate", "factor:LOW0")
+    if fallback_candidate in {None, ""}:
+        return pd.Series(dtype=float)
+    try:
+        column, _direction = _candidate_column_and_direction(str(fallback_candidate), signed_factors.columns)
+    except ValueError:
+        return pd.Series(dtype=float)
+    if column not in signed_factors.columns:
+        return pd.Series(dtype=float)
+    return pd.Series({column: 1.0}, dtype=float)
+
+
+def _signed_candidate_factors(factors: pd.DataFrame, candidates: list[str]) -> pd.DataFrame:
+    numeric = factors.select_dtypes("number")
+    if numeric.empty:
+        raise ValueError("factor_df has no numeric factor columns.")
+
+    pieces: dict[str, pd.Series] = {}
+    for candidate in candidates:
+        column, direction = _candidate_column_and_direction(candidate, numeric.columns)
+        pieces[column] = numeric[column].astype("float32", copy=False) * direction
+    if not pieces:
+        raise ValueError("dynamic_ic_selector has no usable candidate factors.")
+    return pd.DataFrame(pieces, index=factors.index)
+
+
+def _candidate_column_and_direction(candidate: str, columns: pd.Index) -> tuple[str, float]:
+    method = str(candidate).strip()
+    direction = 1.0
+    lowered = method.lower()
+    for prefix in ("low_", "inverse_", "short_"):
+        if lowered.startswith(prefix):
+            method = method[len(prefix) :]
+            direction = -1.0
+            break
+    selected = factor_columns_for_method(columns, method)
+    if len(selected) != 1:
+        raise ValueError(f"dynamic_ic_selector candidate '{candidate}' matched {len(selected)} columns; use factor:<name>.")
+    return str(selected[0]), direction
+
+
+def _dynamic_ic_selector_weights(
+    signed_factors: pd.DataFrame,
+    prices: pd.DataFrame,
+    selector_cfg: dict,
+) -> dict[pd.Timestamp, pd.Series]:
+    rolling_ic = calculate_rolling_ic(
+        signed_factors,
+        prices,
+        horizon=int(selector_cfg.get("horizon", 20)),
+        method=str(selector_cfg.get("method", "spearman")),
+        window=int(selector_cfg.get("window", 504)),
+        min_periods=int(selector_cfg.get("min_periods", 120)),
+        min_obs=int(selector_cfg.get("min_obs", 20)),
+    )
+    scores = _dynamic_ic_selector_metric(rolling_ic, selector_cfg)
+    scores.attrs = {}
+    min_score = selector_cfg.get("min_score")
+    min_score = float(min_score) if min_score is not None else None
+
+    weights: dict[pd.Timestamp, pd.Series] = {}
+    for date, row in scores.iterrows():
+        candidates = row.dropna()
+        if min_score is not None:
+            candidates = candidates[candidates >= min_score]
+        if candidates.empty:
+            continue
+        selected = str(candidates.sort_values(ascending=False).index[0])
+        weights[pd.Timestamp(date).normalize()] = pd.Series({selected: 1.0}, dtype=float)
+    return weights
+
+
+def _dynamic_ic_selector_metric(rolling_ic: pd.DataFrame, selector_cfg: dict) -> pd.DataFrame:
+    metric = str(selector_cfg.get("metric", "mean")).strip().lower()
+    if metric == "mean":
+        return rolling_ic
+    if metric in {"ir", "ic_ir"}:
+        daily_ic = rolling_ic.attrs.get("daily_ic")
+        if not isinstance(daily_ic, pd.DataFrame):
+            raise ValueError("rolling IC frame is missing daily_ic attrs.")
+        horizon = max(1, int(rolling_ic.attrs.get("horizon", selector_cfg.get("horizon", 20))))
+        window = int(rolling_ic.attrs.get("window", selector_cfg.get("window", 504)))
+        min_periods = int(rolling_ic.attrs.get("min_periods", selector_cfg.get("min_periods", 120)))
+        source = daily_ic.shift(horizon)
+        rolling_std = source.rolling(window=window, min_periods=min_periods).std(ddof=0)
+        return rolling_ic / rolling_std.where(rolling_std != 0)
+    raise ValueError(f"Unsupported dynamic_ic_selector metric: {metric}")
+
+
+def _liquidity_filter_enabled(filter_cfg: dict) -> bool:
+    return bool(filter_cfg.get("enabled", False))
+
+
+def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg: dict) -> pd.Series:
+    if not _liquidity_filter_enabled(filter_cfg):
+        return scores
+    if scores.empty:
+        return scores
+    if not isinstance(scores.index, pd.MultiIndex):
+        raise ValueError("liquidity filter requires MultiIndex scores: datetime/instrument.")
+
+    amount = _price_field(prices, str(filter_cfg.get("field", "amount")))
+    if amount.empty:
+        raise ValueError("liquidity filter requires an amount field in the price panel.")
+    amount.index = pd.to_datetime(amount.index).normalize()
+    adv = amount.rolling(
+        window=int(filter_cfg.get("window", 10)),
+        min_periods=int(filter_cfg.get("min_periods", 5)),
+    ).mean()
+    side = str(filter_cfg.get("side", "low")).strip().lower()
+    quantile = float(filter_cfg.get("quantile", 0.35))
+
+    date_level = scores.index.names[0] or 0
+    filtered_parts: list[pd.Series] = []
+    for date, daily_scores in scores.groupby(level=date_level, sort=False):
+        signal_date = pd.Timestamp(date).normalize()
+        if signal_date not in adv.index:
+            filtered_parts.append(pd.Series(pd.NA, index=daily_scores.index, name=scores.name, dtype="float64"))
+            continue
+        daily_adv = adv.loc[signal_date]
+        instruments = daily_scores.index.get_level_values(1).astype(str)
+        aligned_adv = daily_adv.reindex(instruments)
+        threshold = aligned_adv.quantile(quantile)
+        if pd.isna(threshold):
+            mask = pd.Series(False, index=daily_scores.index)
+        elif side == "low":
+            mask = pd.Series(aligned_adv.to_numpy() <= threshold, index=daily_scores.index)
+        elif side == "high":
+            mask = pd.Series(aligned_adv.to_numpy() >= threshold, index=daily_scores.index)
+        else:
+            raise ValueError(f"Unsupported liquidity filter side: {side}")
+        filtered_parts.append(daily_scores.where(mask))
+    return pd.concat(filtered_parts).sort_index().rename(scores.name)
+
+
+def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
+    field = str(field).lower()
+    if isinstance(prices.columns, pd.MultiIndex):
+        field_names = prices.columns.get_level_values(0).astype(str).str.lower()
+        if field not in set(field_names):
+            return pd.DataFrame(index=prices.index)
+        frame = prices.loc[:, field_names == field].copy()
+        frame.columns = frame.columns.get_level_values(1).astype(str)
+        return frame
+    return pd.DataFrame(index=prices.index)
 
 
 def _optional_float(value: object) -> float | None:

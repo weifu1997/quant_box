@@ -14,6 +14,7 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import factor_cache_columns, load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
 from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_parameter_grid, run_walk_forward_grid_validation, run_walk_forward_optimization
+from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS
 from src.strategy import factor_columns_for_method
 from src.trading_calendar import resolve_target_date_value
 
@@ -81,7 +82,7 @@ def main() -> None:
     for values in grid.values():
         total_combinations *= len(values)
     logger.info("Optimization grid has %s combinations: %s", total_combinations, grid)
-    factor_columns = _requested_factor_columns(args.factor_file, grid["factor_group"])
+    factor_columns = _requested_factor_columns(args.factor_file, grid["factor_group"], config.get("dynamic_ic_selector", {}))
     if factor_columns is None:
         logger.info("Loading all factor columns.")
     else:
@@ -175,7 +176,7 @@ def main() -> None:
     logger.info("Top results:\n%s", results.head(10).to_string(index=False))
 
 
-def _requested_factor_columns(factor_file: str, factor_groups: list[str]) -> list[str] | None:
+def _requested_factor_columns(factor_file: str, factor_groups: list[str], dynamic_cfg: dict | None = None) -> list[str] | None:
     groups = {group.strip().lower() for group in factor_groups}
     if not groups or groups.intersection({"all", "ic_weighted"}):
         return None
@@ -184,8 +185,21 @@ def _requested_factor_columns(factor_file: str, factor_groups: list[str]) -> lis
         return None
     requested: set[str] = set()
     for group in groups:
-        requested.update(str(column) for column in factor_columns_for_method(available_columns, group))
+        if group in DYNAMIC_IC_SELECTOR_GROUPS:
+            candidates = (dynamic_cfg or {}).get("candidates", DEFAULT_DYNAMIC_IC_CANDIDATES)
+            for candidate in candidates:
+                requested.update(str(column) for column in factor_columns_for_method(available_columns, _strip_direction_prefix(str(candidate))))
+        else:
+            requested.update(str(column) for column in factor_columns_for_method(available_columns, group))
     return sorted(requested) if requested else None
+
+
+def _strip_direction_prefix(value: str) -> str:
+    lowered = value.strip().lower()
+    for prefix in ("low_", "inverse_", "short_"):
+        if lowered.startswith(prefix):
+            return value.strip()[len(prefix) :]
+    return value
 
 
 def _progress_writer(output_path: Path):

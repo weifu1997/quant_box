@@ -46,6 +46,72 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(scores.loc[(pd.Timestamp("2024-01-02"), "E")], scores.loc[(pd.Timestamp("2024-01-02"), "A")])
         make_weights.assert_called_once()
 
+    def test_build_strategy_scores_uses_dynamic_ic_selector(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame(
+            {
+                "F1": [5.0, 4.0, 3.0, 2.0, 1.0],
+                "F2": [1.0, 2.0, 3.0, 4.0, 5.0],
+            },
+            index=index,
+        )
+        prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+        config = {
+            "strategy": {"factor_group": "dynamic_ic_selector", "min_cross_section_obs": 2},
+            "dynamic_ic_selector": {
+                "candidates": ["factor:F1", "factor:F2"],
+                "horizon": 1,
+                "window": 2,
+                "min_periods": 1,
+                "metric": "mean",
+                "fallback_candidate": "factor:F1",
+            },
+        }
+        rolling_ic = pd.DataFrame({"F1": [0.01], "F2": [0.05]}, index=[pd.Timestamp("2024-01-02")])
+        rolling_ic.attrs["daily_ic"] = rolling_ic
+        rolling_ic.attrs["window"] = 2
+        rolling_ic.attrs["min_periods"] = 1
+        rolling_ic.attrs["horizon"] = 1
+
+        with patch("src.scoring.calculate_rolling_ic", return_value=rolling_ic) as calc:
+            scores = build_strategy_scores(factors, config, price_df=prices)
+
+        self.assertEqual(scores.name, "score")
+        self.assertGreater(scores.loc[(pd.Timestamp("2024-01-02"), "E")], scores.loc[(pd.Timestamp("2024-01-02"), "A")])
+        calc.assert_called_once()
+
+    def test_build_strategy_scores_applies_low_liquidity_filter(self) -> None:
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
+        instruments = ["A", "B", "C", "D", "E"]
+        index = pd.MultiIndex.from_product([[dates[-1]], instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0, 5.0]}, index=index)
+        amount = pd.DataFrame(
+            {
+                "A": [1.0, 1.0],
+                "B": [2.0, 2.0],
+                "C": [3.0, 3.0],
+                "D": [4.0, 4.0],
+                "E": [5.0, 5.0],
+            },
+            index=dates,
+        )
+        close = pd.DataFrame(10.0, index=dates, columns=instruments)
+        prices = pd.concat({"close": close, "amount": amount}, axis=1)
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        config = {
+            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
+            "liquidity_filter": {"enabled": True, "field": "amount", "window": 2, "min_periods": 1, "quantile": 0.4, "side": "low"},
+        }
+
+        scores = build_strategy_scores(factors, config, price_df=prices)
+
+        daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
+        self.assertFalse(daily.loc[["A", "B"]].isna().any())
+        self.assertTrue(daily.loc[["C", "D", "E"]].isna().all())
+
     def test_build_strategy_scores_passes_ic_stability_config(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
