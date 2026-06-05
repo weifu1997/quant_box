@@ -7,7 +7,17 @@ from typing import Any, Iterable
 import pandas as pd
 
 
-PARAM_COLUMNS = ["factor_group", "top_n", "max_turnover", "rank_buffer", "rebalance_freq"]
+STRATEGY_PARAM_COLUMNS = ["factor_group", "top_n", "max_turnover", "rank_buffer", "rebalance_freq"]
+RISK_PARAM_COLUMNS = [
+    "max_weight_per_stock",
+    "stop_loss_pct",
+    "take_profit_pct",
+    "circuit_breaker_drawdown",
+    "circuit_breaker_cooldown_days",
+    "target_vol",
+]
+PARAM_COLUMNS = STRATEGY_PARAM_COLUMNS
+OPTIMIZABLE_PARAM_COLUMNS = [*STRATEGY_PARAM_COLUMNS, *RISK_PARAM_COLUMNS]
 METRIC_DEFAULTS = {
     "optimization_score": 0.0,
     "annual_return": 0.0,
@@ -249,7 +259,7 @@ def apply_strategy_params(config: dict[str, Any], params: dict[str, Any]) -> dic
     selected = deepcopy(config)
     selected.setdefault("strategy", {})
     for key, value in params.items():
-        if key in PARAM_COLUMNS:
+        if key in OPTIMIZABLE_PARAM_COLUMNS:
             selected["strategy"][key] = _python_scalar(value)
     return selected
 
@@ -265,11 +275,20 @@ def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None)
     drawdown_limit = float(cfg.get("max_drawdown_limit", cfg.get("max_backtest_drawdown_limit", -0.20)))
     annual = pd.to_numeric(summary["annual_return_mean"], errors="coerce")
     drawdown = pd.to_numeric(summary["max_drawdown_worst"], errors="coerce")
-    filtered = summary[(annual >= min_return) & (drawdown >= drawdown_limit)]
+    mask = (annual >= min_return) & (drawdown >= drawdown_limit)
+    if "annual_turnover_mean" in summary.columns:
+        turnover = pd.to_numeric(summary["annual_turnover_mean"], errors="coerce")
+        mask &= turnover <= float(cfg.get("max_annual_turnover", float("inf")))
+    if "annual_trade_cost_ratio_mean" in summary.columns:
+        cost = pd.to_numeric(summary["annual_trade_cost_ratio_mean"], errors="coerce")
+        mask &= cost <= float(cfg.get("max_annual_trade_cost_ratio", float("inf")))
+    filtered = summary[mask]
     return filtered if not filtered.empty else summary
 
 
 def _python_scalar(value: Any) -> Any:
+    if pd.isna(value):
+        return None
     if hasattr(value, "item"):
         return value.item()
     return value

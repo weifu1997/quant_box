@@ -27,10 +27,28 @@ def _csv_values(value: str, cast):
     return [cast(item.strip()) for item in value.split(",") if item.strip()]
 
 
+def _csv_optional_values(value: str, cast):
+    values = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if item.lower() in {"none", "null", "off"}:
+            values.append(None)
+        else:
+            values.append(cast(item))
+    return values
+
+
 def _grid_values(value: str | None, defaults: list, cast):
     if value is None:
         return list(defaults)
     return _csv_values(value, cast)
+
+
+def _maybe_add_grid_values(grid: dict[str, list], key: str, value: str | None, cast) -> None:
+    if value is not None:
+        grid[key] = _csv_optional_values(value, cast)
 
 
 def main() -> None:
@@ -45,6 +63,12 @@ def main() -> None:
     parser.add_argument("--max-turnover", help="Comma-separated max turnover values. Defaults to the fast baseline grid.")
     parser.add_argument("--rank-buffer", help="Comma-separated rank buffer values. Defaults to the fast baseline grid.")
     parser.add_argument("--rebalance-freq", help="Comma-separated rebalance frequencies. Defaults to the fast baseline grid.")
+    parser.add_argument("--max-weight-per-stock", help="Comma-separated per-stock caps, or none.")
+    parser.add_argument("--stop-loss-pct", help="Comma-separated stop-loss percentages, or none.")
+    parser.add_argument("--take-profit-pct", help="Comma-separated take-profit percentages, or none.")
+    parser.add_argument("--circuit-breaker-drawdown", help="Comma-separated portfolio drawdown breakers, or none.")
+    parser.add_argument("--circuit-breaker-cooldown-days", help="Comma-separated breaker cooldown sessions, or none.")
+    parser.add_argument("--target-vol", help="Comma-separated target volatility values, or none.")
     parser.add_argument("--full-grid", action="store_true", help="Use the full default grid instead of the fast baseline grid.")
     parser.add_argument("--ic-top-k", type=int, default=30)
     parser.add_argument("--ic-window", type=int, default=config.get("ic", {}).get("window", 252))
@@ -83,6 +107,12 @@ def main() -> None:
         "rank_buffer": _grid_values(args.rank_buffer, grid_defaults["rank_buffer"], int),
         "rebalance_freq": _grid_values(args.rebalance_freq, grid_defaults["rebalance_freq"], str),
     }
+    _maybe_add_grid_values(grid, "max_weight_per_stock", args.max_weight_per_stock, float)
+    _maybe_add_grid_values(grid, "stop_loss_pct", args.stop_loss_pct, float)
+    _maybe_add_grid_values(grid, "take_profit_pct", args.take_profit_pct, float)
+    _maybe_add_grid_values(grid, "circuit_breaker_drawdown", args.circuit_breaker_drawdown, float)
+    _maybe_add_grid_values(grid, "circuit_breaker_cooldown_days", args.circuit_breaker_cooldown_days, int)
+    _maybe_add_grid_values(grid, "target_vol", args.target_vol, float)
     total_combinations = 1
     for values in grid.values():
         total_combinations *= len(values)

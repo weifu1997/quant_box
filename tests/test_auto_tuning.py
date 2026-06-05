@@ -112,6 +112,47 @@ class AutoTuningTests(unittest.TestCase):
 
         self.assertEqual(selected["factor_group"], "factor:LOW0")
 
+    def test_select_stable_params_filters_turnover_when_available(self) -> None:
+        summary = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 7,
+                    "max_turnover": 1,
+                    "rank_buffer": 20,
+                    "rebalance_freq": "monthly",
+                    "annual_return_mean": 0.30,
+                    "max_drawdown_worst": -0.12,
+                    "annual_turnover_mean": 45.0,
+                    "annual_trade_cost_ratio_mean": 0.01,
+                    "auto_score": 10.0,
+                },
+                {
+                    "factor_group": "factor:LOW0",
+                    "top_n": 10,
+                    "max_turnover": 1,
+                    "rank_buffer": 20,
+                    "rebalance_freq": "monthly",
+                    "annual_return_mean": 0.22,
+                    "max_drawdown_worst": -0.18,
+                    "annual_turnover_mean": 12.0,
+                    "annual_trade_cost_ratio_mean": 0.01,
+                    "auto_score": 1.0,
+                },
+            ]
+        )
+
+        selected = select_stable_params(
+            summary,
+            {
+                "min_optimizer_annual_return": 0.20,
+                "max_drawdown_limit": -0.20,
+                "max_annual_turnover": 20.0,
+            },
+        )
+
+        self.assertEqual(selected["factor_group"], "factor:LOW0")
+
     def test_assess_parameter_quality_uses_target_filtered_selection(self) -> None:
         summary = pd.DataFrame(
             [
@@ -167,6 +208,26 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(config["strategy"]["top_n"], 5)
         self.assertEqual(selected["strategy"]["top_n"], 7)
         self.assertEqual(selected["strategy"]["rebalance_freq"], "weekly")
+
+    def test_apply_strategy_params_carries_risk_controls(self) -> None:
+        config = {
+            "strategy": {"top_n": 5, "factor_group": "momentum", "circuit_breaker_drawdown": 0.12},
+            "backtest": {"initial_capital": 1000},
+        }
+
+        selected = apply_strategy_params(
+            config,
+            {
+                "max_weight_per_stock": 0.15,
+                "target_vol": 0.20,
+                "circuit_breaker_drawdown": None,
+            },
+        )
+
+        self.assertEqual(config["strategy"]["circuit_breaker_drawdown"], 0.12)
+        self.assertEqual(selected["strategy"]["max_weight_per_stock"], 0.15)
+        self.assertEqual(selected["strategy"]["target_vol"], 0.20)
+        self.assertIsNone(selected["strategy"]["circuit_breaker_drawdown"])
 
     def test_assess_parameter_quality_blocks_unstable_selected_params(self) -> None:
         summary = pd.DataFrame(

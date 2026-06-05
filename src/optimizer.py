@@ -17,6 +17,16 @@ from src.strategy import composite_factor, resample_signals
 logger = logging.getLogger(__name__)
 
 
+STRATEGY_GRID_KEYS = ("factor_group", "top_n", "max_turnover", "rank_buffer", "rebalance_freq")
+RISK_GRID_KEYS = (
+    "max_weight_per_stock",
+    "stop_loss_pct",
+    "take_profit_pct",
+    "circuit_breaker_drawdown",
+    "circuit_breaker_cooldown_days",
+    "target_vol",
+)
+
 DEFAULT_GRID = {
     "factor_group": ["ic_weighted", "momentum"],
     "top_n": [5, 7, 10],
@@ -27,7 +37,7 @@ DEFAULT_GRID = {
 
 BASELINE_GRID = {
     "factor_group": ["momentum", "factor:LOW0"],
-    "top_n": [20, 50],
+    "top_n": [7, 10, 20],
     "max_turnover": [1],
     "rank_buffer": [20],
     "rebalance_freq": ["monthly"],
@@ -427,7 +437,7 @@ def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Time
 def _scoring_config(config: dict | None, params: dict[str, object]) -> dict:
     result = deepcopy(config) if config is not None else {"strategy": {}}
     result.setdefault("strategy", {})
-    for key in ["factor_group", "top_n", "max_turnover", "rank_buffer", "rebalance_freq"]:
+    for key in STRATEGY_GRID_KEYS:
         if key in params:
             result["strategy"][key] = params[key]
     return result
