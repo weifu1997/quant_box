@@ -8,12 +8,16 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.data_fetcher import (
+    DAILY_BASIC_FIELDS,
     DAILY_FIELDS,
+    fetch_daily_basic,
     fetch_daily_stock,
     fetch_daily_stocks,
     fetch_stock_universe,
     filter_universe_frame,
+    normalize_daily_basic_frame,
     _raw_latest_date,
+    update_daily_basic_data,
     update_daily_data,
     update_daily_data_resumable,
 )
@@ -83,6 +87,25 @@ class EmptyTushareClient(FakeTushareClient):
         raise AssertionError(f"Unexpected API call: {api_name}")
 
 
+class DailyBasicClient(FakeTushareClient):
+    def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        params = params or {}
+        self.calls.append((api_name, params.copy(), fields))
+        if api_name == "daily_basic":
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": params.get("trade_date", "20240102"),
+                        "total_mv": 1000.0,
+                        "circ_mv": 800.0,
+                        "pb": 1.2,
+                    }
+                ]
+            )
+        return super().call(api_name, params=params, fields=fields)
+
+
 class FailingTushareClient(FakeTushareClient):
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
         self.calls.append((api_name, (params or {}).copy(), fields))
@@ -102,6 +125,98 @@ class DataFetcherTests(unittest.TestCase):
             ).to_csv(path, index=False)
 
             self.assertEqual(_raw_latest_date(path), pd.Timestamp("2024-01-04"))
+
+    def test_normalize_daily_basic_frame_keeps_market_cap_fields(self) -> None:
+        frame = normalize_daily_basic_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.sz",
+                        "trade_date": "20240102",
+                        "total_mv": "1000.5",
+                        "circ_mv": "800.25",
+                    }
+                ]
+            )
+        )
+
+        self.assertEqual(frame["ts_code"].iloc[0], "000001.SZ")
+        self.assertEqual(frame["trade_date"].iloc[0], pd.Timestamp("2024-01-02"))
+        self.assertAlmostEqual(float(frame["total_mv"].iloc[0]), 1000.5)
+        self.assertIn("circ_mv", frame.columns)
+
+    def test_fetch_daily_basic_requests_tushare_daily_basic_fields(self) -> None:
+        client = DailyBasicClient()
+
+        frame = fetch_daily_basic("2024-01-02", client=client, retries=1)
+
+        self.assertEqual(client.calls[0][0], "daily_basic")
+        self.assertEqual(client.calls[0][1]["trade_date"], "20240102")
+        self.assertEqual(client.calls[0][2], DAILY_BASIC_FIELDS)
+        self.assertEqual(frame["trade_date"].iloc[0], pd.Timestamp("2024-01-02"))
+
+    def test_update_daily_basic_data_writes_incremental_parquet_cache(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "daily_basic.parquet"
+            price_file = root / "prices.parquet"
+            prices = pd.DataFrame(
+                {"close": [1.0, 2.0]},
+                index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
+            )
+            prices.to_parquet(price_file)
+            config = {
+                "data": {
+                    "start_date": "2024-01-02",
+                    "end_date": "2024-01-03",
+                    "daily_basic_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                },
+                "ic": {"price_file": str(price_file)},
+            }
+            client = DailyBasicClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                path = update_daily_basic_data(client=client)
+
+            cached = pd.read_parquet(path)
+            self.assertEqual(len(cached), 2)
+            self.assertEqual([call[1]["trade_date"] for call in client.calls], ["20240102", "20240103"])
+
+    def test_update_daily_basic_data_supports_history_start_and_max_dates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "daily_basic.parquet"
+            price_file = root / "prices.parquet"
+            prices = pd.DataFrame(
+                {"close": [1.0, 2.0, 3.0]},
+                index=pd.to_datetime(["2021-01-04", "2021-01-05", "2024-01-02"]),
+            )
+            prices.to_parquet(price_file)
+            config = {
+                "data": {
+                    "start_date": "2024-01-01",
+                    "history_start_date": "2021-01-01",
+                    "end_date": "2024-01-03",
+                    "daily_basic_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                },
+                "ic": {"price_file": str(price_file)},
+            }
+            client = DailyBasicClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                path = update_daily_basic_data(client=client, max_dates=1)
+
+            cached = pd.read_parquet(path)
+            self.assertEqual(len(cached), 1)
+            self.assertEqual([call[1]["trade_date"] for call in client.calls], ["20210104"])
 
     def test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait(self) -> None:
         client = FailingTushareClient()
@@ -251,6 +366,34 @@ class DataFetcherTests(unittest.TestCase):
         daily_calls = [call for call in client.calls if call[0] == "daily"]
         self.assertEqual(len(daily_calls), 1)
         self.assertEqual(daily_calls[0][1]["ts_code"], "000001.SZ,600519.SH")
+
+    def test_update_daily_data_defaults_to_history_start_date(self) -> None:
+        client = FakeTushareClient()
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "history_start_date": "2021-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "daily_batch_size": 100,
+                "max_new_symbols_per_run": 100,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+
+        with TemporaryDirectory() as tmp:
+            raw_dir = Path(tmp)
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.TushareHttpClient.from_config", return_value=client
+            ):
+                update_daily_data(
+                    stock_codes=["000001.SZ"],
+                    end_date="2024-01-03",
+                    raw_dir=raw_dir,
+                )
+
+        daily_calls = [call for call in client.calls if call[0] == "daily"]
+        self.assertEqual(daily_calls[0][1]["start_date"], "20210101")
 
     def test_fetch_daily_stocks_skips_symbol_with_incomplete_adj_factor(self) -> None:
         client = MissingAdjFactorClient()

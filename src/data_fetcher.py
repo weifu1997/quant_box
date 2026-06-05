@@ -32,6 +32,25 @@ DAILY_FIELDS = [
     "amount",
 ]
 ADJ_FACTOR_FIELDS = ["ts_code", "trade_date", "adj_factor"]
+DAILY_BASIC_FIELDS = [
+    "ts_code",
+    "trade_date",
+    "turnover_rate",
+    "turnover_rate_f",
+    "volume_ratio",
+    "pe",
+    "pe_ttm",
+    "pb",
+    "ps",
+    "ps_ttm",
+    "dv_ratio",
+    "dv_ttm",
+    "total_share",
+    "float_share",
+    "free_share",
+    "total_mv",
+    "circ_mv",
+]
 STOCK_BASIC_FIELDS = [
     "ts_code",
     "symbol",
@@ -242,6 +261,81 @@ def fetch_daily_stocks(
     result = result.drop_duplicates(["ts_code", "trade_date"], keep="last")
     result.attrs["failed_codes"] = sorted(all_failed_codes)
     return result
+
+
+def fetch_daily_basic(
+    trade_date: str | datetime,
+    client: TushareHttpClient | None = None,
+    fields: Iterable[str] | str | None = None,
+    retries: int = 5,
+    retry_max_wait: float | None = None,
+) -> pd.DataFrame:
+    client = client or TushareHttpClient.from_config()
+    params = {"trade_date": _format_tushare_date(trade_date)}
+    requested_fields = fields or DAILY_BASIC_FIELDS
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            df = client.call("daily_basic", params=params, fields=requested_fields)
+            return normalize_daily_basic_frame(df)
+        except (RuntimeError, ValueError) as exc:
+            last_error = exc
+            if attempt < retries:
+                wait_seconds = _retry_wait_seconds(attempt, retry_max_wait)
+                logger.warning("Retrying daily_basic %s after error: %s", params["trade_date"], exc)
+                time.sleep(wait_seconds)
+    raise ValueError(f"daily_basic response is invalid for {params['trade_date']} after {retries} attempts: {last_error}") from last_error
+
+
+def update_daily_basic_data(
+    start_date: str | datetime | None = None,
+    end_date: str | datetime | None = None,
+    out_file: str | Path | None = None,
+    trade_dates: Iterable[str | datetime] | None = None,
+    client: TushareHttpClient | None = None,
+    sleep_seconds: float = 0.0,
+    retries: int | None = None,
+    retry_max_wait: float | None = None,
+    max_dates: int | None = None,
+) -> Path:
+    config = load_config()
+    data_cfg = config.get("data", {})
+    start = pd.Timestamp(start_date or data_cfg.get("history_start_date") or data_cfg["start_date"]).normalize()
+    end = pd.Timestamp(resolve_target_date_value(end_date or data_cfg["end_date"], config=config)).normalize()
+    path = resolve_path(out_file or data_cfg.get("daily_basic_file", "data/factors/daily_basic.parquet"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    dates = _daily_basic_trade_dates(start, end, trade_dates)
+    existing = pd.read_parquet(path) if path.exists() else pd.DataFrame()
+    existing = normalize_daily_basic_frame(existing) if not existing.empty else existing
+    existing_dates = set(pd.to_datetime(existing["trade_date"]).dt.normalize()) if not existing.empty else set()
+    pending_dates = [date for date in dates if pd.Timestamp(date).normalize() not in existing_dates]
+    if max_dates is not None:
+        pending_dates = pending_dates[: max(0, int(max_dates))]
+    if not pending_dates:
+        return path
+
+    client = client or TushareHttpClient.from_config(config)
+    retries = int(retries if retries is not None else data_cfg.get("retries", 5))
+    retry_max_wait = retry_max_wait if retry_max_wait is not None else data_cfg.get("retry_max_wait", 30)
+    retry_max_wait = float(retry_max_wait) if retry_max_wait is not None else None
+    frames: list[pd.DataFrame] = []
+    for pos, date in enumerate(pending_dates, start=1):
+        frame = fetch_daily_basic(date, client=client, retries=retries, retry_max_wait=retry_max_wait)
+        if not frame.empty:
+            frames.append(frame)
+        if sleep_seconds > 0 and pos < len(pending_dates):
+            time.sleep(float(sleep_seconds))
+
+    if frames:
+        new_data = pd.concat(frames, ignore_index=True)
+        combined = pd.concat([existing, new_data], ignore_index=True) if not existing.empty else new_data
+    else:
+        combined = existing
+    combined = normalize_daily_basic_frame(combined)
+    combined = combined.drop_duplicates(["ts_code", "trade_date"], keep="last").sort_values(["trade_date", "ts_code"])
+    combined.to_parquet(path, index=False)
+    return path
 
 
 def _fetch_daily_stock_batch(
@@ -652,6 +746,24 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
     return renamed.reset_index(drop=True)
 
 
+def normalize_daily_basic_frame(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=DAILY_BASIC_FIELDS)
+    renamed = df.rename(columns={"date": "trade_date", "code": "ts_code"}).copy()
+    for column in DAILY_BASIC_FIELDS:
+        if column not in renamed.columns:
+            renamed[column] = pd.NA
+    renamed = renamed[DAILY_BASIC_FIELDS]
+    renamed["ts_code"] = renamed["ts_code"].astype(str).str.upper()
+    renamed["trade_date"] = pd.to_datetime(renamed["trade_date"], errors="coerce")
+    for column in DAILY_BASIC_FIELDS:
+        if column not in {"ts_code", "trade_date"}:
+            renamed[column] = pd.to_numeric(renamed[column], errors="coerce")
+    renamed = renamed.dropna(subset=["ts_code", "trade_date"])
+    renamed = renamed[renamed["ts_code"].str.strip() != ""]
+    return renamed.sort_values(["trade_date", "ts_code"]).reset_index(drop=True)
+
+
 def update_daily_data(
     stock_codes: Iterable[str] | None = None,
     start_date: str | None = None,
@@ -665,7 +777,7 @@ def update_daily_data(
     target_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    start = start_date or data_cfg["start_date"]
+    start = start_date or data_cfg.get("history_start_date") or data_cfg["start_date"]
     end = resolve_target_date_value(end_date or data_cfg["end_date"], config=config)
     codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe(date=end)
     client = TushareHttpClient.from_config(config)
@@ -757,7 +869,7 @@ def update_daily_data_resumable(
     target_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    start = start_date or data_cfg["start_date"]
+    start = start_date or data_cfg.get("history_start_date") or data_cfg["start_date"]
     end = resolve_target_date_value(end_date or data_cfg["end_date"], config=config)
     codes = list(stock_codes) if stock_codes is not None else fetch_stock_universe(date=end)
     codes = [str(code).upper() for code in dict.fromkeys(codes)]
@@ -787,6 +899,7 @@ def update_daily_data_resumable(
 
     initial_existing = _existing_stock_codes(target_dir) & target_code_set
     initial_latest = _fresh_stock_codes(target_dir, target_code_set, end)
+    initial_history_complete = _history_complete_stock_codes(target_dir, target_code_set, start, end) if force_full else set()
     latest_codes = set(initial_latest)
     confirmed_no_new_data: set[str] = set()
     if not include_existing and not force_full and previous_progress and str(previous_progress.get("target_end_date", "")) == end:
@@ -798,14 +911,21 @@ def update_daily_data_resumable(
             for code in previous_confirmed
             if str(code).upper() in target_code_set and str(code).upper() not in initial_latest
         }
-    pending_codes = codes if include_existing or force_full else [
-        code
-        for code in codes
-        if (
-            (code not in initial_latest or _needs_adj_factor_backfill(target_dir / f"{code}.csv"))
-            and code not in confirmed_no_new_data
-        )
-    ]
+    if force_full:
+        pending_codes = [
+            code for code in codes if code not in initial_history_complete or _needs_adj_factor_backfill(target_dir / f"{code}.csv")
+        ]
+    elif include_existing:
+        pending_codes = codes
+    else:
+        pending_codes = [
+            code
+            for code in codes
+            if (
+                (code not in initial_latest or _needs_adj_factor_backfill(target_dir / f"{code}.csv"))
+                and code not in confirmed_no_new_data
+            )
+        ]
     written: dict[str, Path] = {}
     failed: dict[str, str] = {}
     processed_codes: set[str] = set()
@@ -828,6 +948,7 @@ def update_daily_data_resumable(
             "target_symbols": len(codes),
             "initial_existing": len(initial_existing),
             "initial_latest_symbols": len(initial_latest),
+            "initial_history_complete_symbols": len(initial_history_complete),
             "pending_symbols": len(pending_codes),
             "chunk_size": chunk_size,
             "sleep_seconds": sleep_seconds,
@@ -1046,6 +1167,47 @@ def _fresh_stock_codes(raw_dir: Path, codes: set[str], end_date: str) -> set[str
     return fresh
 
 
+def _history_complete_stock_codes(raw_dir: Path, codes: set[str], start_date: str, end_date: str) -> set[str]:
+    start_target = pd.Timestamp(start_date).normalize()
+    start_tolerance = start_target + pd.Timedelta(days=31)
+    end_target = pd.Timestamp(end_date).normalize()
+
+    def coverage_for_code(code: str) -> tuple[str, pd.Timestamp | None, pd.Timestamp | None]:
+        path = raw_dir / f"{code}.csv"
+        return code, _raw_earliest_date(path), _raw_latest_date(path)
+
+    complete: set[str] = set()
+    code_list = list(codes)
+    iterator = None
+    if len(code_list) >= 100:
+        max_workers = min(32, len(code_list))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            iterator = executor.map(coverage_for_code, code_list)
+            for code, earliest, latest in iterator:
+                if earliest is not None and latest is not None and earliest <= start_tolerance and latest >= end_target:
+                    complete.add(code)
+    else:
+        for code, earliest, latest in map(coverage_for_code, code_list):
+            if earliest is not None and latest is not None and earliest <= start_tolerance and latest >= end_target:
+                complete.add(code)
+    return complete
+
+
+def _raw_earliest_date(path: Path) -> pd.Timestamp | None:
+    if not path.exists():
+        return None
+    try:
+        rows = pd.read_csv(path, usecols=["trade_date"], parse_dates=["trade_date"], nrows=1)
+    except (OSError, ValueError):
+        return None
+    if rows.empty:
+        return None
+    earliest = pd.to_datetime(rows["trade_date"], errors="coerce").min()
+    if pd.isna(earliest):
+        return None
+    return pd.Timestamp(earliest).normalize()
+
+
 def _raw_latest_date(path: Path) -> pd.Timestamp | None:
     if not path.exists():
         return None
@@ -1191,6 +1353,31 @@ def _date_windows(
         window_end = min(current + step, end)
         yield current.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d")
         current = window_end + pd.Timedelta(days=1)
+
+
+def _daily_basic_trade_dates(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    trade_dates: Iterable[str | datetime] | None,
+) -> list[pd.Timestamp]:
+    if trade_dates is not None:
+        dates = pd.DatetimeIndex(pd.to_datetime(list(trade_dates), errors="coerce")).dropna().normalize().unique().sort_values()
+        return [pd.Timestamp(date) for date in dates if start <= pd.Timestamp(date) <= end]
+
+    config = load_config()
+    price_file = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
+    if price_file.exists():
+        try:
+            prices = pd.read_parquet(price_file, columns=[])
+        except (ValueError, TypeError):
+            prices = pd.read_parquet(price_file)
+        dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce")).dropna().normalize().unique().sort_values()
+        selected = [pd.Timestamp(date) for date in dates if start <= pd.Timestamp(date) <= end]
+        if selected:
+            return selected
+
+    business_dates = pd.bdate_range(start, end)
+    return [pd.Timestamp(date).normalize() for date in business_dates]
 
 
 def _incremental_start(path: Path, configured_start: str) -> str:

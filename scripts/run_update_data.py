@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch configured A-share universe daily data through a Tushare HTTP proxy.")
     parser.add_argument("--codes", nargs="*", help="Optional ts_codes. If omitted, configured universe constituents are used.")
-    parser.add_argument("--start-date", help="Override config data.start_date.")
+    parser.add_argument("--start-date", help="Override config data.history_start_date.")
     parser.add_argument("--end-date", help="Override config data.end_date.")
     parser.add_argument("--chunk-size", type=int, help="Resumable missing-symbol chunk size when --codes is omitted.")
     parser.add_argument("--sleep-seconds", type=float, help="Seconds to sleep between resumable chunks when --codes is omitted.")
