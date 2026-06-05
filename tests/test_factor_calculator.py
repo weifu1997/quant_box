@@ -86,6 +86,51 @@ class FactorCalculatorTests(unittest.TestCase):
         compute.assert_not_called()
         self.assertEqual(len(factors), len(cached))
 
+    def test_load_or_compute_factors_reuses_superset_cache_and_slices_dates(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            provider = root / "qlib"
+            cached_dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"])
+            requested_dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+            index = pd.MultiIndex.from_product([cached_dates, ["A", "B"]], names=["datetime", "instrument"])
+            cached = pd.DataFrame({"F1": range(len(index))}, index=index)
+            cached.to_parquet(cache_path)
+            prices = pd.concat(
+                {
+                    "close": pd.DataFrame({"A": [10.0, 10.1], "B": [20.0, 20.1]}, index=requested_dates),
+                },
+                axis=1,
+            )
+            prices.to_parquet(price_path)
+            (cache_path.with_name(f"{cache_path.name}.meta.json")).write_text(
+                json.dumps(
+                    {
+                        "provider_uri": str(provider),
+                        "region": "cn",
+                        "instruments": "mainboard_a",
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-01-04",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "factors": {"cache_file": str(cache_path)},
+                "ic": {"price_file": str(price_path)},
+                "qlib": {"provider_uri": str(provider), "region": "cn", "instruments": "mainboard_a"},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors") as compute:
+                factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path)
+
+        compute.assert_not_called()
+        self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).date), set(requested_dates.date))
+        self.assertEqual(len(factors), 4)
+
     def test_load_or_compute_factors_recomputes_when_qlib_metadata_changes(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

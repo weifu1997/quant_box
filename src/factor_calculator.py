@@ -88,7 +88,7 @@ def load_or_compute_factors(
     if path.exists() and not force:
         cached = _read_factor_cache(path, columns=columns)
         if _factor_cache_matches_request(cached, start_date, end, config, cache_file=path):
-            return cached
+            return _slice_factor_cache(cached, start_date, end)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     factors = compute_alpha158_factors(start_date, end)
@@ -142,6 +142,10 @@ def _factor_cache_matches_request(
         return False
 
     factor_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
+    requested_start = pd.Timestamp(start_date).normalize()
+    requested_end = pd.Timestamp(end_date).normalize()
+    if factor_dates.min() > requested_start:
+        return False
     latest_factor_date = factor_dates.max()
     price_dates, price_symbols = _price_cache_state(config, start_date, end_date)
     if not price_dates.empty and latest_factor_date < price_dates.max():
@@ -153,10 +157,18 @@ def _factor_cache_matches_request(
             return False
 
     if price_dates.empty:
-        requested_end = pd.Timestamp(end_date).normalize()
         if latest_factor_date < requested_end:
             return False
     return True
+
+
+def _slice_factor_cache(factors: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    if factors.empty or not isinstance(factors.index, pd.MultiIndex):
+        return factors
+    dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
+    start = pd.Timestamp(start_date).normalize()
+    end = pd.Timestamp(end_date).normalize()
+    return factors[(dates >= start) & (dates <= end)]
 
 
 def _price_cache_state(config: dict, start_date: str, end_date: str) -> tuple[pd.DatetimeIndex, set[str]]:
@@ -195,12 +207,21 @@ def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cac
     except (OSError, json.JSONDecodeError):
         return False
     expected = _factor_cache_meta_payload(None, start_date, end_date, config)
-    keys = ["start_date", "end_date"]
+    keys = []
     if "qlib" in config:
-        keys = ["provider_uri", "region", "instruments", *keys]
+        keys = ["provider_uri", "region", "instruments"]
     for key in keys:
         if meta.get(key) != expected.get(key):
             return False
+    try:
+        cached_start = pd.Timestamp(meta.get("start_date")).normalize()
+        cached_end = pd.Timestamp(meta.get("end_date")).normalize()
+        requested_start = pd.Timestamp(expected.get("start_date")).normalize()
+        requested_end = pd.Timestamp(expected.get("end_date")).normalize()
+    except (TypeError, ValueError):
+        return False
+    if cached_start > requested_start or cached_end < requested_end:
+        return False
     return True
 
 
