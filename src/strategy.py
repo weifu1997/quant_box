@@ -333,11 +333,11 @@ def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:
             parts.append(pd.DataFrame(np.nan, index=daily.index, columns=daily.columns, dtype="float32"))
             continue
 
-        numeric = daily.astype("float32", copy=False)
+        numeric = daily.astype("float32")
         stds = numeric[valid_columns].std(ddof=0).replace(0, np.nan)
         scaled = pd.DataFrame(np.nan, index=daily.index, columns=daily.columns, dtype="float32")
         scaled[valid_columns] = (numeric[valid_columns] - numeric[valid_columns].mean()) / stds
-        parts.append(_mask_nonfinite(scaled).astype("float32", copy=False))
+        parts.append(_mask_nonfinite(scaled).astype("float32"))
 
     if not parts:
         return pd.DataFrame(index=df.index, columns=df.columns, dtype="float32")

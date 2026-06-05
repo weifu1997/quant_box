@@ -86,7 +86,7 @@ def main() -> None:
     parser.add_argument("--cost-penalty", type=float, default=1.0)
     parser.add_argument("--target-annual-return", type=float, default=base_config.get("quality", {}).get("target_annual_return", 0.20))
     parser.add_argument("--min-annual-return", type=float, default=base_config.get("quality", {}).get("min_optimizer_annual_return", 0.18))
-    parser.add_argument("--drawdown-limit", type=float, default=base_config.get("quality", {}).get("max_backtest_drawdown_limit", -0.40))
+    parser.add_argument("--drawdown-limit", type=float, default=base_config.get("quality", {}).get("max_backtest_drawdown_limit", -0.20))
     parser.add_argument("--drawdown-penalty", type=float, default=2.0)
     args = parser.parse_args()
 

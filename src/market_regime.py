@@ -21,9 +21,21 @@ def market_regime_enabled(config: dict[str, Any]) -> bool:
 
 def detect_market_regime(price_df: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
     cfg = config.get("market_regime", {})
-    benchmark = _benchmark_close(price_df, config)
+    return _detect_regime(price_df, config, cfg, name="market_regime")
+
+
+def detect_reporting_regime(price_df: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
+    base = dict(config.get("market_regime", {}))
+    reporting_cfg = dict(config.get("reporting_regime", {}))
+    cfg = {**base, **reporting_cfg}
+    cfg.setdefault("lag_days", 0)
+    return _detect_regime(price_df, config, cfg, name="reporting_regime")
+
+
+def _detect_regime(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[str, Any], name: str) -> pd.Series:
+    benchmark = _benchmark_close(price_df, config, cfg)
     if benchmark.empty:
-        return pd.Series(dtype="object", name="market_regime")
+        return pd.Series(dtype="object", name=name)
 
     benchmark = benchmark.sort_index()
     benchmark.index = pd.to_datetime(benchmark.index).normalize()
@@ -45,14 +57,14 @@ def detect_market_regime(price_df: pd.DataFrame, config: dict[str, Any]) -> pd.S
         (momentum <= float(cfg.get("bear_momentum_max", 0.0))) | high_volatility
     )
 
-    regime = pd.Series(REGIME_SIDEWAYS, index=benchmark.index, name="market_regime", dtype="object")
+    regime = pd.Series(REGIME_SIDEWAYS, index=benchmark.index, name=name, dtype="object")
     regime.loc[bull.fillna(False)] = REGIME_BULL
     regime.loc[bear.fillna(False)] = REGIME_BEAR
 
     lag_days = int(cfg.get("lag_days", 1))
     if lag_days > 0:
         regime = regime.shift(lag_days).fillna(REGIME_SIDEWAYS)
-    return regime.rename("market_regime")
+    return regime.rename(name)
 
 
 def regime_for_date(regimes: pd.Series, date: pd.Timestamp | str, default: str = REGIME_SIDEWAYS) -> str:
@@ -165,8 +177,8 @@ def _high_volatility_mask(volatility: pd.Series, cfg: dict[str, Any]) -> pd.Seri
     return volatility >= threshold
 
 
-def _benchmark_close(price_df: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
-    cfg = config.get("market_regime", {})
+def _benchmark_close(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[str, Any] | None = None) -> pd.Series:
+    cfg = cfg or config.get("market_regime", {})
     benchmark_file = cfg.get("benchmark_file")
     if benchmark_file:
         benchmark = _load_benchmark_file(benchmark_file)

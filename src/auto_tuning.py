@@ -192,7 +192,7 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
 def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None = None) -> BacktestQualityReport:
     cfg = quality_config or {}
     min_return = float(cfg.get("min_backtest_annual_return", cfg.get("target_annual_return", 0.20)))
-    max_drawdown = float(cfg.get("max_backtest_drawdown_limit", -0.40))
+    max_drawdown = float(cfg.get("max_backtest_drawdown_limit", -0.20))
     issues: list[str] = []
 
     if not metrics or bool(metrics.get("backtest_skipped", False)):

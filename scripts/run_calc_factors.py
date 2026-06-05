@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     config = load_config()
     parser = argparse.ArgumentParser(description="Compute and cache Qlib Alpha158 factors.")
-    parser.add_argument("--start-date", default=config["data"]["start_date"])
+    parser.add_argument("--start-date", default=config["data"].get("history_start_date", config["data"]["start_date"]))
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--force", action="store_true", help="Recompute even if the factor cache exists.")
     args = parser.parse_args()

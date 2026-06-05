@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument("--circuit-breaker-drawdown", default="0.10,0.12,0.14")
     parser.add_argument("--cooldown-days", default="10,20,40")
     parser.add_argument("--target-annual-return", type=float, default=quality.get("target_annual_return", 0.20))
-    parser.add_argument("--drawdown-limit", type=float, default=quality.get("max_backtest_drawdown_limit", -0.40))
+    parser.add_argument("--drawdown-limit", type=float, default=quality.get("max_backtest_drawdown_limit", -0.20))
     parser.add_argument("--max-seconds", type=float, default=900.0)
     parser.add_argument("--resume", action="store_true", help="Skip parameter rows already present in the output CSV.")
     parser.add_argument("--output", default="outputs/risk_refine_results.csv")

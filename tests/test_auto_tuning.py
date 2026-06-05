@@ -117,7 +117,7 @@ class AutoTuningTests(unittest.TestCase):
     def test_assess_backtest_quality_requires_return_and_drawdown_targets(self) -> None:
         quality = assess_backtest_quality(
             {"annual_return": 0.195, "max_drawdown": -0.45, "calmar": 0.43},
-            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.40},
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},
         )
 
         self.assertFalse(quality.is_acceptable)
@@ -126,8 +126,8 @@ class AutoTuningTests(unittest.TestCase):
 
     def test_assess_backtest_quality_accepts_target_profile(self) -> None:
         quality = assess_backtest_quality(
-            {"annual_return": 0.205, "max_drawdown": -0.35, "calmar": 0.58},
-            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.40},
+            {"annual_return": 0.205, "max_drawdown": -0.18, "calmar": 1.14},
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},
         )
 
         self.assertTrue(quality.is_acceptable)

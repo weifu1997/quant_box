@@ -187,7 +187,7 @@ def _signed_candidate_factors(factors: pd.DataFrame, candidates: list[str]) -> p
     pieces: dict[str, pd.Series] = {}
     for candidate in candidates:
         column, direction = _candidate_column_and_direction(candidate, numeric.columns)
-        pieces[column] = numeric[column].astype("float32", copy=False) * direction
+        pieces[column] = numeric[column].astype("float32") * direction
     if not pieces:
         raise ValueError("dynamic_ic_selector has no usable candidate factors.")
     return pd.DataFrame(pieces, index=factors.index)
