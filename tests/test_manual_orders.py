@@ -90,6 +90,52 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertIn("current_shares_missing", orders.iloc[0]["note"])
         self.assertIn("reference_price_from_signal_date", orders.iloc[0]["note"])
 
+    def test_generate_manual_orders_applies_defensive_exposure_to_target_weight(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=6)
+        signal_date = str(dates[-1].date())
+        signal = pd.DataFrame([{"date": signal_date, "instrument": "000001.SZ", "action": "BUY"}])
+        prices = _prices(
+            [str(date.date()) for date in dates],
+            {"000001.SZ": [10.0, 9.8, 9.5, 9.2, 9.0, 8.8]},
+        )
+        account = AccountState(
+            total_asset=100000,
+            cash=10000,
+            max_position_pct=None,
+            lot_size=100,
+            star_market_lot_size=200,
+            source_file="",
+            holdings_file="",
+            holdings_loaded=True,
+        )
+        config = {
+            "strategy": {},
+            "market_regime": {
+                "enabled": True,
+                "ma_window": 2,
+                "momentum_window": 1,
+                "volatility_window": 2,
+                "min_periods": 1,
+                "high_volatility_threshold": 10.0,
+                "lag_days": 0,
+            },
+            "defensive_timing": {"enabled": True, "bear_exposure": 0.4, "sideways_exposure": 0.8, "bull_exposure": 1.0},
+        }
+
+        orders = generate_manual_orders(
+            signal,
+            ["000001.SZ"],
+            prices,
+            signal_date=signal_date,
+            intended_trade_date=None,
+            account=account,
+            current_holdings=pd.DataFrame({"instrument": ["000001.SZ"], "shares": [0]}),
+            config=config,
+        )
+
+        self.assertEqual(float(orders.iloc[0]["target_weight"]), 0.4)
+        self.assertEqual(float(orders.iloc[0]["target_value"]), 40000.0)
+
     def test_generate_manual_orders_falls_back_to_signal_date_when_intended_price_is_missing(self) -> None:
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
         prices = _prices("2024-01-03", {"000001.SZ": 10.0})

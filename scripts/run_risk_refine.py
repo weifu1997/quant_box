@@ -18,6 +18,7 @@ from scripts.run_backtest import _requested_factor_columns
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
+from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.scoring import build_strategy_scores
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
@@ -90,7 +91,7 @@ def main() -> None:
             scores = resample_signals(scores, scoring_config["strategy"].get("rebalance_freq", "daily"))
             score_cache[liquidity_quantile] = scores
 
-        bt_config = {**config["backtest"], **config["strategy"]}
+        bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
         bt_config.update(
             {
                 "top_n": top_n,

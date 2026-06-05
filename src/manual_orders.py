@@ -8,6 +8,7 @@ import pandas as pd
 import yaml
 
 from src.config_loader import load_config, resolve_path
+from src.market_regime import defensive_exposure_for_date
 
 
 @dataclass
@@ -88,7 +89,8 @@ def generate_manual_orders(
     all_symbols = sorted(set(action_map) | target_set | set(current_map), key=lambda code: (code not in target_set, code))
 
     rows: list[dict[str, Any]] = []
-    target_weight = _target_weight(normalized_targets, account, cfg)
+    target_exposure = defensive_exposure_for_date(price_df, cfg, signal_date)
+    target_weight = _target_weight(normalized_targets, account, cfg, target_exposure)
     reference_date = _reference_price_date(price_df, signal_date, intended_trade_date)
     close = _price_row(price_df, "close", reference_date)
     reference_from_signal_date = _reference_from_signal_date(signal_date, intended_trade_date, reference_date)
@@ -165,10 +167,10 @@ def _signal_action_map(signal_df: pd.DataFrame) -> dict[str, str]:
     return result
 
 
-def _target_weight(target_holdings: list[str], account: AccountState, config: dict) -> float:
+def _target_weight(target_holdings: list[str], account: AccountState, config: dict, exposure_scale: float = 1.0) -> float:
     if not target_holdings:
         return 0.0
-    weight = 1.0 / len(target_holdings)
+    weight = 1.0 / len(target_holdings) * max(float(exposure_scale), 0.0)
     strategy_cap = config.get("strategy", {}).get("max_weight_per_stock")
     if strategy_cap is not None:
         weight = min(weight, float(strategy_cap))

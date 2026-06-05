@@ -112,6 +112,49 @@ def defensive_exposure_schedule(regimes: pd.Series, config: dict[str, Any], date
     return schedule.rename("exposure_scale")
 
 
+def apply_defensive_timing_to_backtest_config(
+    bt_config: dict[str, Any],
+    price_df: pd.DataFrame,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(bt_config)
+    if not market_regime_enabled(config) or not bool(config.get("defensive_timing", {}).get("enabled", False)):
+        return result
+
+    regimes = detect_market_regime(price_df, config)
+    if regimes.empty:
+        return result
+
+    exposure = defensive_exposure_schedule(regimes, config, pd.Index(pd.to_datetime(price_df.index)))
+    result["exposure_schedule"] = exposure
+    result["exposure_rebalance_threshold"] = float(
+        config.get("defensive_timing", {}).get(
+            "exposure_rebalance_threshold",
+            result.get("exposure_rebalance_threshold", 0.05),
+        )
+    )
+    return result
+
+
+def defensive_exposure_for_date(
+    price_df: pd.DataFrame,
+    config: dict[str, Any],
+    date: str | pd.Timestamp,
+    default: float = 1.0,
+) -> float:
+    if not market_regime_enabled(config) or not bool(config.get("defensive_timing", {}).get("enabled", False)):
+        return float(default)
+    regimes = detect_market_regime(price_df, config)
+    if regimes.empty:
+        return float(default)
+    exposure = defensive_exposure_schedule(regimes, config, pd.Index(pd.to_datetime(price_df.index)))
+    target = pd.Timestamp(date).normalize()
+    eligible = exposure.loc[exposure.index <= target]
+    if eligible.empty:
+        return float(default)
+    return float(eligible.iloc[-1])
+
+
 def summarize_regime_performance(equity_curve: pd.Series, regimes: pd.Series, config: dict[str, Any] | None = None) -> pd.DataFrame:
     if equity_curve.empty:
         return pd.DataFrame(columns=["regime", "start", "end", "days", "total_return", "annual_return", "max_drawdown"])

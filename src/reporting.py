@@ -33,6 +33,7 @@ def _render_report(report: dict[str, Any]) -> str:
     selected_params = report.get("selected_params", {})
     data_health = report.get("data_health", {})
     param_quality = report.get("parameter_quality", {})
+    backtest_quality = report.get("backtest_quality", {})
     metrics = report.get("backtest_metrics", {})
     account = report.get("account", {})
     signal_summary = report.get("signal_summary", {})
@@ -67,9 +68,21 @@ def _render_report(report: dict[str, Any]) -> str:
             f"- Acceptable: {param_quality.get('is_acceptable', False)}",
             f"- Windows: {param_quality.get('windows', 0)}",
             f"- Positive return rate: {_pct(param_quality.get('positive_return_rate'))}",
+            f"- Annual return mean: {_pct(param_quality.get('annual_return_mean'))}",
+            f"- Annual return target: {_pct(param_quality.get('min_optimizer_annual_return'))}",
             f"- Sharpe mean: {_num(param_quality.get('sharpe_mean'))}",
             f"- Worst drawdown: {_pct(param_quality.get('max_drawdown_worst'))}",
             f"- Issues: {', '.join(param_quality.get('issues', [])) or 'none'}",
+            "",
+            "## Backtest Quality",
+            "",
+            f"- Acceptable: {backtest_quality.get('is_acceptable', False)}",
+            f"- Annual return: {_pct(backtest_quality.get('annual_return'))}",
+            f"- Annual return target: {_pct(backtest_quality.get('min_backtest_annual_return'))}",
+            f"- Max drawdown: {_pct(backtest_quality.get('max_drawdown'))}",
+            f"- Max drawdown limit: {_pct(backtest_quality.get('max_backtest_drawdown_limit'))}",
+            f"- Calmar: {_num(backtest_quality.get('calmar'))}",
+            f"- Issues: {', '.join(backtest_quality.get('issues', [])) or 'none'}",
             "",
             "## Selected Params",
             "",

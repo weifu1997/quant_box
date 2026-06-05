@@ -29,6 +29,7 @@ from src.data_fetcher import update_daily_data_resumable
 from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
 from src.manual_orders import generate_manual_orders, load_account_state, load_current_holdings, save_manual_orders
+from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_walk_forward_grid_validation
 from src.reporting import archive_run, signal_action_summary, write_daily_signal_report
 from src.scoring import build_strategy_scores
@@ -183,10 +184,11 @@ def main() -> None:
                 total_combinations *= len(values)
             logger.info("Automatic validation grid has %s combinations: %s", total_combinations, grid)
             logger.info("Running automatic walk-forward grid validation.")
+            base_bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
             validation = run_walk_forward_grid_validation(
                 factors,
                 prices,
-                base_config={**config["backtest"], **config["strategy"]},
+                base_config=base_bt_config,
                 start_date=args.start_date,
                 end_date=end_date,
                 grid=grid,
@@ -216,7 +218,7 @@ def main() -> None:
             summary.to_csv(summary_path, index=False, encoding="utf-8-sig")
             artifacts.extend([validation_path, summary_path])
             if not summary.empty:
-                selected_params = select_stable_params(summary)
+                selected_params = select_stable_params(summary, config.get("quality", {}))
                 selected_config = apply_strategy_params(config, selected_params)
             _stage(status, out_dir, "optimize_params", "complete")
         else:
@@ -249,12 +251,17 @@ def main() -> None:
             _stage(status, out_dir, "backtest", "running")
             scores = build_strategy_scores(factors, selected_config, price_df=prices)
             scores = resample_signals(scores, selected_config["strategy"].get("rebalance_freq", "daily"))
+            bt_config = apply_defensive_timing_to_backtest_config(
+                {**selected_config["backtest"], **selected_config["strategy"]},
+                prices,
+                selected_config,
+            )
             result = run_backtest(
                 scores,
                 prices,
                 args.start_date,
                 end_date,
-                {**selected_config["backtest"], **selected_config["strategy"]},
+                bt_config,
             )
             result.equity_curve.to_csv(equity_path, encoding="utf-8-sig")
             result.holdings.to_csv(holdings_bt_path, index=False, encoding="utf-8-sig")
@@ -448,14 +455,19 @@ def _skipped_quality(quality_config: dict) -> ParameterQualityReport:
         issues=["parameter_validation_skipped"],
         windows=0,
         positive_return_rate=0.0,
+        annual_return_mean=0.0,
+        annual_return_min=0.0,
         sharpe_mean=0.0,
         max_drawdown_worst=0.0,
         annual_turnover_mean=0.0,
         annual_trade_cost_ratio_mean=0.0,
         min_validation_windows=int(quality_config.get("min_validation_windows", 3)),
         min_positive_return_rate=float(quality_config.get("min_positive_return_rate", 0.5)),
+        min_optimizer_annual_return=float(
+            quality_config.get("min_optimizer_annual_return", quality_config.get("target_annual_return", 0.20))
+        ),
         min_sharpe_mean=float(quality_config.get("min_sharpe_mean", 0.0)),
-        max_drawdown_limit=float(quality_config.get("max_drawdown_limit", -0.35)),
+        max_drawdown_limit=float(quality_config.get("max_drawdown_limit", -0.20)),
         max_annual_turnover=float(quality_config.get("max_annual_turnover", 20.0)),
         max_annual_trade_cost_ratio=float(quality_config.get("max_annual_trade_cost_ratio", 0.2)),
     )

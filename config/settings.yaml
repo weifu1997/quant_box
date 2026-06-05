@@ -151,10 +151,11 @@ quality:
   min_validation_windows: 3
   min_positive_return_rate: 0.5
   min_sharpe_mean: 0.0
-  max_drawdown_limit: -0.35
+  max_drawdown_limit: -0.20
   target_annual_return: 0.20
+  min_optimizer_annual_return: 0.20
   min_backtest_annual_return: 0.20
-  max_backtest_drawdown_limit: -0.40
+  max_backtest_drawdown_limit: -0.20
   max_annual_turnover: 20.0
   max_annual_trade_cost_ratio: 0.2
 

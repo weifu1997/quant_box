@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import factor_cache_columns, load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
+from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_parameter_grid, run_walk_forward_grid_validation, run_walk_forward_optimization
 from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS
 from src.strategy import factor_columns_for_method
@@ -107,7 +108,7 @@ def main() -> None:
         ic_summary_path.parent.mkdir(parents=True, exist_ok=True)
         ic_summary.to_csv(ic_summary_path, encoding="utf-8-sig")
 
-    base_config = {**config["backtest"], **config["strategy"]}
+    base_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
     if args.walk_forward and args.selection_walk_forward:
         results = run_walk_forward_optimization(
             factors,

@@ -49,8 +49,10 @@ class ConfigLoaderTests(unittest.TestCase):
         quality = DEFAULT_CONFIG["quality"]
 
         self.assertEqual(quality["target_annual_return"], 0.20)
+        self.assertEqual(quality["min_optimizer_annual_return"], 0.20)
         self.assertEqual(quality["min_backtest_annual_return"], 0.20)
         self.assertEqual(quality["max_backtest_drawdown_limit"], -0.20)
+        self.assertEqual(quality["max_drawdown_limit"], -0.20)
 
     def test_default_ml_strategy_is_configured_but_disabled_for_existing_pipeline(self) -> None:
         ml = DEFAULT_CONFIG["ml_strategy"]

@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import factor_cache_columns, load_or_compute_factors
+from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS, build_strategy_scores
 from src.strategy import factor_columns_for_method, resample_signals
 from src.trading_calendar import resolve_target_date_value
@@ -53,7 +54,7 @@ def main() -> None:
     scores = build_strategy_scores(factors, config, price_df=prices)
     scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
 
-    bt_config = {**config["backtest"], **config["strategy"]}
+    bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
     if args.benchmark_file:
         benchmark_path = resolve_path(args.benchmark_file)
         if benchmark_path.suffix.lower() == ".csv":
