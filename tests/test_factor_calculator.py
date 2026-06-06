@@ -159,6 +159,36 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertFalse(cache_path.exists())
         self.assertFalse(cache_path.with_name(f"{cache_path.name}.meta.json").exists())
 
+    def test_load_or_compute_factors_writes_default_cache_for_full_available_price_range(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            price_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+            pd.DataFrame({"A": [10.0, 10.1, 10.2]}, index=price_dates).to_parquet(price_path)
+            computed_index = pd.MultiIndex.from_product(
+                [price_dates, ["A"]],
+                names=["datetime", "instrument"],
+            )
+            computed = pd.DataFrame({"F1": [1.0, 2.0, 3.0]}, index=computed_index)
+            config = {
+                "data": {"history_start_date": "2020-01-01", "start_date": "2024-01-01", "end_date": "auto"},
+                "factors": {"cache_file": str(cache_path)},
+                "ic": {"price_file": str(price_path)},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=computed) as compute:
+                factors = load_or_compute_factors("2024-01-01", "2024-01-04", cache_file=cache_path)
+
+            compute.assert_called_once()
+            self.assertEqual(len(factors), 3)
+            self.assertTrue(cache_path.exists())
+            meta = json.loads(cache_path.with_name(f"{cache_path.name}.meta.json").read_text(encoding="utf-8"))
+            self.assertEqual(meta["start_date"], "2024-01-01")
+            self.assertEqual(meta["end_date"], "2024-01-04")
+
     def test_load_or_compute_factors_recomputes_when_qlib_metadata_changes(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

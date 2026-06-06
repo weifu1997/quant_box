@@ -29,20 +29,29 @@ RISK_GRID_KEYS = (
 )
 
 DEFAULT_GRID = {
-    "factor_group": ["ic_weighted", "momentum"],
-    "top_n": [5, 7, 10],
+    "factor_group": ["dynamic_ic_selector", "ic_weighted", "momentum", "factor:LOW0"],
+    "top_n": [7, 10, 15],
     "max_turnover": [1],
     "rank_buffer": [20, 30],
     "rebalance_freq": ["weekly", "monthly"],
 }
 
 BASELINE_GRID = {
-    "factor_group": ["momentum", "factor:LOW0"],
-    "top_n": [7, 10, 20],
+    "factor_group": ["dynamic_ic_selector", "momentum", "factor:LOW0"],
+    "top_n": [7, 10, 15],
     "max_turnover": [1],
     "rank_buffer": [30],
     "rebalance_freq": ["monthly"],
 }
+
+
+def with_current_risk_defaults(grid: dict[str, Iterable], strategy_config: dict | None = None) -> dict[str, list]:
+    result = {key: list(values) for key, values in grid.items()}
+    strategy_config = strategy_config or {}
+    for key in RISK_GRID_KEYS:
+        if key not in result:
+            result[key] = [_python_grid_value(strategy_config.get(key))]
+    return result
 
 
 def run_parameter_grid(
@@ -74,7 +83,7 @@ def run_parameter_grid(
 ) -> pd.DataFrame:
     grid = grid or DEFAULT_GRID
     dynamic_weights = None
-    if "ic_weighted" in set(grid.get("factor_group", [])) and use_rolling_ic:
+    if scoring_config is None and "ic_weighted" in set(grid.get("factor_group", [])) and use_rolling_ic:
         rolling_ic = calculate_rolling_ic(factor_df, price_df, window=ic_window, min_periods=ic_min_periods)
         dynamic_weights = make_rolling_ic_weights(
             rolling_ic,
@@ -85,7 +94,7 @@ def run_parameter_grid(
             weight_smoothing=ic_weight_smoothing,
             max_weight_turnover=ic_max_weight_turnover,
         )
-    elif "ic_weighted" in set(grid.get("factor_group", [])) and ic_weights is None:
+    elif scoring_config is None and "ic_weighted" in set(grid.get("factor_group", [])) and ic_weights is None:
         ic_df = calculate_factor_ic(factor_df, price_df)
         ic_weights = make_ic_weights(summarize_ic(ic_df), top_k=ic_top_k, min_abs_ic=ic_min_abs)
 
@@ -99,10 +108,13 @@ def run_parameter_grid(
         cache_key = (factor_group, rebalance_freq)
         if cache_key not in score_cache:
             logger.info("Building scores for factor_group=%s rebalance_freq=%s.", factor_group, rebalance_freq)
-            weights = ic_weights if factor_group == "ic_weighted" else None
-            dynamic = dynamic_weights if factor_group == "ic_weighted" else None
             if factor_group == "ic_weighted":
-                scores = composite_factor(factor_df, method=factor_group, factor_weights=weights, factor_weights_dynamic=dynamic)
+                if scoring_config is not None:
+                    scores = build_strategy_scores(factor_df, _scoring_config(scoring_config, params), price_df=price_df)
+                else:
+                    weights = ic_weights
+                    dynamic = dynamic_weights
+                    scores = composite_factor(factor_df, method=factor_group, factor_weights=weights, factor_weights_dynamic=dynamic)
             else:
                 scores = build_strategy_scores(factor_df, _scoring_config(scoring_config, params), price_df=price_df)
             score_cache[cache_key] = resample_signals(scores, rebalance_freq)
@@ -165,6 +177,7 @@ def run_walk_forward_optimization(
     drawdown_penalty: float = 2.0,
     annual_return_weight: float = 0.5,
     calmar_weight: float = 0.25,
+    scoring_config: dict | None = None,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     price_df = price_df.copy()
@@ -183,9 +196,11 @@ def run_walk_forward_optimization(
 
         train_factors = _slice_factor_dates(factor_df, train_start, train_end)
         test_factors = _slice_factor_dates(factor_df, test_start, test_end)
+        scoring_factors = _slice_factor_dates(factor_df, train_start, test_end)
         train_prices = price_df.loc[(price_df.index >= train_start) & (price_df.index <= train_end)]
         test_prices = price_df.loc[(price_df.index >= test_start) & (price_df.index <= test_end)]
-        if train_factors.empty or test_factors.empty or train_prices.empty or test_prices.empty:
+        scoring_prices = price_df.loc[(price_df.index >= train_start) & (price_df.index <= test_end)]
+        if train_factors.empty or test_factors.empty or scoring_factors.empty or train_prices.empty or test_prices.empty or scoring_prices.empty:
             train_start += pd.DateOffset(months=step_months)
             continue
 
@@ -212,6 +227,7 @@ def run_walk_forward_optimization(
             drawdown_penalty=drawdown_penalty,
             annual_return_weight=annual_return_weight,
             calmar_weight=calmar_weight,
+            scoring_config=scoring_config,
         )
         if train_results.empty:
             train_start += pd.DateOffset(months=step_months)
@@ -243,12 +259,16 @@ def run_walk_forward_optimization(
                 score_source = test_factors
         else:
             score_source = test_factors
-        if factor_group == "ic_weighted" and use_rolling_ic:
+        if factor_group == "ic_weighted" and scoring_config is not None:
+            scores = build_strategy_scores(scoring_factors, _scoring_config(scoring_config, params), price_df=scoring_prices)
+            scores = _slice_score_dates(scores, test_start, test_end)
+        elif factor_group == "ic_weighted" and use_rolling_ic:
             scores = composite_factor(score_source, method=factor_group, factor_weights_dynamic=dynamic_weights)
         elif factor_group == "ic_weighted":
             scores = composite_factor(score_source, method=factor_group, factor_weights=weights)
         else:
-            scores = build_strategy_scores(score_source, {"strategy": {"factor_group": factor_group}}, price_df=test_prices)
+            scores = build_strategy_scores(scoring_factors, _scoring_config(scoring_config, params), price_df=scoring_prices)
+            scores = _slice_score_dates(scores, test_start, test_end)
         scores = resample_signals(scores, rebalance_freq)
         scores = _slice_score_dates(scores, test_start, test_end)
         result = run_backtest(
@@ -343,7 +363,7 @@ def run_walk_forward_grid_validation(
 
         static_ic_weights = None
         dynamic_ic_weights = None
-        if "ic_weighted" in set(grid.get("factor_group", [])):
+        if scoring_config is None and "ic_weighted" in set(grid.get("factor_group", [])):
             logger.info("Preparing IC weights for validation window %s to %s.", test_start.date(), test_end.date())
             if use_rolling_ic:
                 rolling_ic = calculate_rolling_ic(train_factors, train_prices, window=ic_window, min_periods=ic_min_periods)
@@ -379,7 +399,7 @@ def run_walk_forward_grid_validation(
                     factor_group,
                     rebalance_freq,
                 )
-                if factor_group == "ic_weighted":
+                if factor_group == "ic_weighted" and scoring_config is None:
                     scores = composite_factor(
                         test_factors,
                         method=factor_group,
@@ -438,10 +458,20 @@ def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Time
 def _scoring_config(config: dict | None, params: dict[str, object]) -> dict:
     result = deepcopy(config) if config is not None else {"strategy": {}}
     result.setdefault("strategy", {})
-    for key in STRATEGY_GRID_KEYS:
+    for key in (*STRATEGY_GRID_KEYS, *RISK_GRID_KEYS):
         if key in params:
             result["strategy"][key] = params[key]
     return result
+
+
+def _python_grid_value(value: object) -> object:
+    if value is None:
+        return None
+    if pd.isna(value):
+        return None
+    if hasattr(value, "item"):
+        return value.item()
+    return value
 
 
 def _last_dynamic_weights(weights_by_date: dict[pd.Timestamp, pd.Series]) -> pd.Series:

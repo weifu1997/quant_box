@@ -5,7 +5,14 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.optimizer import BASELINE_GRID, DEFAULT_GRID, _optimization_score, run_walk_forward_grid_validation, run_walk_forward_optimization
+from src.optimizer import (
+    BASELINE_GRID,
+    DEFAULT_GRID,
+    _optimization_score,
+    run_walk_forward_grid_validation,
+    run_walk_forward_optimization,
+    with_current_risk_defaults,
+)
 
 
 class OptimizerTests(unittest.TestCase):
@@ -33,8 +40,27 @@ class OptimizerTests(unittest.TestCase):
 
     def test_baseline_grid_is_smaller_than_full_grid(self) -> None:
         self.assertLess(_grid_size(BASELINE_GRID), _grid_size(DEFAULT_GRID))
-        self.assertEqual(BASELINE_GRID["factor_group"], ["momentum", "factor:LOW0"])
-        self.assertEqual(BASELINE_GRID["top_n"], [7, 10, 20])
+        self.assertIn("dynamic_ic_selector", BASELINE_GRID["factor_group"])
+        self.assertIn("dynamic_ic_selector", DEFAULT_GRID["factor_group"])
+        self.assertEqual(BASELINE_GRID["top_n"], [7, 10, 15])
+
+    def test_current_risk_defaults_are_added_as_grid_columns(self) -> None:
+        grid = with_current_risk_defaults(
+            BASELINE_GRID,
+            {
+                "stop_loss_pct": 0.08,
+                "circuit_breaker_drawdown": 0.08,
+                "circuit_breaker_cooldown_days": 5,
+                "circuit_breaker_target_exposure": 0.30,
+                "target_vol": None,
+            },
+        )
+
+        self.assertEqual(grid["stop_loss_pct"], [0.08])
+        self.assertEqual(grid["circuit_breaker_drawdown"], [0.08])
+        self.assertEqual(grid["circuit_breaker_cooldown_days"], [5])
+        self.assertEqual(grid["circuit_breaker_target_exposure"], [0.30])
+        self.assertEqual(grid["target_vol"], [None])
 
     def test_run_walk_forward_optimization_returns_out_of_sample_window(self) -> None:
         factors, prices = _walk_forward_data()
@@ -87,6 +113,7 @@ class OptimizerTests(unittest.TestCase):
             "max_turnover": [1],
             "rank_buffer": [0],
             "rebalance_freq": ["monthly"],
+            "stop_loss_pct": [0.08],
         }
         captured: list[dict] = []
 
@@ -111,6 +138,42 @@ class OptimizerTests(unittest.TestCase):
 
         self.assertFalse(result.empty)
         self.assertEqual(captured[0]["strategy"]["factor_group"], "dynamic_ic_selector")
+        self.assertEqual(captured[0]["strategy"]["stop_loss_pct"], 0.08)
+        self.assertTrue(captured[0]["liquidity_filter"]["enabled"])
+
+    def test_ic_weighted_uses_full_scoring_config_when_available(self) -> None:
+        factors, prices = _walk_forward_data()
+        grid = {
+            "factor_group": ["ic_weighted"],
+            "top_n": [1],
+            "max_turnover": [1],
+            "rank_buffer": [0],
+            "rebalance_freq": ["monthly"],
+        }
+        captured: list[dict] = []
+
+        def fake_build_scores(factor_df: pd.DataFrame, config: dict, price_df: pd.DataFrame | None = None) -> pd.Series:
+            captured.append(config)
+            return factor_df["ROC5"].rename("score")
+
+        with patch("src.optimizer.build_strategy_scores", side_effect=fake_build_scores):
+            result = run_walk_forward_grid_validation(
+                factors,
+                prices,
+                base_config=_base_backtest_config(),
+                start_date="2023-01-02",
+                end_date="2024-02-15",
+                grid=grid,
+                train_years=1,
+                test_months=1,
+                step_months=12,
+                use_rolling_ic=False,
+                scoring_config={"strategy": {"factor_group": "old"}, "liquidity_filter": {"enabled": True}},
+            )
+
+        self.assertFalse(result.empty)
+        self.assertTrue(captured)
+        self.assertEqual(captured[0]["strategy"]["factor_group"], "ic_weighted")
         self.assertTrue(captured[0]["liquidity_filter"]["enabled"])
 
 

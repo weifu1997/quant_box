@@ -14,7 +14,14 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import factor_cache_columns, load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
 from src.market_regime import apply_defensive_timing_to_backtest_config
-from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_parameter_grid, run_walk_forward_grid_validation, run_walk_forward_optimization
+from src.optimizer import (
+    BASELINE_GRID,
+    DEFAULT_GRID,
+    run_parameter_grid,
+    run_walk_forward_grid_validation,
+    run_walk_forward_optimization,
+    with_current_risk_defaults,
+)
 from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS
 from src.strategy import factor_columns_for_method
 from src.trading_calendar import resolve_target_date_value
@@ -99,7 +106,10 @@ def main() -> None:
     end_date = resolve_target_date_value(args.end_date, config=config)
     config["data"]["end_date"] = end_date
 
-    grid_defaults = DEFAULT_GRID if args.full_grid else BASELINE_GRID
+    grid_defaults = with_current_risk_defaults(
+        DEFAULT_GRID if args.full_grid else BASELINE_GRID,
+        config.get("strategy", {}),
+    )
     grid = {
         **grid_defaults,
         "factor_group": _grid_values(args.factor_groups, grid_defaults["factor_group"], str),

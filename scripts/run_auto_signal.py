@@ -30,7 +30,7 @@ from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
 from src.manual_orders import generate_manual_orders, load_account_state, load_current_holdings, save_manual_orders, validate_account_inputs
 from src.market_regime import apply_defensive_timing_to_backtest_config
-from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_walk_forward_grid_validation
+from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_walk_forward_grid_validation, with_current_risk_defaults
 from src.reporting import archive_run, signal_action_summary, write_daily_signal_report
 from src.scoring import build_strategy_scores
 from src.signal_generator import generate_signal, read_previous_holdings, save_signal
@@ -196,7 +196,10 @@ def main() -> None:
         summary = pd.DataFrame()
         if not args.skip_optimize:
             _stage(status, out_dir, "optimize_params", "running")
-            grid_defaults = DEFAULT_GRID if args.full_grid else BASELINE_GRID
+            grid_defaults = with_current_risk_defaults(
+                DEFAULT_GRID if args.full_grid else BASELINE_GRID,
+                config.get("strategy", {}),
+            )
             grid = {
                 **grid_defaults,
                 "factor_group": _grid_values(args.factor_groups, grid_defaults["factor_group"], str),

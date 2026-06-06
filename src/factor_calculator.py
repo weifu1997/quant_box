@@ -272,19 +272,32 @@ def _should_write_factor_cache(path: Path, start_date: str, end_date: str, confi
     if not _is_default_factor_cache(path, config):
         return True
     data_cfg = config.get("data", {})
-    default_start = data_cfg.get("history_start_date", data_cfg.get("start_date"))
+    default_start = _default_factor_cache_start_date(config)
     if default_start is None:
         return True
 
     requested_start = pd.Timestamp(start_date).normalize()
     requested_end = pd.Timestamp(end_date).normalize()
-    if requested_start != pd.Timestamp(default_start).normalize():
+    if requested_start > default_start:
         return False
 
-    default_end = _default_data_end_date(config, default_start)
+    default_end = _default_data_end_date(config, str(default_start.date()))
     if default_end is None:
         return True
     return requested_end >= default_end
+
+
+def _default_factor_cache_start_date(config: dict) -> pd.Timestamp | None:
+    data_cfg = config.get("data", {})
+    configured_start = data_cfg.get("history_start_date", data_cfg.get("start_date"))
+    if configured_start is None:
+        return None
+
+    start = pd.Timestamp(configured_start).normalize()
+    price_dates, _symbols = _price_cache_state(config, str(start.date()), "2100-01-01")
+    if price_dates.empty:
+        return start
+    return max(start, pd.Timestamp(price_dates.min()).normalize())
 
 
 def _is_default_factor_cache(path: Path, config: dict) -> bool:
