@@ -723,17 +723,6 @@ def _precompute_feature_ic_weights(
     return weights_by_date
 
 
-def _fit_predict_model(
-    X_train: np.ndarray,
-    y: np.ndarray,
-    X_predict: np.ndarray,
-    cfg: dict[str, Any],
-    seed: int,
-) -> tuple[np.ndarray, str]:
-    model, model_used = _fit_train_model(X_train, y, cfg, seed)
-    return _predict_model(model, X_predict), model_used
-
-
 def _fit_train_model(
     X_train: np.ndarray,
     y: np.ndarray,
@@ -788,16 +777,6 @@ def _is_missing_model_dependency(exc: Exception) -> bool:
         "missing optional dependency",
     ]
     return any(pattern in text for pattern in patterns)
-
-
-def _fit_predict_lightgbm(
-    X_train: np.ndarray,
-    y: np.ndarray,
-    X_predict: np.ndarray,
-    cfg: dict[str, Any],
-    seed: int,
-) -> np.ndarray:
-    return _fit_lightgbm_model(X_train, y, cfg, seed).predict(X_predict).astype(float)
 
 
 def _fit_lightgbm_model(
@@ -871,16 +850,6 @@ def _fit_lightgbm_model(
     return model
 
 
-def _fit_predict_xgboost(
-    X_train: np.ndarray,
-    y: np.ndarray,
-    X_predict: np.ndarray,
-    cfg: dict[str, Any],
-    seed: int,
-) -> np.ndarray:
-    return _fit_xgboost_model(X_train, y, cfg, seed).predict(X_predict).astype(float)
-
-
 def _fit_xgboost_model(
     X_train: np.ndarray,
     y: np.ndarray,
@@ -925,16 +894,6 @@ def _fit_xgboost_model(
     return model
 
 
-def _fit_predict_sklearn_gbdt(
-    X_train: np.ndarray,
-    y: np.ndarray,
-    X_predict: np.ndarray,
-    cfg: dict[str, Any],
-    seed: int,
-) -> np.ndarray:
-    return _fit_sklearn_gbdt_model(X_train, y, cfg, seed).predict(X_predict).astype(float)
-
-
 def _fit_sklearn_gbdt_model(
     X_train: np.ndarray,
     y: np.ndarray,
@@ -966,15 +925,6 @@ def _fit_sklearn_gbdt_model(
     )
     model.fit(X_train, y)
     return model
-
-
-def _fit_predict_ridge_numpy(
-    X_train: np.ndarray,
-    y: np.ndarray,
-    X_predict: np.ndarray,
-    cfg: dict[str, Any],
-) -> np.ndarray:
-    return _fit_ridge_numpy_model(X_train, y, cfg).predict(X_predict)
 
 
 def _fit_ridge_numpy_model(

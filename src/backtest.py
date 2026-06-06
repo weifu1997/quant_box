@@ -623,14 +623,6 @@ def _row_price_dict(row: pd.Series | Mapping[str, float]) -> Mapping[str, float]
     return row.dropna().to_dict()
 
 
-def _target_value(total: float, target_holdings: list[str], max_weight: float | None, exposure_scale: float = 1.0) -> float:
-    if not target_holdings:
-        return 0.0
-    equal_weight = 1 / len(target_holdings)
-    weight = min(equal_weight, max_weight) if max_weight is not None else equal_weight
-    return total * weight * exposure_scale
-
-
 def _target_values(
     total: float,
     target_holdings: list[str],
@@ -1222,31 +1214,6 @@ def _shares_affordable(capital: float, price: float, commission: float, min_comm
         return variable_shares
     fixed_shares = (capital - min_commission) / (price * (1 + max(transfer_fee, 0.0)))
     return max(0.0, min(variable_shares, fixed_shares))
-
-
-def _risk_exit_decision(
-    stock: str,
-    entry: float,
-    trade_date: pd.Timestamp,
-    prices: pd.DataFrame,
-    close: pd.Series | Mapping[str, float],
-    last_prices: dict[str, float],
-    stop_loss: float | None,
-    take_profit: float | None,
-    config: dict | None = None,
-) -> tuple[str | None, float | None]:
-    return _risk_exit_decision_from_rows(
-        stock,
-        entry,
-        close,
-        _field_on_date(prices, "open", trade_date),
-        _field_on_date(prices, "high", trade_date),
-        _field_on_date(prices, "low", trade_date),
-        last_prices,
-        stop_loss,
-        take_profit,
-        config,
-    )
 
 
 def _risk_exit_decision_from_rows(

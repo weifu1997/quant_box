@@ -232,11 +232,6 @@ def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cac
     return True
 
 
-def _write_factor_cache_meta(path: Path, factors: pd.DataFrame, start_date: str, end_date: str, config: dict) -> None:
-    payload = _factor_cache_meta_payload(factors, start_date, end_date, config)
-    path.with_name(f"{path.name}.meta.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-
 def _write_factor_cache(path: Path, factors: pd.DataFrame, start_date: str, end_date: str, config: dict) -> None:
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_meta_path = path.with_name(f"{path.name}.tmp.meta.json")

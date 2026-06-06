@@ -1313,29 +1313,6 @@ def _can_reuse_complete_update_progress(
     return int(progress.get("remaining_unconfirmed_symbols", progress.get("remaining_symbols", 1))) == 0
 
 
-def _load_universe_list_dates(config: dict) -> dict[str, str]:
-    data_cfg = config.get("data", {})
-    path = resolve_path(data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
-    if not path.exists():
-        return {}
-    df = pd.read_csv(path)
-    if "list_date" not in df.columns:
-        return {}
-    code_col = _code_column(df)
-    dates = pd.to_datetime(df["list_date"].astype(str), format="%Y%m%d", errors="coerce")
-    return {
-        str(code).upper(): date.strftime("%Y-%m-%d")
-        for code, date in zip(df[code_col], dates)
-        if pd.notna(date)
-    }
-
-
-def _symbol_start_date(default_start: str, list_date: str | None) -> str:
-    if not list_date:
-        return default_start
-    return max(pd.Timestamp(default_start), pd.Timestamp(list_date)).strftime("%Y-%m-%d")
-
-
 def _date_windows(
     start_date: str | datetime,
     end_date: str | datetime,

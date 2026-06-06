@@ -308,14 +308,6 @@ def resolve_path(value: str | Path) -> Path:
     return PROJECT_ROOT / path
 
 
-def merged_section(*sections: dict[str, Any] | None) -> dict[str, Any]:
-    merged: dict[str, Any] = {}
-    for section in sections:
-        if section:
-            merged.update(deepcopy(section))
-    return merged
-
-
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(base)
     for key, value in override.items():
