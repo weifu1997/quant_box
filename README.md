@@ -8,7 +8,7 @@
 - 将原始 CSV 转换为 Qlib provider 数据和本地价格面板
 - 计算并缓存 Alpha158 因子
 - 使用 rolling IC 动态权重生成综合因子分数
-- 运行考虑滑点、手续费、最低佣金、过户费、容量限制、涨跌停、长期停牌折价退出的回测
+- 运行考虑滑点、手续费、最低佣金、过户费、容量限制、分板块涨跌停、长期停牌冻结/可选折价退出的回测
 - 生成最新调仓信号和最新持仓文件
 - 运行 walk-forward 参数优化
 - Windows 双击 `.bat` 一键启动常用流程
@@ -216,6 +216,8 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 - 自动选中的参数必须通过样本外质量门槛
 - 如果任一门槛不通过，只输出 `candidate_signal_*.csv` 和 `manual_orders_candidate_*.csv`，不会覆盖 `outputs/latest_holdings.csv`
 - 如果门槛全部通过，输出正式 `signal_*.csv`、`manual_orders_*.csv` 和 `latest_holdings.csv`
+- `--allow-low-quality` 只允许流程继续生成候选结果；如确需在低质量门槛下覆盖正式文件，必须同时传 `--force-official`
+- 缺少或校验失败的 `config/account.yaml` / `config/current_holdings.csv` 会阻止正式输出，并在交易单备注中列出原因
 
 可选账户与真实持仓文件：
 
@@ -242,7 +244,15 @@ instrument,shares
 000001.SZ,500
 ```
 
-这两个文件已加入 `.gitignore`，不会提交到 GitHub。没有真实持仓文件时，系统仍会生成候选交易单，但会在备注中提示 `current_shares_missing`。
+这两个文件已加入 `.gitignore`，不会提交到 GitHub。仓库提供 `config/account.example.yaml` 和 `config/current_holdings.example.csv` 作为格式参考。没有真实持仓文件时，系统仍会生成候选交易单，但不会把订单标记为可直接执行。
+
+人工交易单会同时输出估算和最终下单相关字段：
+
+- `indicative_target_shares`：基于信号日可得价格的估算股数
+- `final_target_shares` / `order_shares`：仅在交易日参考价格可用且账户/持仓校验通过时给出
+- `is_order_actionable`：是否可直接按交易单执行
+- `reference_price_source`：价格来自信号日还是预定交易日
+- `suggested_limit_price`、`stop_loss_price`、`adv_10d`、`capacity_ratio`、`is_limit_up`、`is_limit_down`、`is_st`：人工执行辅助字段
 
 ## 输出文件
 
@@ -286,18 +296,18 @@ outputs/history/YYYY-MM-DD/            每次自动运行的归档快照
 当前默认配置位于 `config/settings.yaml`：
 
 - 股票池：A 股主板 `mainboard_a`
-- 因子组：`dynamic_ic_selector`
+- 因子组：`dynamic_ic_selector`，默认每期使用 IC 排名前 3 个候选因子做权重混合
 - 调仓频率：monthly
 - 默认持仓数：15
 - 单次最大换手：1
-- 排名缓冲：20
-- 低流动性候选池：保留 `amount` 10 日均值低端 35% 股票（收益弹性更高，但容量和滑点风险也更高）
-- 组合熔断：组合回撤 12% 后空仓冷却 20 个交易日
-- 成本：佣金、最低佣金、印花税、过户费、滑点
+- 排名缓冲：30
+- 流动性候选池：默认剔除 `amount` 10 日均值底部 20% 股票，降低低流动性执行风险但保留量价因子的区分度
+- 组合熔断：组合回撤 8% 后降至 30% 目标仓位，并冷却 5 个交易日
+- 成本：佣金、最低佣金、印花税、过户费、0.05% 基础滑点；默认开启 ADV 占比动态滑点
 - 容量限制：使用交易日前历史 ADV，避免看当日成交额
-- 涨跌停：优先用 high/low 判断触板
-- 止盈止损：优先用 high/low 触发，并按止损价/止盈价或跳空开盘价成交
-- 长期缺价/停牌：按配置折价退出，避免回测净值长期使用陈旧价格
+- 涨跌停：优先用 high/low 判断触板，并按主板、科创/创业、北交所、ST 分别使用阈值
+- 止盈止损：默认配置 8% 个股止损，关闭固定止盈；日内触发采用保守成交价，跳空低开按开盘价成交
+- 长期缺价/停牌：默认按 `stale_price_haircut` 折价退出，避免长期冻结造成虚高净值
 
 ## 测试
 

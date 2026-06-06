@@ -8,20 +8,26 @@ import pandas as pd
 
 from src.config_loader import resolve_path
 from src.factor_ic import calculate_factor_ic, calculate_rolling_ic, make_ic_weights, make_rolling_ic_weights, summarize_ic
+from src.market_regime import detect_market_regime
 from src.ml_strategy import build_ml_scores, ml_strategy_enabled
+from src.score_blending import apply_regime_score_blend
 from src.strategy import composite_factor, factor_columns_for_method
 
 
 DYNAMIC_IC_SELECTOR_GROUPS = {"dynamic_ic_selector", "dynamic_ic"}
 DEFAULT_DYNAMIC_IC_CANDIDATES = [
     "factor:LOW0",
+    "factor:VMA60",
+    "factor:VSUMN30",
+    "factor:VSUMN60",
+    "factor:VSUMN20",
+    "factor:VMA30",
+    "factor:VMA20",
+    "factor:MIN5",
     "inverse_factor:KUP",
     "inverse_factor:KLEN",
     "inverse_factor:KLOW",
     "inverse_factor:CORR5",
-    "factor:ROC20",
-    "factor:ROC30",
-    "factor:RSV5",
 ]
 
 
@@ -43,15 +49,21 @@ def build_strategy_scores(
         result = build_ml_scores(factors, prices, config)
         scores = result.scores
         scores.attrs["training_diagnostics"] = result.diagnostics
+        scores = _apply_regime_score_blend(scores, factors, prices, config)
         return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
     if factor_group in DYNAMIC_IC_SELECTOR_GROUPS:
         prices = prices if prices is not None else _load_ic_price_frame(price_path)
         scores = _build_dynamic_ic_selector_scores(factors, prices, config, min_obs=min_obs)
+        scores = _apply_regime_score_blend(scores, factors, prices, config)
         return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
     if factor_group != "ic_weighted":
         scores = composite_factor(factors, method=factor_group, min_obs=min_obs)
+        if prices is None and _regime_score_blend_enabled(config):
+            prices = _load_ic_price_frame(price_path)
+        if prices is not None:
+            scores = _apply_regime_score_blend(scores, factors, prices, config)
         if _liquidity_filter_enabled(config.get("liquidity_filter", {})):
             prices = prices if prices is not None else _load_ic_price_frame(price_path)
             scores = _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
@@ -60,6 +72,7 @@ def build_strategy_scores(
     prices = prices if prices is not None else _load_ic_price_frame(price_path)
     dynamic_weights = _load_or_compute_dynamic_weights(factors, prices, ic_cfg)
     scores = composite_factor(factors, method=factor_group, factor_weights_dynamic=dynamic_weights, min_obs=min_obs)
+    scores = _apply_regime_score_blend(scores, factors, prices, config)
     return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
 
@@ -89,6 +102,7 @@ def build_latest_strategy_scores(
             raise ValueError(f"No usable ML scores found for signal date {target_date.date()}.")
         scores = result.scores
         scores.attrs["training_diagnostics"] = result.diagnostics
+        scores = _apply_regime_score_blend(scores, factors, prices, config)
         return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
     if factor_group in DYNAMIC_IC_SELECTOR_GROUPS:
@@ -98,10 +112,15 @@ def build_latest_strategy_scores(
             raise ValueError(f"No usable dynamic IC selector weights found for signal date {target_date.date()}.")
         signed_factors = _signed_candidate_factors(latest_factors, _dynamic_ic_candidates(config))
         scores = composite_factor(signed_factors, method="ic_weighted", factor_weights=weights, min_obs=min_obs)
+        scores = _apply_regime_score_blend(scores, factors, prices, config)
         return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
 
     if factor_group != "ic_weighted":
         scores = composite_factor(latest_factors, method=factor_group, min_obs=min_obs)
+        if prices is None and _regime_score_blend_enabled(config):
+            prices = _load_ic_price_frame(price_path)
+        if prices is not None:
+            scores = _apply_regime_score_blend(scores, factors, prices, config)
         if _liquidity_filter_enabled(config.get("liquidity_filter", {})):
             prices = prices if prices is not None else _load_ic_price_frame(price_path)
             scores = _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
@@ -112,7 +131,22 @@ def build_latest_strategy_scores(
     if weights.empty:
         raise ValueError(f"No usable IC weights found for signal date {target_date.date()}.")
     scores = composite_factor(latest_factors, method=factor_group, factor_weights=weights, min_obs=min_obs)
+    scores = _apply_regime_score_blend(scores, factors, prices, config)
     return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+
+
+def _regime_score_blend_enabled(config: dict) -> bool:
+    return bool(config.get("regime_score_blend", {}).get("enabled", False))
+
+
+def _apply_regime_score_blend(scores: pd.Series, factors: pd.DataFrame, prices: pd.DataFrame, config: dict) -> pd.Series:
+    if not _regime_score_blend_enabled(config):
+        return scores
+    regimes = detect_market_regime(prices, config)
+    blended, summary = apply_regime_score_blend(scores, factors, regimes, config.get("regime_score_blend", {}))
+    blended.attrs = dict(getattr(scores, "attrs", {}))
+    blended.attrs["regime_score_blend"] = summary
+    return blended
 
 
 def _load_ic_price_frame(path_value: str | Path) -> pd.DataFrame:
@@ -284,7 +318,7 @@ def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg:
         min_periods=int(filter_cfg.get("min_periods", 5)),
     ).mean()
     side = str(filter_cfg.get("side", "low")).strip().lower()
-    quantile = float(filter_cfg.get("quantile", 0.35))
+    quantile = float(filter_cfg.get("quantile", 0.20))
 
     if side not in {"low", "high"}:
         raise ValueError(f"Unsupported liquidity filter side: {side}")

@@ -129,6 +129,52 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue((result.trades["status"] == "blocked").any())
         self.assertEqual(result.equity_curve.iloc[-1], 100000)
 
+    def test_growth_board_uses_twenty_percent_limit_threshold(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        stock = "300001.SZ"
+        index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
+        scores = pd.Series([10, 10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 11.5]}, index=dates),
+                "high": pd.DataFrame({stock: [10.0, 11.5]}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {"initial_capital": 100000, "top_n": 1, "max_turnover": 1, "limit_up_threshold": 0.099},
+        )
+
+        self.assertTrue((result.trades["side"] == "BUY").any())
+        self.assertFalse((result.trades["reason"] == "not_buyable").any())
+
+    def test_st_uses_five_percent_limit_threshold(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        stock = "600000.SH"
+        index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
+        scores = pd.Series([10, 10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 10.6]}, index=dates),
+                "high": pd.DataFrame({stock: [10.0, 10.6]}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0]}, index=dates),
+                "is_st": pd.DataFrame({stock: [0.0, 1.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(scores, prices, "2024-01-02", "2024-01-03", {"initial_capital": 100000, "top_n": 1})
+
+        blocked = result.trades[result.trades["status"] == "blocked"]
+        self.assertFalse(blocked.empty)
+        self.assertEqual(blocked.iloc[0]["reason"], "not_buyable")
+
     def test_capacity_limit_uses_prior_amount_not_trade_day_amount(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
@@ -264,7 +310,8 @@ class BacktestTests(unittest.TestCase):
 
         risk_trade = result.trades[result.trades["status"] == "risk_exit"].iloc[0]
         self.assertEqual(risk_trade["reason"], "stop_loss")
-        self.assertAlmostEqual(float(risk_trade["price"]), 9.5)
+        self.assertAlmostEqual(float(risk_trade["price"]), 9.4525)
+        self.assertLess(float(risk_trade["price"]), 9.5)
 
     def test_gap_down_stop_loss_uses_open_price(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
@@ -331,6 +378,43 @@ class BacktestTests(unittest.TestCase):
         filled = result.trades[result.trades["status"] == "filled"]
         self.assertTrue(bool(filled.iloc[0]["capacity_warning"]))
 
+    def test_dynamic_slippage_increases_with_adv_participation(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "open": pd.DataFrame({"A": [10.0, 10.0]}, index=dates),
+                "close": pd.DataFrame({"A": [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1.0, 1.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "trade_price_field": "open",
+                "slippage": 0.001,
+                "dynamic_slippage_enabled": True,
+                "dynamic_slippage_threshold": 0.02,
+                "dynamic_slippage_multiplier": 0.1,
+                "max_slippage": 0.05,
+                "amount_unit": 1000.0,
+            },
+        )
+
+        trade = result.trades[result.trades["side"] == "BUY"].iloc[0]
+        self.assertGreater(float(trade["slippage_rate"]), 0.001)
+        self.assertEqual(trade["slippage_model"], "dynamic_adv")
+
     def test_min_commission_and_transfer_fee_are_recorded(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
@@ -380,7 +464,39 @@ class BacktestTests(unittest.TestCase):
                 "top_n": 1,
                 "max_turnover": 1,
                 "stale_price_exit_days": 2,
+                "stale_price_exit_policy": "haircut_exit",
                 "stale_price_haircut": 0.5,
+                "slippage": 0.0,
+            },
+        )
+
+        stale_trade = result.trades[result.trades["reason"] == "stale_price_exit"].iloc[0]
+        self.assertEqual(stale_trade["status"], "risk_exit")
+        self.assertAlmostEqual(float(stale_trade["price"]), 5.0)
+
+    def test_stale_price_exit_haircuts_by_default(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, None, None]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 0.0, 0.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 1000.0, 0.0, 0.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-05",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "stale_price_exit_days": 2,
                 "slippage": 0.0,
             },
         )
@@ -425,6 +541,44 @@ class BacktestTests(unittest.TestCase):
             & (pd.to_datetime(result.trades["date"]) > pd.Timestamp(circuit_sell["date"]))
         ]
         self.assertFalse(later_buys.empty)
+
+    def test_circuit_breaker_target_exposure_reduces_instead_of_liquidates(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series(10, index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 9.0]}, index=dates),
+                "open": pd.DataFrame({"A": [10.0, 10.0, 9.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "circuit_breaker_drawdown": 0.05,
+                "circuit_breaker_cooldown_days": 1,
+                "circuit_breaker_target_exposure": 0.30,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "limit_down_threshold": 1.0,
+            },
+        )
+
+        circuit_sell = result.trades[result.trades["reason"] == "circuit_breaker"].iloc[0]
+        self.assertEqual(int(circuit_sell["shares"]), 7000)
+        final_holding = result.holdings[result.holdings["date"] == dates[-1]].iloc[0]
+        self.assertEqual(int(final_holding["shares"]), 3000)
 
     def test_exposure_schedule_change_rebalances_with_latest_signal(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])

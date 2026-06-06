@@ -14,6 +14,7 @@ RISK_PARAM_COLUMNS = [
     "take_profit_pct",
     "circuit_breaker_drawdown",
     "circuit_breaker_cooldown_days",
+    "circuit_breaker_target_exposure",
     "target_vol",
 ]
 PARAM_COLUMNS = STRATEGY_PARAM_COLUMNS

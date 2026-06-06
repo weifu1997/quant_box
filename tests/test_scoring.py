@@ -204,6 +204,47 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(daily.loc[["A", "B"]].isna().all())
         self.assertFalse(daily.loc[["C", "D", "E"]].isna().any())
 
+    def test_build_strategy_scores_applies_regime_score_blend(self) -> None:
+        date = pd.Timestamp("2024-01-02")
+        index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": [2.0, 1.0], "STD20": [10.0, 1.0]}, index=index)
+        prices = pd.concat({"close": pd.DataFrame({"A": [10.0], "B": [10.0]}, index=[date])}, axis=1)
+        config = {
+            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
+            "regime_score_blend": {
+                "enabled": True,
+                "bear_defensive_weight": 1.0,
+                "defensive_components": [{"column": "STD20", "direction": -1.0}],
+            },
+        }
+
+        with patch("src.scoring.detect_market_regime", return_value=pd.Series(["bear"], index=[date])):
+            scores = build_strategy_scores(factors, config, price_df=prices)
+
+        daily = scores.xs(date, level=0)
+        self.assertGreater(daily.loc["B"], daily.loc["A"])
+        self.assertEqual(scores.attrs["regime_score_blend"]["dates_blended"], 1)
+
+    def test_build_latest_strategy_scores_applies_regime_score_blend(self) -> None:
+        date = pd.Timestamp("2024-01-02")
+        index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": [2.0, 1.0], "STD20": [10.0, 1.0]}, index=index)
+        prices = pd.concat({"close": pd.DataFrame({"A": [10.0], "B": [10.0]}, index=[date])}, axis=1)
+        config = {
+            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
+            "regime_score_blend": {
+                "enabled": True,
+                "bear_defensive_weight": 1.0,
+                "defensive_components": [{"column": "STD20", "direction": -1.0}],
+            },
+        }
+
+        with patch("src.scoring.detect_market_regime", return_value=pd.Series(["bear"], index=[date])):
+            scores = build_latest_strategy_scores(factors, config, signal_date=date, price_df=prices)
+
+        daily = scores.xs(date, level=0)
+        self.assertGreater(daily.loc["B"], daily.loc["A"])
+
     def test_build_strategy_scores_passes_ic_stability_config(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],

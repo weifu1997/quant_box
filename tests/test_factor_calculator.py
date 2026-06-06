@@ -131,6 +131,34 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).date), set(requested_dates.date))
         self.assertEqual(len(factors), 4)
 
+    def test_load_or_compute_factors_does_not_overwrite_default_cache_for_partial_range(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            price_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+            pd.DataFrame({"A": [10.0, 10.1, 10.2]}, index=price_dates).to_parquet(price_path)
+            computed_index = pd.MultiIndex.from_product(
+                [pd.to_datetime(["2024-01-02", "2024-01-03"]), ["A"]],
+                names=["datetime", "instrument"],
+            )
+            computed = pd.DataFrame({"F1": [1.0, 2.0]}, index=computed_index)
+            config = {
+                "data": {"start_date": "2015-01-01", "end_date": "auto"},
+                "factors": {"cache_file": str(cache_path)},
+                "ic": {"price_file": str(price_path)},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=computed) as compute:
+                factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path)
+
+        compute.assert_called_once()
+        self.assertEqual(len(factors), 2)
+        self.assertFalse(cache_path.exists())
+        self.assertFalse(cache_path.with_name(f"{cache_path.name}.meta.json").exists())
+
     def test_load_or_compute_factors_recomputes_when_qlib_metadata_changes(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

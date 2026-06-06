@@ -33,17 +33,18 @@ def main() -> None:
     parser.add_argument("--engine", choices=["formal", "fast"], default="formal", help="formal uses daily execution backtest; fast is approximate monthly screening.")
     parser.add_argument("--top-n", default="5,10,15,20,30")
     parser.add_argument("--max-turnover", default="1,3,5,10,15")
-    parser.add_argument("--rank-buffer", default="0,5,10,20")
+    parser.add_argument("--rank-buffer", default="10,20,30")
     parser.add_argument("--score-weighted", default="false,true")
     parser.add_argument("--score-direction", default="1,-1", help="Use 1 for high-score long, -1 for low-score long.")
     parser.add_argument("--max-weight", default="none,0.20,0.15,0.10")
     parser.add_argument("--bull-exposure", default="1.0")
-    parser.add_argument("--sideways-exposure", default="0.3,0.5,0.7,0.85")
-    parser.add_argument("--bear-exposure", default="0.0,0.15,0.3,0.55")
+    parser.add_argument("--sideways-exposure", default="0.3,0.5,0.6")
+    parser.add_argument("--bear-exposure", default="0.0,0.15,0.3")
     parser.add_argument("--stop-loss", default="none,0.06,0.10")
-    parser.add_argument("--take-profit", default="none,0.25,0.50")
-    parser.add_argument("--circuit-breaker-drawdown", default="none,0.06,0.10,0.12")
-    parser.add_argument("--circuit-breaker-cooldown-days", default="0,20,60")
+    parser.add_argument("--take-profit", default="none")
+    parser.add_argument("--circuit-breaker-drawdown", default="none,0.06,0.08,0.10")
+    parser.add_argument("--circuit-breaker-cooldown-days", default="0,5,10")
+    parser.add_argument("--circuit-breaker-target-exposure", default="0.0,0.3")
     parser.add_argument("--target-vol", default="none,0.10,0.15")
     parser.add_argument("--max-rows", type=int, default=0, help="Limit combinations for quick smoke runs.")
     args = parser.parse_args()
@@ -73,6 +74,7 @@ def main() -> None:
         _csv_optional_floats(args.take_profit),
         _csv_optional_floats(args.circuit_breaker_drawdown),
         _csv_ints(args.circuit_breaker_cooldown_days),
+        _csv_floats(args.circuit_breaker_target_exposure),
         _csv_optional_floats(args.target_vol),
     )
     for idx, (
@@ -89,6 +91,7 @@ def main() -> None:
         take_profit,
         circuit_breaker_drawdown,
         circuit_breaker_cooldown_days,
+        circuit_breaker_target_exposure,
         target_vol,
     ) in enumerate(combos, start=1):
         if args.max_rows and idx > args.max_rows:
@@ -133,9 +136,11 @@ def main() -> None:
         if circuit_breaker_drawdown is not None:
             bt_config["circuit_breaker_drawdown"] = circuit_breaker_drawdown
             bt_config["circuit_breaker_cooldown_days"] = circuit_breaker_cooldown_days
+            bt_config["circuit_breaker_target_exposure"] = circuit_breaker_target_exposure
         else:
             bt_config.pop("circuit_breaker_drawdown", None)
             bt_config.pop("circuit_breaker_cooldown_days", None)
+            bt_config.pop("circuit_breaker_target_exposure", None)
         if target_vol is not None:
             bt_config["target_vol"] = target_vol
             bt_config["max_leverage"] = 1.0
@@ -166,6 +171,7 @@ def main() -> None:
             "take_profit_pct": "" if take_profit is None else take_profit,
             "circuit_breaker_drawdown": "" if circuit_breaker_drawdown is None else circuit_breaker_drawdown,
             "circuit_breaker_cooldown_days": "" if circuit_breaker_drawdown is None else circuit_breaker_cooldown_days,
+            "circuit_breaker_target_exposure": "" if circuit_breaker_drawdown is None else circuit_breaker_target_exposure,
             "target_vol": "" if target_vol is None else target_vol,
             **result.metrics,
             **quality,
@@ -177,7 +183,7 @@ def main() -> None:
             f"dd={result.metrics.get('max_drawdown', 0.0):.4f} top_n={top_n} weighted={score_weighted} "
             f"turnover={max_turnover} buffer={rank_buffer} dir={score_direction} "
             f"max_w={max_weight} exp=({bull_exposure},{sideways_exposure},{bear_exposure}) "
-            f"stop={stop_loss} take={take_profit} cb={circuit_breaker_drawdown}/{circuit_breaker_cooldown_days} vol={target_vol}",
+            f"stop={stop_loss} take={take_profit} cb={circuit_breaker_drawdown}/{circuit_breaker_cooldown_days}/{circuit_breaker_target_exposure} vol={target_vol}",
             flush=True,
         )
 

@@ -92,8 +92,15 @@ def load_or_compute_factors(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     factors = compute_alpha158_factors(start_date, end)
-    factors.to_parquet(path)
-    _write_factor_cache_meta(path, factors, start_date, end, config)
+    if _should_write_factor_cache(path, start_date, end, config):
+        _write_factor_cache(path, factors, start_date, end, config)
+    else:
+        logger.warning(
+            "Computed factors for %s to %s but did not overwrite default cache %s because the request is a partial date range.",
+            start_date,
+            end,
+            path,
+        )
     if columns is not None:
         factors = factors[[column for column in columns if column in factors.columns]]
     return factors
@@ -230,6 +237,21 @@ def _write_factor_cache_meta(path: Path, factors: pd.DataFrame, start_date: str,
     path.with_name(f"{path.name}.meta.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _write_factor_cache(path: Path, factors: pd.DataFrame, start_date: str, end_date: str, config: dict) -> None:
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_meta_path = path.with_name(f"{path.name}.tmp.meta.json")
+    meta_path = path.with_name(f"{path.name}.meta.json")
+    try:
+        factors.to_parquet(tmp_path)
+        payload = _factor_cache_meta_payload(factors, start_date, end_date, config)
+        tmp_meta_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        tmp_path.replace(path)
+        tmp_meta_path.replace(meta_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+        tmp_meta_path.unlink(missing_ok=True)
+
+
 def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, end_date: str, config: dict) -> dict[str, object]:
     qlib_cfg = config.get("qlib", {})
     payload: dict[str, object] = {
@@ -244,3 +266,44 @@ def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, en
         payload["rows"] = int(len(factors))
         payload["symbols"] = sorted(set(factors.index.get_level_values(1).astype(str).str.upper()))
     return payload
+
+
+def _should_write_factor_cache(path: Path, start_date: str, end_date: str, config: dict) -> bool:
+    if not _is_default_factor_cache(path, config):
+        return True
+    data_cfg = config.get("data", {})
+    default_start = data_cfg.get("history_start_date", data_cfg.get("start_date"))
+    if default_start is None:
+        return True
+
+    requested_start = pd.Timestamp(start_date).normalize()
+    requested_end = pd.Timestamp(end_date).normalize()
+    if requested_start != pd.Timestamp(default_start).normalize():
+        return False
+
+    default_end = _default_data_end_date(config, default_start)
+    if default_end is None:
+        return True
+    return requested_end >= default_end
+
+
+def _is_default_factor_cache(path: Path, config: dict) -> bool:
+    default_value = config.get("factors", {}).get("cache_file")
+    if default_value is None:
+        return False
+    try:
+        return path.resolve() == resolve_path(default_value).resolve()
+    except OSError:
+        return str(path) == str(resolve_path(default_value))
+
+
+def _default_data_end_date(config: dict, default_start: str) -> pd.Timestamp | None:
+    data_cfg = config.get("data", {})
+    configured_end = data_cfg.get("end_date")
+    if configured_end not in {None, "", "auto"}:
+        return pd.Timestamp(resolve_target_date_value(str(configured_end), config=config)).normalize()
+
+    price_dates, _symbols = _price_cache_state(config, default_start, "2100-01-01")
+    if price_dates.empty:
+        return None
+    return pd.Timestamp(price_dates.max()).normalize()

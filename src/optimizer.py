@@ -24,6 +24,7 @@ RISK_GRID_KEYS = (
     "take_profit_pct",
     "circuit_breaker_drawdown",
     "circuit_breaker_cooldown_days",
+    "circuit_breaker_target_exposure",
     "target_vol",
 )
 
@@ -31,7 +32,7 @@ DEFAULT_GRID = {
     "factor_group": ["ic_weighted", "momentum"],
     "top_n": [5, 7, 10],
     "max_turnover": [1],
-    "rank_buffer": [10, 20],
+    "rank_buffer": [20, 30],
     "rebalance_freq": ["weekly", "monthly"],
 }
 
@@ -39,7 +40,7 @@ BASELINE_GRID = {
     "factor_group": ["momentum", "factor:LOW0"],
     "top_n": [7, 10, 20],
     "max_turnover": [1],
-    "rank_buffer": [20],
+    "rank_buffer": [30],
     "rebalance_freq": ["monthly"],
 }
 

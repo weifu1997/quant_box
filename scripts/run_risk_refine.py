@@ -37,11 +37,12 @@ def main() -> None:
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
     parser.add_argument("--price-file", default=config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
-    parser.add_argument("--liquidity-quantiles", default="0.50")
+    parser.add_argument("--liquidity-quantiles", default="0.20,0.30")
     parser.add_argument("--top-n", default=str(config.get("strategy", {}).get("top_n", 15)))
-    parser.add_argument("--rank-buffer", default=str(config.get("strategy", {}).get("rank_buffer", 20)))
-    parser.add_argument("--circuit-breaker-drawdown", default="0.10,0.12,0.14")
-    parser.add_argument("--cooldown-days", default="10,20,40")
+    parser.add_argument("--rank-buffer", default=str(config.get("strategy", {}).get("rank_buffer", 30)))
+    parser.add_argument("--circuit-breaker-drawdown", default="0.06,0.08,0.10")
+    parser.add_argument("--cooldown-days", default="5,10")
+    parser.add_argument("--circuit-breaker-target-exposure", default="0.0,0.30")
     parser.add_argument("--target-annual-return", type=float, default=quality.get("target_annual_return", 0.20))
     parser.add_argument("--drawdown-limit", type=float, default=quality.get("max_backtest_drawdown_limit", -0.20))
     parser.add_argument("--max-seconds", type=float, default=900.0)
@@ -67,13 +68,14 @@ def main() -> None:
             _csv_values(args.rank_buffer, int),
             _csv_values(args.circuit_breaker_drawdown, float),
             _csv_values(args.cooldown_days, int),
+            _csv_values(args.circuit_breaker_target_exposure, float),
         )
     )
     logger.info("Risk refinement grid has %s exact backtest candidates.", len(combos))
 
     score_cache: dict[float, pd.Series] = {}
-    for idx, (liquidity_quantile, top_n, rank_buffer, circuit_drawdown, cooldown_days) in enumerate(combos, start=1):
-        key = _combo_key(liquidity_quantile, top_n, rank_buffer, circuit_drawdown, cooldown_days)
+    for idx, (liquidity_quantile, top_n, rank_buffer, circuit_drawdown, cooldown_days, target_exposure) in enumerate(combos, start=1):
+        key = _combo_key(liquidity_quantile, top_n, rank_buffer, circuit_drawdown, cooldown_days, target_exposure)
         if key in completed:
             logger.info("Skipping completed row %s/%s: %s.", idx, len(combos), key)
             continue
@@ -98,6 +100,7 @@ def main() -> None:
                 "rank_buffer": rank_buffer,
                 "circuit_breaker_drawdown": circuit_drawdown,
                 "circuit_breaker_cooldown_days": cooldown_days,
+                "circuit_breaker_target_exposure": target_exposure,
             }
         )
 
@@ -109,6 +112,7 @@ def main() -> None:
             "rank_buffer": rank_buffer,
             "circuit_breaker_drawdown": circuit_drawdown,
             "circuit_breaker_cooldown_days": cooldown_days,
+            "circuit_breaker_target_exposure": target_exposure,
             "seconds": time.monotonic() - row_start,
             **result.metrics,
         }
@@ -141,11 +145,19 @@ def _combo_key(
     rank_buffer: int,
     circuit_drawdown: float,
     cooldown_days: int,
-) -> tuple[float, int, int, float, int]:
-    return (round(float(liquidity_quantile), 6), int(top_n), int(rank_buffer), round(float(circuit_drawdown), 6), int(cooldown_days))
+    target_exposure: float,
+) -> tuple[float, int, int, float, int, float]:
+    return (
+        round(float(liquidity_quantile), 6),
+        int(top_n),
+        int(rank_buffer),
+        round(float(circuit_drawdown), 6),
+        int(cooldown_days),
+        round(float(target_exposure), 6),
+    )
 
 
-def _completed_keys(output_path: Path) -> set[tuple[float, int, int, float, int]]:
+def _completed_keys(output_path: Path) -> set[tuple[float, int, int, float, int, float]]:
     frame = _read_existing(output_path)
     if frame.empty:
         return set()
@@ -155,6 +167,7 @@ def _completed_keys(output_path: Path) -> set[tuple[float, int, int, float, int]
         "rank_buffer",
         "circuit_breaker_drawdown",
         "circuit_breaker_cooldown_days",
+        "circuit_breaker_target_exposure",
     ]
     if any(column not in frame.columns for column in required):
         return set()
@@ -165,6 +178,7 @@ def _completed_keys(output_path: Path) -> set[tuple[float, int, int, float, int]
             row["rank_buffer"],
             row["circuit_breaker_drawdown"],
             row["circuit_breaker_cooldown_days"],
+            row["circuit_breaker_target_exposure"],
         )
         for _, row in frame.iterrows()
     }

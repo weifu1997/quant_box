@@ -72,8 +72,8 @@ market_regime:
 defensive_timing:
   enabled: true
   bull_exposure: 1.0
-  sideways_exposure: 0.85
-  bear_exposure: 0.55
+  sideways_exposure: 0.60
+  bear_exposure: 0.30
   exposure_rebalance_threshold: 0.05
 
 ic:
@@ -91,20 +91,24 @@ ic:
 dynamic_ic_selector:
   candidates:
     - "factor:LOW0"
+    - "factor:VMA60"
+    - "factor:VSUMN30"
+    - "factor:VSUMN60"
+    - "factor:VSUMN20"
+    - "factor:VMA30"
+    - "factor:VMA20"
+    - "factor:MIN5"
     - "inverse_factor:KUP"
     - "inverse_factor:KLEN"
     - "inverse_factor:KLOW"
     - "inverse_factor:CORR5"
-    - "factor:ROC20"
-    - "factor:ROC30"
-    - "factor:RSV5"
   horizon: 20
   window: 504
   min_periods: 120
   min_obs: 20
   method: "spearman"
-  metric: "mean"
-  top_k: 1
+  metric: "ic_ir"
+  top_k: 3
   fallback_candidate: "factor:LOW0"
 
 liquidity_filter:
@@ -112,18 +116,20 @@ liquidity_filter:
   field: "amount"
   window: 10
   min_periods: 5
-  quantile: 0.35
-  side: "low"
+  quantile: 0.20
+  side: "high"
 
 strategy:
   top_n: 15
   max_turnover: 1
-  rank_buffer: 20
+  rank_buffer: 30
   factor_group: "dynamic_ic_selector"
   rebalance_freq: "monthly"
-  take_profit_pct: 0.5
-  circuit_breaker_drawdown: 0.12
-  circuit_breaker_cooldown_days: 20
+  stop_loss_pct: 0.08
+  take_profit_pct: null
+  circuit_breaker_drawdown: 0.08
+  circuit_breaker_cooldown_days: 5
+  circuit_breaker_target_exposure: 0.30
   min_cross_section_obs: 5
 
 backtest:
@@ -135,13 +141,30 @@ backtest:
   annual_trading_days: 252
   trade_price_field: "open"
   valuation_price_field: "close"
-  slippage: 0.001
+  slippage: 0.0005
+  dynamic_slippage_enabled: true
+  dynamic_slippage_threshold: 0.02
+  dynamic_slippage_multiplier: 2.0
+  max_slippage: 0.03
   max_participation_rate: 0.05
   capacity_window: 20
   capacity_warning_threshold: 0.05
   amount_unit: 1000.0
   stale_price_exit_days: 20
+  stale_price_exit_policy: "haircut_exit"
   stale_price_haircut: 0.5
+  stop_fill_policy: "conservative"
+  stop_fill_buffer: 0.005
+  limit_up_threshold: 0.099
+  limit_down_threshold: 0.099
+  star_limit_up_threshold: 0.199
+  star_limit_down_threshold: 0.199
+  growth_limit_up_threshold: 0.199
+  growth_limit_down_threshold: 0.199
+  bj_limit_up_threshold: 0.299
+  bj_limit_down_threshold: 0.299
+  st_limit_up_threshold: 0.049
+  st_limit_down_threshold: 0.049
 
 quality:
   min_raw_coverage: 0.95
@@ -167,6 +190,10 @@ account:
   max_position_pct: null
   lot_size: 100
   star_market_lot_size: 200
+
+manual_orders:
+  limit_price_buffer: 0.002
+  cash_redistribution_overweight_tolerance: 0.10
 
 reports:
   history_dir: "outputs/history"

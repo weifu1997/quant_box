@@ -68,6 +68,7 @@ def main() -> None:
     parser.add_argument("--take-profit-pct", help="Comma-separated take-profit percentages, or none.")
     parser.add_argument("--circuit-breaker-drawdown", help="Comma-separated portfolio drawdown breakers, or none.")
     parser.add_argument("--circuit-breaker-cooldown-days", help="Comma-separated breaker cooldown sessions, or none.")
+    parser.add_argument("--circuit-breaker-target-exposure", help="Comma-separated breaker target exposures, or none.")
     parser.add_argument("--target-vol", help="Comma-separated target volatility values, or none.")
     parser.add_argument("--full-grid", action="store_true", help="Use the full default grid instead of the fast baseline grid.")
     parser.add_argument("--ic-top-k", type=int, default=30)
@@ -112,6 +113,7 @@ def main() -> None:
     _maybe_add_grid_values(grid, "take_profit_pct", args.take_profit_pct, float)
     _maybe_add_grid_values(grid, "circuit_breaker_drawdown", args.circuit_breaker_drawdown, float)
     _maybe_add_grid_values(grid, "circuit_breaker_cooldown_days", args.circuit_breaker_cooldown_days, int)
+    _maybe_add_grid_values(grid, "circuit_breaker_target_exposure", args.circuit_breaker_target_exposure, float)
     _maybe_add_grid_values(grid, "target_vol", args.target_vol, float)
     total_combinations = 1
     for values in grid.values():

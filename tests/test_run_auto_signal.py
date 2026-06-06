@@ -32,7 +32,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertEqual(status["status"], "blocked")
             self.assertIn("params:parameter_validation_skipped", status["block_reasons"])
 
-    def test_allow_low_quality_promotes_skip_optimize_run_to_official_outputs(self) -> None:
+    def test_allow_low_quality_keeps_skip_optimize_run_as_candidate_outputs(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -47,6 +47,33 @@ class RunAutoSignalTests(unittest.TestCase):
                 "--skip-optimize",
                 "--skip-backtest",
                 "--allow-low-quality",
+                "--no-archive",
+            ]
+            with _patched_auto_run(module, config, factors, argv):
+                module.main()
+
+            self.assertTrue((root / "candidate_signal_2024-01-03.csv").exists())
+            self.assertTrue((root / "manual_orders_candidate_2024-01-03.csv").exists())
+            self.assertFalse((root / "signal_2024-01-03.csv").exists())
+            self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")
+
+    def test_force_official_promotes_allowed_low_quality_run(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            latest = root / "latest_holdings.csv"
+            latest.write_text("instrument\nOLD.SZ\n", encoding="utf-8")
+            (root / "current_holdings.csv").write_text("instrument,shares\n", encoding="utf-8")
+
+            argv = [
+                "run_auto_signal.py",
+                "--skip-update",
+                "--skip-convert",
+                "--skip-optimize",
+                "--skip-backtest",
+                "--allow-low-quality",
+                "--force-official",
                 "--no-archive",
             ]
             with _patched_auto_run(module, config, factors, argv):

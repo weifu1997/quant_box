@@ -28,7 +28,7 @@ from src.data_converter import convert_to_qlib_format
 from src.data_fetcher import update_daily_data_resumable
 from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
-from src.manual_orders import generate_manual_orders, load_account_state, load_current_holdings, save_manual_orders
+from src.manual_orders import generate_manual_orders, load_account_state, load_current_holdings, save_manual_orders, validate_account_inputs
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_walk_forward_grid_validation
 from src.reporting import archive_run, signal_action_summary, write_daily_signal_report
@@ -78,7 +78,8 @@ def main() -> None:
     parser.add_argument("--skip-optimize", action="store_true", help="Use current config strategy instead of automatic tuning.")
     parser.add_argument("--skip-backtest", action="store_true", help="Generate signal without running the full historical backtest.")
     parser.add_argument("--allow-unhealthy", action="store_true", help="Continue even if data health checks fail.")
-    parser.add_argument("--allow-low-quality", action="store_true", help="Continue even if selected parameters fail quality gates.")
+    parser.add_argument("--allow-low-quality", action="store_true", help="Continue and write candidate outputs even if quality gates fail.")
+    parser.add_argument("--force-official", action="store_true", help="Write official outputs despite allowed quality warnings.")
     parser.add_argument("--no-archive", action="store_true", help="Do not copy run artifacts into outputs/history.")
     parser.add_argument(
         "--promote-candidate",
@@ -102,6 +103,7 @@ def main() -> None:
     parser.add_argument("--take-profit-pct", help="Comma-separated take-profit percentages, or none.")
     parser.add_argument("--circuit-breaker-drawdown", help="Comma-separated portfolio drawdown breakers, or none.")
     parser.add_argument("--circuit-breaker-cooldown-days", help="Comma-separated breaker cooldown sessions, or none.")
+    parser.add_argument("--circuit-breaker-target-exposure", help="Comma-separated breaker target exposures, or none.")
     parser.add_argument("--target-vol", help="Comma-separated target volatility values, or none.")
     parser.add_argument("--full-grid", action="store_true", help="Use the full default grid instead of the fast baseline grid.")
     parser.add_argument("--train-years", type=int, default=3)
@@ -208,6 +210,7 @@ def main() -> None:
             _maybe_add_grid_values(grid, "take_profit_pct", args.take_profit_pct, float)
             _maybe_add_grid_values(grid, "circuit_breaker_drawdown", args.circuit_breaker_drawdown, float)
             _maybe_add_grid_values(grid, "circuit_breaker_cooldown_days", args.circuit_breaker_cooldown_days, int)
+            _maybe_add_grid_values(grid, "circuit_breaker_target_exposure", args.circuit_breaker_target_exposure, float)
             _maybe_add_grid_values(grid, "target_vol", args.target_vol, float)
             param_columns = list(grid)
             total_combinations = 1
@@ -325,14 +328,29 @@ def main() -> None:
             price_df=prices,
         )
         intended_text = str(pd.Timestamp(intended).date())
+        account = load_account_state(selected_config)
+        current_holdings = load_current_holdings(selected_config)
+        account_issues = validate_account_inputs(account, current_holdings, selected_config)
         block_reasons = []
+        quality_warnings = []
+        if not data_health.is_healthy:
+            quality_warnings.extend([f"data:{issue}" for issue in data_health.issues])
+        if not parameter_quality.is_acceptable:
+            quality_warnings.extend([f"params:{issue}" for issue in parameter_quality.issues])
+        if not backtest_quality.is_acceptable:
+            quality_warnings.extend([f"backtest:{issue}" for issue in backtest_quality.issues])
+        if account_issues:
+            quality_warnings.extend([f"account:{issue}" for issue in account_issues])
         if not data_gate:
             block_reasons.extend([f"data:{issue}" for issue in data_health.issues])
         if not parameter_quality_gate:
             block_reasons.extend([f"params:{issue}" for issue in parameter_quality.issues])
         if not backtest_quality_gate:
             block_reasons.extend([f"backtest:{issue}" for issue in backtest_quality.issues])
-        is_executable = not block_reasons
+        if account_issues:
+            block_reasons.extend([f"account:{issue}" for issue in account_issues])
+        allowed_with_warnings = not block_reasons and bool(quality_warnings) and args.force_official
+        is_executable = not quality_warnings or allowed_with_warnings
 
         if is_executable:
             signal_path, holdings_path = save_signal(signal_df, target_holdings, output_date, config=selected_config)
@@ -340,8 +358,6 @@ def main() -> None:
             signal_path, holdings_path = _save_candidate_signal(signal_df, target_holdings, output_date, out_dir)
         artifacts.extend([signal_path, holdings_path])
 
-        account = load_account_state(selected_config)
-        current_holdings = load_current_holdings(selected_config)
         orders = generate_manual_orders(
             signal_df,
             target_holdings,
@@ -375,6 +391,12 @@ def main() -> None:
             "intended_trade_date": intended_text,
             "is_executable": is_executable,
             "block_reasons": block_reasons,
+            "quality_warnings": quality_warnings,
+            "allow_low_quality": bool(args.allow_low_quality),
+            "allow_unhealthy": bool(args.allow_unhealthy),
+            "force_official": bool(args.force_official),
+            "skip_optimize": bool(args.skip_optimize),
+            "skip_backtest": bool(args.skip_backtest),
             "validation_windows": int(len(validation)),
             "validation_param_sets": int(len(summary)),
             "files": {

@@ -38,6 +38,7 @@ def _render_report(report: dict[str, Any]) -> str:
     account = report.get("account", {})
     signal_summary = report.get("signal_summary", {})
     block_reasons = report.get("block_reasons", [])
+    quality_warnings = report.get("quality_warnings", [])
 
     lines = [
         "# Daily Signal Report",
@@ -45,9 +46,16 @@ def _render_report(report: dict[str, Any]) -> str:
         f"- Signal date: {report.get('signal_date', '')}",
         f"- Intended trade date: {report.get('intended_trade_date', '')}",
         f"- Executable: {report.get('is_executable', False)}",
+        f"- Skip optimize: {report.get('skip_optimize', False)}",
+        f"- Skip backtest: {report.get('skip_backtest', False)}",
+        f"- Allow low quality: {report.get('allow_low_quality', False)}",
+        f"- Allow unhealthy: {report.get('allow_unhealthy', False)}",
+        f"- Force official: {report.get('force_official', False)}",
     ]
     if block_reasons:
         lines.append(f"- Block reasons: {', '.join(map(str, block_reasons))}")
+    if quality_warnings:
+        lines.append(f"- Quality warnings: {', '.join(map(str, quality_warnings))}")
     lines.extend(
         [
             "",

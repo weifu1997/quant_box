@@ -105,8 +105,8 @@ def defensive_exposure_schedule(regimes: pd.Series, config: dict[str, Any], date
     aligned = regimes_for_dates(regimes, target_dates, default=default)
     exposure_by_regime = {
         REGIME_BULL: float(cfg.get("bull_exposure", 1.0)),
-        REGIME_SIDEWAYS: float(cfg.get("sideways_exposure", 0.85)),
-        REGIME_BEAR: float(cfg.get("bear_exposure", 0.55)),
+        REGIME_SIDEWAYS: float(cfg.get("sideways_exposure", 0.60)),
+        REGIME_BEAR: float(cfg.get("bear_exposure", 0.30)),
     }
     schedule = aligned.map(exposure_by_regime).astype(float).clip(lower=0.0)
     return schedule.rename("exposure_scale")

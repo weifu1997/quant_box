@@ -33,17 +33,41 @@ class ConfigLoaderTests(unittest.TestCase):
     def test_default_strategy_includes_portfolio_circuit_breaker(self) -> None:
         strategy = DEFAULT_CONFIG["strategy"]
 
-        self.assertEqual(strategy["circuit_breaker_drawdown"], 0.12)
-        self.assertEqual(strategy["circuit_breaker_cooldown_days"], 20)
-        self.assertEqual(strategy["rank_buffer"], 0)
+        self.assertEqual(strategy["circuit_breaker_drawdown"], 0.08)
+        self.assertEqual(strategy["circuit_breaker_cooldown_days"], 5)
+        self.assertEqual(strategy["circuit_breaker_target_exposure"], 0.30)
+        self.assertEqual(strategy["rank_buffer"], 30)
+        self.assertEqual(strategy["stop_loss_pct"], 0.08)
+        self.assertIsNone(strategy["take_profit_pct"])
 
     def test_default_data_config_includes_daily_basic_cache(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["data"]["history_start_date"], "2012-01-01")
         self.assertEqual(DEFAULT_CONFIG["data"]["daily_basic_file"], "data/factors/daily_basic.parquet")
 
-    def test_default_scoring_uses_low_liquidity_bucket_and_winner_take_all_dynamic_ic(self) -> None:
-        self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "low")
-        self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["top_k"], 1)
+    def test_default_scoring_uses_high_liquidity_bucket_and_stable_dynamic_ic(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "high")
+        self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["quantile"], 0.20)
+        self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["top_k"], 3)
+        self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["metric"], "ic_ir")
+        self.assertIn("factor:VMA60", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
+        self.assertIn("factor:VSUMN30", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
+        self.assertNotIn("factor:RSV5", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
+
+    def test_default_backtest_uses_conservative_execution_assumptions(self) -> None:
+        backtest = DEFAULT_CONFIG["backtest"]
+
+        self.assertEqual(backtest["slippage"], 0.0005)
+        self.assertTrue(backtest["dynamic_slippage_enabled"])
+        self.assertEqual(backtest["stale_price_exit_policy"], "haircut_exit")
+        self.assertEqual(backtest["stop_fill_policy"], "conservative")
+        self.assertEqual(backtest["star_limit_up_threshold"], 0.199)
+        self.assertEqual(backtest["st_limit_down_threshold"], 0.049)
+
+    def test_default_manual_orders_include_execution_buffers(self) -> None:
+        manual_orders = DEFAULT_CONFIG["manual_orders"]
+
+        self.assertEqual(manual_orders["limit_price_buffer"], 0.002)
+        self.assertEqual(manual_orders["cash_redistribution_overweight_tolerance"], 0.10)
 
     def test_default_quality_includes_full_backtest_return_and_drawdown_gates(self) -> None:
         quality = DEFAULT_CONFIG["quality"]
@@ -84,7 +108,8 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(ml["fundamental_lag_days"], 90)
         self.assertEqual(DEFAULT_CONFIG["reporting_regime"]["lag_days"], 0)
         self.assertTrue(DEFAULT_CONFIG["defensive_timing"]["enabled"])
-        self.assertEqual(DEFAULT_CONFIG["defensive_timing"]["sideways_exposure"], 1.0)
+        self.assertEqual(DEFAULT_CONFIG["defensive_timing"]["sideways_exposure"], 0.60)
+        self.assertEqual(DEFAULT_CONFIG["defensive_timing"]["bear_exposure"], 0.30)
         self.assertFalse(DEFAULT_CONFIG["neutralization"]["enabled"])
         self.assertTrue(DEFAULT_CONFIG["neutralization"]["industry"])
         self.assertTrue(DEFAULT_CONFIG["neutralization"]["market_cap"])

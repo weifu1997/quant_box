@@ -132,24 +132,46 @@ def run_backtest(
             if risk_off and circuit_breaker_cooldown_days is not None:
                 circuit_breaker_until = _cooldown_until(price_dates, date_pos, int(circuit_breaker_cooldown_days))
         if risk_off:
-            capital = _liquidate_portfolio(
-                holdings,
-                entry_prices,
-                capital,
-                close_values,
-                last_prices,
-                tradability,
-                trade_rows,
-                trade_date,
-                commission,
-                stamp_tax,
-                transfer_fee,
-                min_commission,
-                slippage,
-                prices,
-                config,
-                reason="circuit_breaker",
-            )
+            target_exposure = _circuit_breaker_target_exposure(config)
+            if target_exposure <= 0:
+                capital = _liquidate_portfolio(
+                    holdings,
+                    entry_prices,
+                    capital,
+                    close_values,
+                    last_prices,
+                    tradability,
+                    trade_rows,
+                    trade_date,
+                    commission,
+                    stamp_tax,
+                    transfer_fee,
+                    min_commission,
+                    slippage,
+                    prices,
+                    config,
+                    reason="circuit_breaker",
+                )
+            else:
+                capital = _reduce_portfolio_exposure(
+                    holdings,
+                    entry_prices,
+                    capital,
+                    close_values,
+                    last_prices,
+                    tradability,
+                    trade_rows,
+                    trade_date,
+                    commission,
+                    stamp_tax,
+                    transfer_fee,
+                    min_commission,
+                    slippage,
+                    prices,
+                    config,
+                    target_exposure,
+                    reason="circuit_breaker",
+                )
 
         signal_date = trade_schedule.get(pd.Timestamp(trade_date))
         if signal_date is not None:
@@ -187,7 +209,9 @@ def run_backtest(
                 if stock not in tradability["sellable"]:
                     trade_rows.append(_blocked_trade(rebalance_signal_date, trade_date, stock, "SELL", sell_shares, "not_sellable"))
                     continue
-                price = _price_for(stock, trade_price_values, last_prices) * (1 - slippage)
+                base_price = _price_for(stock, trade_price_values, last_prices)
+                trade_slippage = _trade_slippage(slippage, prices, trade_date, stock, sell_shares * base_price, config)
+                price = base_price * (1 - trade_slippage)
                 capacity = _capacity(prices, trade_date, stock, sell_shares * price, config)
                 filled_shares, status, reason = _apply_capacity_limit(sell_shares, price, stock, prices, trade_date, config)
                 if filled_shares <= 0:
@@ -220,7 +244,9 @@ def run_backtest(
                         commission_cost=commission_cost,
                         tax_cost=tax_cost,
                         transfer_fee_cost=transfer_fee_cost,
-                        slippage_cost=sell_shares * _price_for(stock, trade_price_values, last_prices) * slippage,
+                        slippage_cost=sell_shares * base_price * trade_slippage,
+                        slippage_rate=trade_slippage,
+                        slippage_model=_slippage_model_name(config),
                         capacity=capacity,
                     )
                 )
@@ -234,7 +260,9 @@ def run_backtest(
                 if stock not in tradability["buyable"]:
                     trade_rows.append(_blocked_trade(rebalance_signal_date, trade_date, stock, "BUY", buy_shares, "not_buyable"))
                     continue
-                price = _price_for(stock, trade_price_values, last_prices) * (1 + slippage)
+                base_price = _price_for(stock, trade_price_values, last_prices)
+                trade_slippage = _trade_slippage(slippage, prices, trade_date, stock, buy_shares * base_price, config)
+                price = base_price * (1 + trade_slippage)
                 capacity = _capacity(prices, trade_date, stock, buy_shares * price, config)
                 buy_shares, status, reason = _apply_capacity_limit(buy_shares, price, stock, prices, trade_date, config)
                 if buy_shares <= 0:
@@ -270,7 +298,9 @@ def run_backtest(
                         commission_cost=commission_cost,
                         tax_cost=0.0,
                         transfer_fee_cost=transfer_fee_cost,
-                        slippage_cost=buy_shares * _price_for(stock, trade_price_values, last_prices) * slippage,
+                        slippage_cost=buy_shares * base_price * trade_slippage,
+                        slippage_rate=trade_slippage,
+                        slippage_model=_slippage_model_name(config),
                         capacity=capacity,
                     )
                 )
@@ -527,18 +557,39 @@ def _tradability(
     if previous_date is not None:
         prev_close = _field_on_date(prices, "close", previous_date).reindex(close.index)
         valid_prev = prev_close > 0
-        up_threshold = float(config.get("limit_up_threshold", 0.099))
-        down_threshold = float(config.get("limit_down_threshold", 0.099))
         high = _field_on_date(prices, "high", trade_date).reindex(close.index)
         low = _field_on_date(prices, "low", trade_date).reindex(close.index)
         up_probe = high.where(high.notna(), close)
         down_probe = low.where(low.notna(), close)
-        limit_up = up_probe[valid_prev] >= prev_close[valid_prev] * (1 + up_threshold)
-        limit_down = down_probe[valid_prev] <= prev_close[valid_prev] * (1 - down_threshold)
-        buyable -= set(limit_up[limit_up].index.astype(str))
-        sellable -= set(limit_down[limit_down].index.astype(str))
+        for stock in close.index[valid_prev]:
+            stock = str(stock)
+            up_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "up")
+            down_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "down")
+            if pd.notna(up_probe.get(stock)) and float(up_probe.get(stock)) >= float(prev_close.get(stock)) * (1 + up_threshold):
+                buyable.discard(stock)
+            if pd.notna(down_probe.get(stock)) and float(down_probe.get(stock)) <= float(prev_close.get(stock)) * (1 - down_threshold):
+                sellable.discard(stock)
 
     return {"priced": priced, "buyable": buyable, "sellable": sellable}
+
+
+def _limit_threshold_for_stock(stock: str, prices: pd.DataFrame, trade_date: pd.Timestamp, config: dict, side: str) -> float:
+    suffix = "up" if side == "up" else "down"
+    if _is_st_on_date(stock, prices, trade_date):
+        return float(config.get(f"st_limit_{suffix}_threshold", 0.049))
+    lowered = str(stock).lower()
+    if lowered.startswith(("688", "689", "300", "301")):
+        return float(config.get(f"star_limit_{suffix}_threshold", config.get(f"growth_limit_{suffix}_threshold", 0.199)))
+    if lowered.startswith(("8", "4")):
+        return float(config.get(f"bj_limit_{suffix}_threshold", 0.299))
+    return float(config.get(f"limit_{suffix}_threshold", 0.099))
+
+
+def _is_st_on_date(stock: str, prices: pd.DataFrame, trade_date: pd.Timestamp) -> bool:
+    is_st = _field_on_date(prices, "is_st", trade_date)
+    if is_st.empty or stock not in is_st.index or pd.isna(is_st.loc[stock]):
+        return False
+    return bool(is_st.loc[stock])
 
 
 def _portfolio_value(
@@ -652,6 +703,8 @@ def _trade(
     tax_cost: float = 0.0,
     transfer_fee_cost: float = 0.0,
     slippage_cost: float = 0.0,
+    slippage_rate: float = 0.0,
+    slippage_model: str = "fixed",
     capacity: dict[str, float | bool] | None = None,
 ) -> dict[str, Any]:
     row = {
@@ -663,10 +716,13 @@ def _trade(
         "price": price,
         "cash": cash,
         "status": status,
+        "reason": reason or "",
         "commission_cost": float(commission_cost),
         "tax_cost": float(tax_cost),
         "transfer_fee_cost": float(transfer_fee_cost),
         "slippage_cost": float(slippage_cost),
+        "slippage_rate": float(slippage_rate),
+        "slippage_model": slippage_model,
     }
     if reason is not None:
         row["reason"] = reason
@@ -697,6 +753,8 @@ def _blocked_trade(
         "tax_cost": 0.0,
         "transfer_fee_cost": 0.0,
         "slippage_cost": 0.0,
+        "slippage_rate": 0.0,
+        "slippage_model": "none",
     }
 
 
@@ -750,6 +808,7 @@ def _execute_risk_exits(
             last_prices,
             stop_loss,
             take_profit,
+            config,
         )
         if reason is None:
             continue
@@ -798,6 +857,7 @@ def _execute_stale_price_exits(
 ) -> float:
     threshold = int(config.get("stale_price_exit_days", 20))
     haircut = float(config.get("stale_price_haircut", 0.5))
+    policy = str(config.get("stale_price_exit_policy", "haircut_exit")).strip().lower()
     if threshold <= 0 or not holdings:
         return capital
 
@@ -811,6 +871,10 @@ def _execute_stale_price_exits(
             continue
         stale_unpriced_days[stock] = stale_unpriced_days.get(stock, 0) + 1
         if stale_unpriced_days[stock] < threshold:
+            continue
+
+        if policy not in {"haircut_exit", "discount_exit", "sell"}:
+            trade_rows.append(_blocked_trade(pd.NaT, trade_date, stock, "SELL", shares, f"stale_price_{policy}"))
             continue
 
         base_price = _price_for(stock, close, last_prices) * max(0.0, min(haircut, 1.0))
@@ -883,6 +947,97 @@ def _liquidate_portfolio(
     return capital
 
 
+def _reduce_portfolio_exposure(
+    holdings: dict[str, int],
+    entry_prices: dict[str, float],
+    capital: float,
+    close: pd.Series | Mapping[str, float],
+    last_prices: dict[str, float],
+    tradability: dict[str, set[str]],
+    trade_rows: list[dict[str, object]],
+    trade_date: pd.Timestamp,
+    commission: float,
+    stamp_tax: float,
+    transfer_fee: float,
+    min_commission: float,
+    slippage: float,
+    prices: pd.DataFrame,
+    config: dict,
+    target_exposure: float,
+    reason: str,
+) -> float:
+    target_exposure = max(0.0, min(float(target_exposure), 1.0))
+    if target_exposure <= 0:
+        return _liquidate_portfolio(
+            holdings,
+            entry_prices,
+            capital,
+            close,
+            last_prices,
+            tradability,
+            trade_rows,
+            trade_date,
+            commission,
+            stamp_tax,
+            transfer_fee,
+            min_commission,
+            slippage,
+            prices,
+            config,
+            reason,
+        )
+    if target_exposure >= 1 or not holdings:
+        return capital
+
+    holding_values: dict[str, tuple[int, float, float]] = {}
+    current_invested = 0.0
+    for stock, shares in list(holdings.items()):
+        if shares <= 0:
+            continue
+        price = _price_for(stock, close, last_prices)
+        value = float(shares) * price
+        if price <= 0 or value <= 0:
+            continue
+        holding_values[stock] = (shares, price, value)
+        current_invested += value
+
+    if current_invested <= 0:
+        return capital
+    total = capital + current_invested
+    target_invested = total * target_exposure
+    if current_invested <= target_invested:
+        return capital
+
+    sell_fraction = min((current_invested - target_invested) / current_invested, 1.0)
+    for stock, (shares, _price, _value) in holding_values.items():
+        sell_shares = min(_round_lot(shares * sell_fraction, stock, config), shares)
+        if sell_shares <= 0:
+            continue
+        if stock not in tradability["sellable"]:
+            trade_rows.append(_blocked_trade(pd.NaT, trade_date, stock, "SELL", sell_shares, f"{reason}_not_sellable"))
+            continue
+        capital = _sell_all(
+            holdings,
+            entry_prices,
+            capital,
+            close,
+            last_prices,
+            trade_rows,
+            trade_date,
+            stock,
+            commission,
+            stamp_tax,
+            transfer_fee,
+            min_commission,
+            slippage,
+            prices,
+            config,
+            reason,
+            requested_shares=sell_shares,
+        )
+    return capital
+
+
 def _sell_all(
     holdings: dict[str, int],
     entry_prices: dict[str, float],
@@ -901,10 +1056,15 @@ def _sell_all(
     config: dict,
     reason: str,
     execution_price: float | None = None,
+    requested_shares: int | None = None,
 ) -> float:
-    shares = holdings.get(stock, 0)
+    total_shares = holdings.get(stock, 0)
+    shares = total_shares if requested_shares is None else min(max(int(requested_shares), 0), total_shares)
+    if shares <= 0:
+        return capital
     base_price = execution_price if execution_price is not None else _risk_exit_market_price(stock, close, last_prices, trade_date, prices, config)
-    price = float(base_price) * (1 - slippage)
+    trade_slippage = _trade_slippage(slippage, prices, trade_date, stock, shares * float(base_price), config)
+    price = float(base_price) * (1 - trade_slippage)
     filled_shares, status, capacity_reason = _apply_capacity_limit(shares, price, stock, prices, trade_date, config)
     if filled_shares <= 0:
         trade_rows.append(
@@ -918,7 +1078,7 @@ def _sell_all(
     transfer_fee_cost = _transfer_fee_cost(gross, transfer_fee)
     proceeds = gross - commission_cost - tax_cost - transfer_fee_cost
     capital += proceeds
-    remaining = shares - filled_shares
+    remaining = total_shares - filled_shares
     if remaining > 0:
         holdings[stock] = remaining
     else:
@@ -938,11 +1098,20 @@ def _sell_all(
             commission_cost=commission_cost,
             tax_cost=tax_cost,
             transfer_fee_cost=transfer_fee_cost,
-            slippage_cost=filled_shares * float(base_price) * slippage,
+            slippage_cost=filled_shares * float(base_price) * trade_slippage,
+            slippage_rate=trade_slippage,
+            slippage_model=_slippage_model_name(config),
             capacity=_capacity(prices, trade_date, stock, filled_shares * price, config),
         )
     )
     return capital
+
+
+def _circuit_breaker_target_exposure(config: dict) -> float:
+    value = config.get("circuit_breaker_target_exposure")
+    if value is None:
+        return 0.0
+    return max(0.0, min(float(value), 1.0))
 
 
 def _drawdown_breached(total: float, peak_equity: float, config: dict) -> bool:
@@ -1064,6 +1233,7 @@ def _risk_exit_decision(
     last_prices: dict[str, float],
     stop_loss: float | None,
     take_profit: float | None,
+    config: dict | None = None,
 ) -> tuple[str | None, float | None]:
     return _risk_exit_decision_from_rows(
         stock,
@@ -1075,6 +1245,7 @@ def _risk_exit_decision(
         last_prices,
         stop_loss,
         take_profit,
+        config,
     )
 
 
@@ -1088,6 +1259,7 @@ def _risk_exit_decision_from_rows(
     last_prices: dict[str, float],
     stop_loss: float | None,
     take_profit: float | None,
+    config: dict | None = None,
 ) -> tuple[str | None, float | None]:
     open_price = _price_for(stock, open_prices, last_prices)
     high_price = _price_for(stock, high_prices, last_prices)
@@ -1096,13 +1268,13 @@ def _risk_exit_decision_from_rows(
     if stop_loss is not None:
         stop_price = entry * (1 - abs(float(stop_loss)))
         if low_price <= stop_price:
-            execution = open_price if open_price <= stop_price else stop_price
+            execution = open_price if open_price <= stop_price else _stop_trigger_fill_price(stop_price, low_price, config)
             return "stop_loss", float(execution)
 
     if take_profit is not None:
         take_price = entry * (1 + abs(float(take_profit)))
         if high_price >= take_price:
-            execution = open_price if open_price >= take_price else take_price
+            execution = open_price if open_price >= take_price else _take_profit_fill_price(take_price, high_price, config)
             return "take_profit", float(execution)
 
     close_price = _price_for(stock, close, last_prices)
@@ -1111,6 +1283,26 @@ def _risk_exit_decision_from_rows(
     if take_profit is not None and close_price / entry - 1 >= abs(float(take_profit)):
         return "take_profit", float(close_price)
     return None, None
+
+
+def _stop_trigger_fill_price(stop_price: float, low_price: float, config: dict | None) -> float:
+    cfg = config or {}
+    policy = str(cfg.get("stop_fill_policy", "conservative")).strip().lower()
+    if policy in {"stop", "stop_price", "ideal"}:
+        return float(stop_price)
+    buffer = max(float(cfg.get("stop_fill_buffer", 0.005)), 0.0)
+    buffered = stop_price * (1 - buffer)
+    return float(max(low_price, min(stop_price, buffered)))
+
+
+def _take_profit_fill_price(take_price: float, high_price: float, config: dict | None) -> float:
+    cfg = config or {}
+    policy = str(cfg.get("take_profit_fill_policy", cfg.get("stop_fill_policy", "conservative"))).strip().lower()
+    if policy in {"target", "take_price", "ideal", "stop_price"}:
+        return float(take_price)
+    buffer = max(float(cfg.get("take_profit_fill_buffer", 0.005)), 0.0)
+    buffered = take_price * (1 - buffer)
+    return float(min(high_price, max(0.0, buffered)))
 
 
 def _risk_exit_market_price(
@@ -1126,6 +1318,27 @@ def _risk_exit_market_price(
     if not price_row.empty:
         return _price_for(stock, price_row, last_prices)
     return _price_for(stock, close, last_prices)
+
+
+def _trade_slippage(base_slippage: float, prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notional: float, config: dict) -> float:
+    base = max(float(base_slippage), 0.0)
+    if not bool(config.get("dynamic_slippage_enabled", False)):
+        return base
+    window = int(config.get("capacity_window", 20))
+    amount_unit = float(config.get("amount_unit", 1000.0))
+    adv = _prior_adv(prices, trade_date, stock, window, amount_unit)
+    if adv <= 0:
+        return base
+    ratio = max(float(abs(notional) / adv), 0.0)
+    threshold = max(float(config.get("dynamic_slippage_threshold", 0.02)), 0.0)
+    multiplier = max(float(config.get("dynamic_slippage_multiplier", 2.0)), 0.0)
+    cap = max(float(config.get("max_slippage", 0.03)), base)
+    extra = max(ratio - threshold, 0.0) * multiplier
+    return float(min(base + extra, cap))
+
+
+def _slippage_model_name(config: dict) -> str:
+    return "dynamic_adv" if bool(config.get("dynamic_slippage_enabled", False)) else "fixed"
 
 
 def _capacity(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notional: float, config: dict) -> dict[str, float | bool]:
