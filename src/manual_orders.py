@@ -12,6 +12,9 @@ from src.config_loader import load_config, resolve_path
 from src.market_regime import defensive_exposure_for_date
 
 
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
+
+
 @dataclass
 class AccountState:
     total_asset: float
@@ -457,6 +460,8 @@ def _price_row(price_df: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Ser
     else:
         if field != "close":
             return pd.Series(dtype=float)
+        if _looks_like_field_table(price_df.columns):
+            raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
         row = price_df.loc[row_key].copy()
     row.index = [_normalize_instrument(value) for value in row.index]
     row = row[row.index != ""]
@@ -668,6 +673,11 @@ def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
     frame = price_df.loc[:, fields == field.lower()].copy()
     frame.columns = [_normalize_instrument(value) for value in frame.columns.get_level_values(1)]
     return frame.loc[:, frame.columns != ""]
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _is_limit_up(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict) -> bool:
