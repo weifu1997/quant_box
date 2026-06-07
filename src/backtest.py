@@ -499,10 +499,10 @@ def _trade_cost_sum(trades: pd.DataFrame, column: str) -> float:
 def _turnover_sell_count(trades: pd.DataFrame) -> int:
     if trades.empty or "side" not in trades.columns:
         return 0
-    sell_mask = trades["side"].astype(str).str.upper() == "SELL"
+    sell_mask = trades["side"].astype(str).str.strip().str.upper() == "SELL"
     if "status" not in trades.columns:
         return int(sell_mask.sum())
-    executable = trades["status"].astype(str).str.lower().isin({"filled", "partial", "risk_exit"})
+    executable = trades["status"].astype(str).str.strip().str.lower().isin({"filled", "partial", "risk_exit"})
     return int((sell_mask & executable).sum())
 
 
@@ -553,7 +553,7 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
             raise ValueError("price_df MultiIndex columns must be field/instrument.")
         normalized_columns = pd.MultiIndex.from_arrays(
             [
-                prices.columns.get_level_values(0).astype(str).str.lower(),
+                [_normalize_price_field(value) for value in prices.columns.get_level_values(0)],
                 [_normalize_instrument(value) for value in prices.columns.get_level_values(1)],
             ],
             names=["field", "instrument"],
@@ -593,8 +593,14 @@ def _normalize_instrument(value: object) -> str:
     return str(value).strip().upper()
 
 
+def _normalize_price_field(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().lower()
+
+
 def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
-    field = str(field).lower()
+    field = _normalize_price_field(field)
     cache_key = id(prices)
     cached = _PRICE_FIELD_CACHE.get(cache_key)
     if cached is None or cached[0]() is not prices:

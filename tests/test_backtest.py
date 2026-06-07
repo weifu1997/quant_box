@@ -15,10 +15,10 @@ class BacktestTests(unittest.TestCase):
         equity = pd.Series([100000.0, 100100.0, 100200.0], index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]))
         trades = pd.DataFrame(
             [
-                {"side": "SELL", "status": "blocked"},
-                {"side": "SELL", "status": "filled"},
-                {"side": "SELL", "status": "partial"},
-                {"side": "SELL", "status": "risk_exit"},
+                {"side": " sell ", "status": " blocked "},
+                {"side": " sell ", "status": " filled "},
+                {"side": "SELL", "status": " PARTIAL "},
+                {"side": "SELL", "status": " RISK_EXIT "},
                 {"side": "BUY", "status": "filled"},
             ]
         )
@@ -56,8 +56,8 @@ class BacktestTests(unittest.TestCase):
         )
         prices = pd.concat(
             {
-                "close": pd.DataFrame({"000001.sz": [10.0, 10.0]}, index=dates),
-                "volume": pd.DataFrame({"000001.sz": [1000.0, 1000.0]}, index=dates),
+                " close ": pd.DataFrame({" 000001.sz ": [10.0, 10.0]}, index=dates),
+                " volume ": pd.DataFrame({" 000001.sz ": [1000.0, 1000.0]}, index=dates),
             },
             axis=1,
         )

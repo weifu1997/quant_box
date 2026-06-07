@@ -210,7 +210,7 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
     if isinstance(prices.columns, pd.MultiIndex):
         normalized_columns = pd.MultiIndex.from_arrays(
             [
-                prices.columns.get_level_values(0).astype(str).str.lower(),
+                [_normalize_price_field(value) for value in prices.columns.get_level_values(0)],
                 [_normalize_instrument(value) for value in prices.columns.get_level_values(1)],
             ],
             names=["field", "instrument"],
@@ -250,12 +250,18 @@ def _normalize_instrument(value: object) -> str:
     return str(value).strip().upper()
 
 
+def _normalize_price_field(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().lower()
+
+
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
-    field = str(field).lower()
+    field = _normalize_price_field(field)
     cache_key = id(prices)
     cached = _PRICE_FIELD_CACHE.get(cache_key)
     if cached is None or cached[0]() is not prices:
-        field_names = set(prices.columns.get_level_values("field").astype(str).str.lower())
+        field_names = set(_normalize_price_field(value) for value in prices.columns.get_level_values("field"))
         cache: dict[str, pd.DataFrame] = {}
         _PRICE_FIELD_CACHE[cache_key] = (weakref.ref(prices), field_names, cache)
     else:
@@ -265,7 +271,7 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
     if field not in field_names:
         frame = pd.DataFrame(index=prices.index)
     else:
-        field_values = prices.columns.get_level_values("field").astype(str).str.lower()
+        field_values = pd.Index([_normalize_price_field(value) for value in prices.columns.get_level_values("field")])
         frame = prices.loc[:, field_values == field]
         frame.columns = frame.columns.get_level_values("instrument").astype(str)
     cache[field] = frame

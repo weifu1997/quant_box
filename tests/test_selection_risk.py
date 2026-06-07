@@ -41,11 +41,14 @@ class SelectionRiskTests(unittest.TestCase):
 
     def test_filter_matches_price_columns_case_insensitively(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
-        prices = _price_panel(
-            dates,
-            open_values={"000001.sz": [10.0, 10.1]},
-            close_values={"000001.sz": [10.0, 10.1]},
-            low_values={"000001.sz": [10.0, 10.0]},
+        prices = pd.concat(
+            {
+                " open ": pd.DataFrame({" 000001.sz ": [10.0, 10.1]}, index=dates),
+                " close ": pd.DataFrame({" 000001.sz ": [10.0, 10.1]}, index=dates),
+                " low ": pd.DataFrame({" 000001.sz ": [10.0, 10.0]}, index=dates),
+                " volume ": pd.DataFrame({" 000001.sz ": [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
         )
         scores = pd.Series([1.0], index=["000001.SZ"], name="score")
 
