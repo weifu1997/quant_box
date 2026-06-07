@@ -86,6 +86,27 @@ class FactorICTests(unittest.TestCase):
                 else:
                     self.assertAlmostEqual(float(actual), float(expected))
 
+    def test_calculate_factor_ic_normalizes_price_instruments_and_dates(self) -> None:
+        factor_dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        index = pd.MultiIndex.from_product(
+            [factor_dates, ["000001.SZ", "600519.SH"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": [1.0, 2.0, 1.5, 3.0]}, index=index)
+        price_dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-03 15:00", "2024-01-04 15:00"])
+        prices = pd.DataFrame(
+            {
+                "000001.sz": [10.0, 10.5, 10.6],
+                "600519.sh": [10.0, 11.0, 12.0],
+            },
+            index=price_dates,
+        )
+
+        ic = calculate_factor_ic(factors, prices, min_obs=2)
+
+        self.assertEqual(ic.index.to_list(), factor_dates.to_list())
+        self.assertTrue(ic["F1"].notna().all())
+
     def test_calculate_factor_ic_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates[:2], ["a", "b", "c"]], names=["datetime", "instrument"])

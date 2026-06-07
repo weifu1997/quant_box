@@ -6,8 +6,6 @@ import numpy as np
 
 def make_forward_returns(price_df: pd.DataFrame, horizon: int = 1) -> pd.Series:
     prices = _close_prices(price_df)
-    prices.index = pd.to_datetime(prices.index)
-    prices.columns = prices.columns.astype(str)
     forward = prices.shift(-horizon) / prices - 1
     stacked = forward.stack(future_stack=True).rename("forward_return")
     stacked.index = stacked.index.set_names(["datetime", "instrument"])
@@ -41,8 +39,8 @@ def calculate_factor_ic(
         except KeyError:
             continue
         daily = daily_factors.droplevel(date_level).copy()
-        daily.index = daily.index.astype(str)
-        daily_returns.index = daily_returns.index.astype(str)
+        daily.index = [_normalize_instrument(value) for value in daily.index]
+        daily_returns.index = [_normalize_instrument(value) for value in daily_returns.index]
         aligned = daily.join(daily_returns, how="inner").dropna(subset=["forward_return"])
         if aligned.empty:
             continue
@@ -274,14 +272,33 @@ def _normalize_abs_weights(weights: pd.Series) -> pd.Series:
 def _close_prices(price_df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(price_df.columns, pd.MultiIndex):
         field_level = 0
-        fields = price_df.columns.get_level_values(field_level).astype(str).str.lower()
+        fields = price_df.columns.get_level_values(field_level).astype(str).str.strip().str.lower()
         if "close" not in set(fields):
             raise ValueError("price_df MultiIndex columns must include a close field.")
         close = price_df.loc[:, fields == "close"].copy()
-        close.columns = close.columns.get_level_values(1).astype(str)
-        return close
+        close.columns = [_normalize_instrument(value) for value in close.columns.get_level_values(1)]
+        return _normalize_close_frame(close)
     field_like_columns = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor"}
     column_names = {str(column).strip().lower() for column in price_df.columns}
     if len(price_df.columns) > 1 and column_names & field_like_columns:
         raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
-    return price_df.copy()
+    close = price_df.copy()
+    close.columns = [_normalize_instrument(value) for value in close.columns]
+    return _normalize_close_frame(close)
+
+
+def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
+    result = close.copy()
+    result.index = pd.to_datetime(result.index).normalize()
+    result.columns = [_normalize_instrument(value) for value in result.columns]
+    result = result.loc[:, result.columns != ""]
+    if result.columns.has_duplicates:
+        result = result.loc[:, ~result.columns.duplicated(keep="last")]
+    result = result[~result.index.duplicated(keep="last")].sort_index()
+    return result.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
