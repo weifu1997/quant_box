@@ -67,6 +67,48 @@ class DataHealthTests(unittest.TestCase):
             self.assertIn("price_latest_before_end:2024-01-02<2024-01-03", report.issues)
             self.assertIn("factor_latest_before_end:2024-01-02<2024-01-03", report.issues)
 
+    def test_build_data_health_report_checks_latest_target_price_and_factor_coverage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "600519.SH"],
+                    "name": ["A", "B"],
+                    "list_status": ["L", "L"],
+                    "list_date": ["20200101", "20200101"],
+                }
+            ).to_csv(universe_file, index=False)
+            _raw(raw_dir / "000001.SZ.csv", "000001.SZ", "2024-01-03")
+            _raw(raw_dir / "600519.SH.csv", "600519.SH", "2024-01-03")
+
+            config = _config(raw_dir, universe_file)
+            prices = _price_panel(
+                ["2024-01-02", "2024-01-03"],
+                {
+                    "000001.SZ": [10.0, None],
+                    "600519.SH": [20.0, None],
+                    "000002.SZ": [None, 30.0],
+                },
+            )
+            factors = _factor_rows(
+                [
+                    ("2024-01-02", "000001.SZ"),
+                    ("2024-01-02", "600519.SH"),
+                    ("2024-01-03", "000002.SZ"),
+                ]
+            )
+
+            report = build_data_health_report(config, price_df=prices, factor_df=factors)
+
+            self.assertFalse(report.is_healthy)
+            self.assertEqual(report.price_latest_target_symbols, 0)
+            self.assertEqual(report.factor_latest_target_symbols, 0)
+            self.assertIn("price_latest_coverage_below_threshold:0.0000<1.0000", report.issues)
+            self.assertIn("factor_latest_coverage_below_threshold:0.0000<1.0000", report.issues)
+
     def test_build_data_health_report_allows_sparse_stale_raw_symbols_above_threshold(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -94,6 +136,48 @@ class DataHealthTests(unittest.TestCase):
             self.assertTrue(report.is_healthy)
             self.assertEqual(report.raw_latest_target_symbols, 1)
             self.assertEqual(report.raw_latest_target_coverage, 0.5)
+
+    def test_build_data_health_report_allows_sparse_latest_price_and_factor_above_threshold(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "600519.SH"],
+                    "name": ["A", "B"],
+                    "list_status": ["L", "L"],
+                    "list_date": ["20200101", "20200101"],
+                }
+            ).to_csv(universe_file, index=False)
+            _raw(raw_dir / "000001.SZ.csv", "000001.SZ", "2024-01-03")
+            _raw(raw_dir / "600519.SH.csv", "600519.SH", "2024-01-03")
+
+            config = _config(raw_dir, universe_file)
+            config["quality"]["min_price_coverage"] = 0.5
+            config["quality"]["min_factor_coverage"] = 0.5
+            prices = _price_panel(
+                ["2024-01-02", "2024-01-03"],
+                {
+                    "000001.SZ": [10.0, 10.1],
+                    "600519.SH": [20.0, None],
+                },
+            )
+            factors = _factor_rows(
+                [
+                    ("2024-01-03", "000001.SZ"),
+                    ("2024-01-02", "600519.SH"),
+                ]
+            )
+
+            report = build_data_health_report(config, price_df=prices, factor_df=factors)
+
+            self.assertTrue(report.is_healthy)
+            self.assertEqual(report.price_latest_target_symbols, 1)
+            self.assertEqual(report.factor_latest_target_symbols, 1)
+            self.assertEqual(report.price_latest_target_coverage, 0.5)
+            self.assertEqual(report.factor_latest_target_coverage, 0.5)
 
     def test_build_data_health_report_normalizes_symbol_whitespace_and_case(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -184,6 +268,20 @@ def _prices(date: str, instruments: list[str]) -> pd.DataFrame:
 def _factors(date: str, instruments: list[str]) -> pd.DataFrame:
     index = pd.MultiIndex.from_product([[pd.Timestamp(date)], instruments], names=["datetime", "instrument"])
     return pd.DataFrame({"ROC5": [1.0 for _ in instruments]}, index=index)
+
+
+def _price_panel(dates: list[str], values: dict[str, list[float | None]]) -> pd.DataFrame:
+    columns = pd.MultiIndex.from_product([["close"], list(values)], names=["field", "instrument"])
+    rows = list(zip(*values.values()))
+    return pd.DataFrame(rows, index=pd.DatetimeIndex(dates), columns=columns)
+
+
+def _factor_rows(rows: list[tuple[str, str]]) -> pd.DataFrame:
+    index = pd.MultiIndex.from_tuples(
+        [(pd.Timestamp(date), instrument) for date, instrument in rows],
+        names=["datetime", "instrument"],
+    )
+    return pd.DataFrame({"ROC5": [1.0 for _ in rows]}, index=index)
 
 
 if __name__ == "__main__":

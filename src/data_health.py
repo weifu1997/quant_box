@@ -6,11 +6,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 from src.data_fetcher import _raw_latest_date, filter_universe_frame
-from src.trading_calendar import latest_trade_date, resolve_target_date_value
+from src.trading_calendar import resolve_target_date_value
 
 PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
@@ -27,10 +28,14 @@ class DataHealthReport:
     factor_symbols: int
     factor_target_symbols: int
     raw_latest_target_symbols: int
+    price_latest_target_symbols: int
+    factor_latest_target_symbols: int
     raw_target_coverage: float
     raw_latest_target_coverage: float
     price_target_coverage: float
+    price_latest_target_coverage: float
     factor_target_coverage: float
+    factor_latest_target_coverage: float
     raw_latest_date: str
     price_latest_date: str
     factor_latest_date: str
@@ -70,9 +75,11 @@ def build_data_health_report(
     factor_target = factor_symbols & target_symbols if target_symbols else factor_symbols
 
     raw_latest_by_symbol = _raw_latest_dates(raw_dir, raw_target)
+    price_latest_by_symbol = _price_latest_dates(prices, price_target)
+    factor_latest_by_symbol = _factor_latest_dates(factors, factor_target)
     raw_latest = min(raw_latest_by_symbol.values()) if raw_latest_by_symbol else None
-    price_latest = latest_trade_date(price_df=prices) if prices is not None else None
-    factor_latest = _factor_latest_date(factors)
+    price_latest = min(price_latest_by_symbol.values()) if price_latest_by_symbol else None
+    factor_latest = min(factor_latest_by_symbol.values()) if factor_latest_by_symbol else None
 
     min_raw = float(quality_cfg.get("min_raw_coverage", 0.95))
     min_price = float(quality_cfg.get("min_price_coverage", 0.95))
@@ -82,7 +89,11 @@ def build_data_health_report(
     raw_coverage = _ratio(len(raw_target), len(target_symbols))
     requested_ts = pd.Timestamp(requested_end)
     raw_latest_target_symbols = sum(1 for value in raw_latest_by_symbol.values() if value >= requested_ts)
+    price_latest_target_symbols = sum(1 for value in price_latest_by_symbol.values() if value >= requested_ts)
+    factor_latest_target_symbols = sum(1 for value in factor_latest_by_symbol.values() if value >= requested_ts)
     raw_latest_target_coverage = _ratio(raw_latest_target_symbols, len(target_symbols))
+    price_latest_target_coverage = _ratio(price_latest_target_symbols, len(target_symbols))
+    factor_latest_target_coverage = _ratio(factor_latest_target_symbols, len(target_symbols))
     price_coverage = _ratio(len(price_target), len(target_symbols))
     factor_coverage = _ratio(len(factor_target), len(target_symbols))
     issues: list[str] = []
@@ -97,9 +108,13 @@ def build_data_health_report(
     if require_latest:
         if raw_latest_target_coverage < min_raw:
             issues.append(f"raw_latest_coverage_below_threshold:{raw_latest_target_coverage:.4f}<{min_raw:.4f}")
-        if price_latest is None or price_latest < requested_ts:
+        if price_latest_target_coverage < min_price:
+            issues.append(f"price_latest_coverage_below_threshold:{price_latest_target_coverage:.4f}<{min_price:.4f}")
+        if factor_latest_target_coverage < min_factor:
+            issues.append(f"factor_latest_coverage_below_threshold:{factor_latest_target_coverage:.4f}<{min_factor:.4f}")
+        if price_latest_target_symbols == 0 and (price_latest is None or price_latest < requested_ts):
             issues.append(f"price_latest_before_end:{_date_text(price_latest)}<{requested_end}")
-        if factor_latest is None or factor_latest < requested_ts:
+        if factor_latest_target_symbols == 0 and (factor_latest is None or factor_latest < requested_ts):
             issues.append(f"factor_latest_before_end:{_date_text(factor_latest)}<{requested_end}")
 
     return DataHealthReport(
@@ -113,10 +128,14 @@ def build_data_health_report(
         factor_symbols=len(factor_symbols),
         factor_target_symbols=len(factor_target),
         raw_latest_target_symbols=raw_latest_target_symbols,
+        price_latest_target_symbols=price_latest_target_symbols,
+        factor_latest_target_symbols=factor_latest_target_symbols,
         raw_target_coverage=raw_coverage,
         raw_latest_target_coverage=raw_latest_target_coverage,
         price_target_coverage=price_coverage,
+        price_latest_target_coverage=price_latest_target_coverage,
         factor_target_coverage=factor_coverage,
+        factor_latest_target_coverage=factor_latest_target_coverage,
         raw_latest_date=_date_text(raw_latest),
         price_latest_date=_date_text(price_latest),
         factor_latest_date=_date_text(factor_latest),
@@ -208,23 +227,79 @@ def _factor_symbols(frame: pd.DataFrame | None) -> set[str]:
     return _normalize_symbols(frame.index.get_level_values(1))
 
 
+def _price_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[str, pd.Timestamp]:
+    close = _close_price_frame(frame)
+    if close.empty:
+        return {}
+
+    latest_dates: dict[str, pd.Timestamp] = {}
+    for position, raw_symbol in enumerate(close.columns):
+        symbol = _normalize_symbol(raw_symbol)
+        if not symbol or (symbols and symbol not in symbols):
+            continue
+        series = close.iloc[:, position]
+        valid_dates = close.index[series.notna()]
+        if valid_dates.empty:
+            continue
+        latest = pd.Timestamp(valid_dates.max()).normalize()
+        current = latest_dates.get(symbol)
+        if current is None or latest > current:
+            latest_dates[symbol] = latest
+    return latest_dates
+
+
+def _close_price_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    if isinstance(frame.columns, pd.MultiIndex):
+        fields = frame.columns.get_level_values(0).astype(str).str.strip().str.lower()
+        if "close" not in set(fields):
+            return pd.DataFrame(index=frame.index)
+        close = frame.loc[:, fields == "close"].copy()
+        close.columns = close.columns.get_level_values(-1)
+    else:
+        if _looks_like_field_table(frame.columns):
+            raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
+        close = frame.copy()
+
+    dates = pd.to_datetime(close.index, errors="coerce")
+    valid_dates = ~pd.isna(dates)
+    close = close.loc[valid_dates].copy()
+    close.index = pd.DatetimeIndex(dates[valid_dates]).normalize()
+    close = close[~close.index.duplicated(keep="last")].sort_index()
+    return close.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+
+def _factor_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[str, pd.Timestamp]:
+    if frame is None or frame.empty or not isinstance(frame.index, pd.MultiIndex):
+        return {}
+    dates = pd.to_datetime(frame.index.get_level_values(0), errors="coerce")
+    instruments = pd.Index(frame.index.get_level_values(1)).astype(str).str.strip().str.upper()
+    latest_dates: dict[str, pd.Timestamp] = {}
+    for date_value, symbol in zip(dates, instruments):
+        if pd.isna(date_value) or not symbol or (symbols and symbol not in symbols):
+            continue
+        latest = pd.Timestamp(date_value).normalize()
+        current = latest_dates.get(symbol)
+        if current is None or latest > current:
+            latest_dates[symbol] = latest
+    return latest_dates
+
+
 def _normalize_symbols(values: Any) -> set[str]:
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
 
 
+def _normalize_symbol(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
 def _looks_like_field_table(columns: pd.Index) -> bool:
     labels = {str(column).strip().lower() for column in columns}
     return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
-
-
-def _factor_latest_date(frame: pd.DataFrame | None) -> pd.Timestamp | None:
-    if frame is None or frame.empty or not isinstance(frame.index, pd.MultiIndex):
-        return None
-    dates = pd.to_datetime(frame.index.get_level_values(0), errors="coerce")
-    if dates.empty:
-        return None
-    return pd.Timestamp(dates.max()).normalize()
 
 
 def _is_stock_csv(path: Path) -> bool:
