@@ -36,7 +36,7 @@ def apply_regime_score_blend(
     component_hits = 0
     for date, daily_scores in scores.groupby(level=0, sort=True):
         date_key = pd.Timestamp(date).normalize()
-        daily = daily_scores.droplevel(0).astype(float)
+        daily = _normalize_daily_scores(daily_scores)
         state = regime_for_date(regimes, date_key)
         defensive_weight = max(0.0, min(weights_by_regime.get(state, 0.0), 1.0))
         if defensive_weight <= 0:
@@ -93,7 +93,7 @@ def apply_regime_score_filter(
     rows_after = 0
     for date, daily_scores in scores.groupby(level=0, sort=True):
         date_key = pd.Timestamp(date).normalize()
-        daily = daily_scores.droplevel(0).astype(float)
+        daily = _normalize_daily_scores(daily_scores)
         rule = _rule_for_regime(rules, regime_for_date(regimes, date_key))
         if rule is None:
             parts.append(daily_scores)
@@ -179,10 +179,28 @@ def _filter_threshold(filter_score: pd.Series, rule: dict[str, Any]) -> float:
 
 def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
-    instruments = factors.index.get_level_values(1).astype(str)
+    instruments = [_normalize_instrument(value) for value in factors.index.get_level_values(1)]
     normalized = factors.copy(deep=False)
     normalized.index = pd.MultiIndex.from_arrays([dates, instruments], names=["datetime", "instrument"])
+    normalized = normalized[normalized.index.get_level_values("instrument") != ""]
+    if normalized.index.has_duplicates:
+        normalized = normalized.groupby(level=["datetime", "instrument"], sort=False).last()
     return normalized.sort_index()
+
+
+def _normalize_daily_scores(daily_scores: pd.Series) -> pd.Series:
+    daily = daily_scores.droplevel(0).astype(float).copy()
+    daily.index = [_normalize_instrument(value) for value in daily.index]
+    daily = daily[daily.index != ""]
+    if daily.index.has_duplicates:
+        daily = daily.groupby(level=0, sort=False).last()
+    return daily
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _defensive_score(factors: pd.DataFrame, components: list[dict[str, object]]) -> pd.Series:
