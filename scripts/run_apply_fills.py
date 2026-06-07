@@ -65,7 +65,7 @@ def _audit_payload(
     fills: pd.DataFrame,
     dry_run: bool,
 ) -> dict[str, object]:
-    status = fills.get("fill_status", pd.Series(dtype=object)).fillna("").astype(str).str.upper()
+    status = fills.get("fill_status", pd.Series(dtype=object)).fillna("").astype(str).str.strip().str.upper()
     applied = status.isin({"FILLED", "PARTIAL"})
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),

@@ -449,9 +449,27 @@ class ManualOrdersTests(unittest.TestCase):
         current = pd.DataFrame({"instrument": ["000001.SZ", "600519.SH"], "shares": [1000, 300]})
         fills = pd.DataFrame(
             [
-                {"instrument": "000001.SZ", "side": "BUY", "executed_shares": 200, "fill_status": " filled "},
-                {"instrument": "600519.SH", "side": "SELL", "executed_shares": 100, "fill_status": " partial "},
-                {"instrument": "000002.SZ", "side": "BUY", "executed_shares": 500, "fill_status": "CANCELLED"},
+                {
+                    "instrument": "000001.SZ",
+                    "side": "BUY",
+                    "planned_order_shares": 200,
+                    "executed_shares": 200,
+                    "fill_status": " filled ",
+                },
+                {
+                    "instrument": "600519.SH",
+                    "side": "SELL",
+                    "planned_order_shares": -100,
+                    "executed_shares": 100,
+                    "fill_status": " partial ",
+                },
+                {
+                    "instrument": "000002.SZ",
+                    "side": "BUY",
+                    "planned_order_shares": 500,
+                    "executed_shares": 500,
+                    "fill_status": "CANCELLED",
+                },
             ]
         )
 
@@ -476,6 +494,19 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertIn("fill_would_make_negative_position:000001.SZ", issues)
         self.assertIn("executed_shares_missing:600519.SH", issues)
         self.assertIn("pending_fill_status:000002.SZ", issues)
+        with self.assertRaises(ValueError):
+            apply_fill_feedback(current, fills)
+
+    def test_validate_fill_feedback_requires_status_side_and_planned_shares(self) -> None:
+        current = pd.DataFrame({"instrument": ["000001.SZ"], "shares": [100]})
+        fills = pd.DataFrame({"instrument": ["000001.SZ"], "executed_shares": [100]})
+
+        issues = validate_fill_feedback(current, fills)
+
+        self.assertEqual(
+            issues,
+            ["fill_feedback_missing_columns:side,planned_order_shares,fill_status"],
+        )
         with self.assertRaises(ValueError):
             apply_fill_feedback(current, fills)
 

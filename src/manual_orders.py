@@ -332,19 +332,14 @@ def validate_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.Dat
     if fill_feedback.empty:
         return []
     issues: list[str] = []
-    required_columns = ["instrument", "executed_shares"]
+    required_columns = ["instrument", "side", "planned_order_shares", "fill_status", "executed_shares"]
     missing_columns = [column for column in required_columns if column not in fill_feedback.columns]
     if missing_columns:
         return ["fill_feedback_missing_columns:" + ",".join(missing_columns)]
 
     fills = fill_feedback.copy()
     current_map = {instrument: float(shares or 0.0) for instrument, shares in _current_share_map(current_holdings).items()}
-    has_status_column = "fill_status" in fills.columns
-    status = (
-        fills["fill_status"].fillna("").astype(str).str.strip().str.upper()
-        if has_status_column
-        else pd.Series("FILLED", index=fills.index)
-    )
+    status = fills["fill_status"].fillna("").astype(str).str.strip().str.upper()
     allowed_statuses = {"FILLED", "PARTIAL", "CANCELLED", "SKIPPED", "PENDING"}
     applied_statuses = {"FILLED", "PARTIAL"}
     for idx, row in fills.iterrows():

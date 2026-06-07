@@ -27,7 +27,7 @@ class RunApplyFillsTests(unittest.TestCase):
                         "side": "BUY",
                         "planned_order_shares": 200,
                         "executed_shares": 200,
-                        "fill_status": "FILLED",
+                        "fill_status": " filled ",
                     },
                     {
                         "signal_date": "2024-01-03",
