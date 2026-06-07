@@ -205,6 +205,7 @@ class RunAutoSignalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config, factors = _auto_config_and_factors(root)
+            config["ic"].update({"horizon": 3, "method": "pearson", "min_obs": 4})
             config["quality"] = {
                 "min_validation_windows": 3,
                 "min_positive_return_rate": 0.5,
@@ -246,13 +247,17 @@ class RunAutoSignalTests(unittest.TestCase):
                 config,
                 factors,
                 ["run_auto_signal.py", "--skip-update", "--skip-convert", "--no-archive"],
-            ), patch.object(module, "run_walk_forward_grid_validation", return_value=validation), patch.object(
+            ), patch.object(module, "run_walk_forward_grid_validation", return_value=validation) as validate, patch.object(
                 module,
                 "run_backtest",
                 return_value=bad_result,
             ):
                 module.main()
 
+            kwargs = validate.call_args.kwargs
+            self.assertEqual(kwargs["ic_horizon"], 3)
+            self.assertEqual(kwargs["ic_method"], "pearson")
+            self.assertEqual(kwargs["ic_min_obs"], 4)
             self.assertTrue((root / "candidate_signal_2024-01-03.csv").exists())
             self.assertFalse((root / "signal_2024-01-03.csv").exists())
             self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")

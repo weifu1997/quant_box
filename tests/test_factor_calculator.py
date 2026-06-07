@@ -86,6 +86,35 @@ class FactorCalculatorTests(unittest.TestCase):
         compute.assert_not_called()
         self.assertEqual(len(factors), len(cached))
 
+    def test_load_or_compute_factors_recomputes_when_requested_columns_are_missing(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+            index = pd.MultiIndex.from_product([dates, ["A", "B"]], names=["datetime", "instrument"])
+            pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0]}, index=index).to_parquet(cache_path)
+            prices = pd.concat(
+                {
+                    "close": pd.DataFrame({"A": [10.0, 10.1], "B": [20.0, 20.1]}, index=dates),
+                },
+                axis=1,
+            )
+            prices.to_parquet(price_path)
+            recomputed = pd.DataFrame(
+                {"F1": [1.0, 2.0, 3.0, 4.0], "F2": [5.0, 6.0, 7.0, 8.0]},
+                index=index,
+            )
+            config = {"factors": {"cache_file": str(cache_path)}, "ic": {"price_file": str(price_path)}}
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=recomputed) as compute:
+                factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path, columns=["F1", "F2"])
+
+        compute.assert_called_once()
+        self.assertEqual(factors.columns.tolist(), ["F1", "F2"])
+
     def test_load_or_compute_factors_reuses_cache_when_request_starts_before_first_trading_day(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

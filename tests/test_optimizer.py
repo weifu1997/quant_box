@@ -114,6 +114,49 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(captured[0]["strategy"]["factor_group"], "dynamic_ic_selector")
         self.assertTrue(captured[0]["liquidity_filter"]["enabled"])
 
+    def test_grid_validation_passes_configured_ic_label_params(self) -> None:
+        factors, prices = _walk_forward_data()
+        grid = {
+            "factor_group": ["ic_weighted"],
+            "top_n": [1],
+            "max_turnover": [1],
+            "rank_buffer": [0],
+            "rebalance_freq": ["monthly"],
+        }
+        rolling_ic = pd.DataFrame({"ROC5": [0.1]}, index=[pd.Timestamp("2023-12-29")])
+        rolling_ic.attrs["daily_ic"] = rolling_ic
+        rolling_ic.attrs["window"] = 2
+        rolling_ic.attrs["min_periods"] = 1
+        rolling_ic.attrs["horizon"] = 3
+
+        with patch("src.optimizer.calculate_rolling_ic", return_value=rolling_ic) as calc_rolling, patch(
+            "src.optimizer.make_rolling_ic_weights",
+            return_value={pd.Timestamp("2023-12-29"): pd.Series({"ROC5": 1.0})},
+        ):
+            result = run_walk_forward_grid_validation(
+                factors,
+                prices,
+                base_config=_base_backtest_config(),
+                start_date="2023-01-02",
+                end_date="2024-02-15",
+                grid=grid,
+                train_years=1,
+                test_months=1,
+                step_months=12,
+                use_rolling_ic=True,
+                ic_horizon=3,
+                ic_method="pearson",
+                ic_min_obs=4,
+                ic_window=2,
+                ic_min_periods=1,
+            )
+
+        self.assertFalse(result.empty)
+        kwargs = calc_rolling.call_args.kwargs
+        self.assertEqual(kwargs["horizon"], 3)
+        self.assertEqual(kwargs["method"], "pearson")
+        self.assertEqual(kwargs["min_obs"], 4)
+
 
 def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     dates = pd.date_range("2023-01-02", periods=300, freq="B")

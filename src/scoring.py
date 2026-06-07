@@ -387,8 +387,11 @@ def _load_or_compute_dynamic_weights(factors: pd.DataFrame, prices: pd.DataFrame
     rolling_ic = calculate_rolling_ic(
         factors,
         prices,
+        horizon=int(ic_cfg.get("horizon", 1)),
+        method=str(ic_cfg.get("method", "spearman")),
         window=int(ic_cfg.get("window", 252)),
         min_periods=int(ic_cfg.get("min_periods", 60)),
+        min_obs=int(ic_cfg.get("min_obs", 20)),
     )
     dynamic_weights = make_rolling_ic_weights(
         rolling_ic,
@@ -405,12 +408,19 @@ def _load_or_compute_dynamic_weights(factors: pd.DataFrame, prices: pd.DataFrame
 
 
 def _latest_ic_weights(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dict, target_date: pd.Timestamp) -> pd.Series:
+    horizon = max(1, int(ic_cfg.get("horizon", 1)))
     window = int(ic_cfg.get("window", 252))
     min_periods = int(ic_cfg.get("min_periods", 60))
-    lookback_sessions = int(ic_cfg.get("latest_weight_lookback_sessions", max(window + min_periods + 5, window + 5)))
+    lookback_sessions = int(ic_cfg.get("latest_weight_lookback_sessions", max(window + min_periods + horizon + 5, window + horizon + 5)))
     factor_history = _slice_recent_factor_history(factors, target_date, lookback_sessions)
     price_history = _slice_price_history(prices, target_date, lookback_sessions)
-    ic_df = calculate_factor_ic(factor_history, price_history, min_obs=int(ic_cfg.get("min_obs", 20)))
+    ic_df = calculate_factor_ic(
+        factor_history,
+        price_history,
+        horizon=horizon,
+        method=str(ic_cfg.get("method", "spearman")),
+        min_obs=int(ic_cfg.get("min_obs", 20)),
+    )
     if len(ic_df) < min_periods:
         return pd.Series(dtype=float)
     ic_df = ic_df.tail(window)
@@ -528,6 +538,9 @@ def _slice_price_history(prices: pd.DataFrame, target_date: pd.Timestamp, sessio
 def _weights_cache_meta(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dict) -> dict[str, object]:
     return {
         "params": {
+            "horizon": int(ic_cfg.get("horizon", 1)),
+            "method": str(ic_cfg.get("method", "spearman")),
+            "min_obs": int(ic_cfg.get("min_obs", 20)),
             "window": int(ic_cfg.get("window", 252)),
             "min_periods": int(ic_cfg.get("min_periods", 60)),
             "top_k": int(ic_cfg.get("top_k", 30)),

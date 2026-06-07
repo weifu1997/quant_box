@@ -27,6 +27,26 @@ class BacktestTests(unittest.TestCase):
 
         self.assertEqual(metrics["turnover_count"], 3.0)
 
+    def test_run_backtest_accepts_string_score_dates(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        stock = "000001.SZ"
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([("2024-01-02", stock)], names=["datetime", "instrument"]),
+            name="score",
+        )
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(scores, prices, "2024-01-02", "2024-01-03", {"initial_capital": 100000, "top_n": 1})
+
+        self.assertTrue((result.trades["side"] == "BUY").any())
+
     def test_calculate_metrics_sortino_uses_downside_deviation_over_all_returns(self) -> None:
         equity = pd.Series(
             [100.0, 110.0, 104.5, 104.5],

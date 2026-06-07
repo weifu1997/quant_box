@@ -283,6 +283,9 @@ class ScoringTests(unittest.TestCase):
         config = {
             "strategy": {"factor_group": "ic_weighted"},
             "ic": {
+                "horizon": 5,
+                "method": "pearson",
+                "min_obs": 7,
                 "top_k": 1,
                 "min_abs_ic": 0.0,
                 "min_periods": 1,
@@ -292,12 +295,16 @@ class ScoringTests(unittest.TestCase):
             },
         }
 
-        with patch("src.scoring.calculate_rolling_ic", return_value=pd.DataFrame()), patch(
+        with patch("src.scoring.calculate_rolling_ic", return_value=pd.DataFrame()) as rolling_ic, patch(
             "src.scoring.make_rolling_ic_weights",
             return_value={pd.Timestamp("2024-01-02"): pd.Series({"F1": 1.0})},
         ) as make_weights:
             build_strategy_scores(factors, config, price_df=prices)
 
+        rolling_kwargs = rolling_ic.call_args.kwargs
+        self.assertEqual(rolling_kwargs["horizon"], 5)
+        self.assertEqual(rolling_kwargs["method"], "pearson")
+        self.assertEqual(rolling_kwargs["min_obs"], 7)
         kwargs = make_weights.call_args.kwargs
         self.assertEqual(kwargs["weight_smoothing"], 0.6)
         self.assertEqual(kwargs["max_weight_turnover"], 0.5)
@@ -426,6 +433,43 @@ class ScoringTests(unittest.TestCase):
 
         self.assertEqual(make_weights.call_count, 2)
 
+    def test_build_strategy_scores_invalidates_weight_cache_when_ic_label_config_changes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cache_path = tmp_path / "weights.pkl"
+            index = pd.MultiIndex.from_product(
+                [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+                names=["datetime", "instrument"],
+            )
+            factors = pd.DataFrame({"F1": range(5)}, index=index)
+            prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+            base_config = {
+                "strategy": {"factor_group": "ic_weighted"},
+                "ic": {
+                    "weights_cache_file": str(cache_path),
+                    "horizon": 1,
+                    "method": "spearman",
+                    "min_obs": 20,
+                    "top_k": 1,
+                    "min_abs_ic": 0.0,
+                    "min_periods": 1,
+                    "corr_threshold": 0.7,
+                },
+            }
+            changed_config = {
+                **base_config,
+                "ic": {**base_config["ic"], "horizon": 2, "method": "pearson", "min_obs": 5},
+            }
+
+            with patch("src.scoring.calculate_rolling_ic", return_value=pd.DataFrame()), patch(
+                "src.scoring.make_rolling_ic_weights",
+                return_value={pd.Timestamp("2024-01-02"): pd.Series({"F1": 1.0})},
+            ) as make_weights:
+                build_strategy_scores(factors, base_config, price_df=prices)
+                build_strategy_scores(factors, changed_config, price_df=prices)
+
+        self.assertEqual(make_weights.call_count, 2)
+
     def test_build_strategy_scores_invalidates_weight_cache_when_factor_values_change(self) -> None:
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -495,6 +539,50 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(set(scores.index.get_level_values(0)), {pd.Timestamp("2024-01-04")})
         self.assertEqual(scores.name, "score")
         rolling_ic.assert_not_called()
+
+    def test_build_latest_strategy_scores_passes_ic_config_to_factor_ic(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+        index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {
+                "F1": list(range(20)),
+                "F2": list(range(20, 0, -1)),
+            },
+            index=index,
+        )
+        prices = pd.DataFrame(
+            {
+                "A": [10.0, 10.1, 10.2, 10.3],
+                "B": [10.0, 10.2, 10.3, 10.5],
+                "C": [10.0, 10.3, 10.4, 10.6],
+                "D": [10.0, 10.4, 10.5, 10.8],
+                "E": [10.0, 10.5, 10.7, 11.0],
+            },
+            index=dates,
+        )
+        config = {
+            "strategy": {"factor_group": "ic_weighted"},
+            "ic": {
+                "horizon": 3,
+                "method": "pearson",
+                "min_obs": 2,
+                "top_k": 1,
+                "min_abs_ic": 0.0,
+                "min_periods": 1,
+                "window": 2,
+                "latest_weight_lookback_sessions": 4,
+            },
+        }
+        ic_frame = pd.DataFrame({"F1": [0.10, 0.20], "F2": [0.01, 0.02]}, index=dates[:2])
+
+        with patch("src.scoring.calculate_factor_ic", return_value=ic_frame) as factor_ic:
+            scores = build_latest_strategy_scores(factors, config, signal_date="2024-01-05", price_df=prices)
+
+        kwargs = factor_ic.call_args.kwargs
+        self.assertEqual(kwargs["horizon"], 3)
+        self.assertEqual(kwargs["method"], "pearson")
+        self.assertEqual(kwargs["min_obs"], 2)
+        self.assertEqual(set(scores.index.get_level_values(0)), {pd.Timestamp("2024-01-05")})
 
 
 if __name__ == "__main__":

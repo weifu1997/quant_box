@@ -87,7 +87,7 @@ def load_or_compute_factors(
     path = resolve_path(cache_file or config["factors"]["cache_file"])
     if path.exists() and not force:
         cached = _read_factor_cache(path, columns=columns)
-        if _factor_cache_matches_request(cached, start_date, end, config, cache_file=path):
+        if _factor_cache_matches_request(cached, start_date, end, config, cache_file=path, columns=columns):
             return _slice_factor_cache(cached, start_date, end)
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,9 +141,15 @@ def _factor_cache_matches_request(
     end_date: str,
     config: dict,
     cache_file: str | Path | None = None,
+    columns: list[str] | None = None,
 ) -> bool:
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         return False
+    if columns is not None:
+        requested_columns = {str(column) for column in columns}
+        cached_columns = {str(column) for column in factors.columns}
+        if not requested_columns.issubset(cached_columns):
+            return False
 
     if not _factor_cache_meta_matches(config, start_date, end_date, cache_file=cache_file):
         return False

@@ -531,7 +531,14 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
             raise ValueError("score_panel DataFrame must have a 'score' column or exactly one column.")
     if not isinstance(score_panel.index, pd.MultiIndex):
         raise ValueError("score_panel must use MultiIndex: date/instrument.")
-    return score_panel.sort_index()
+    normalized_index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(score_panel.index.get_level_values(0)).normalize(),
+            score_panel.index.get_level_values(1).astype(str),
+        ],
+        names=["datetime", "instrument"],
+    )
+    return pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=normalized_index, name=score_panel.name).sort_index()
 
 
 def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:

@@ -116,7 +116,7 @@ def build_ml_scores(
             diagnostic_rows.append(_skipped_row(signal_date, "insufficient_label_history"))
             continue
 
-        train_start_date = signal_date - pd.DateOffset(years=int(train_years))
+        train_start_date = _training_start_date(signal_date, train_years)
         train_end_date = pd.Timestamp(price_dates[train_end_pos]).normalize()
         max_label_end = pd.Timestamp(price_dates[train_end_pos + horizon]).normalize()
         train_start_pos = np.searchsorted(factor_date_values, train_start_date.to_datetime64(), side="left")
@@ -365,6 +365,16 @@ def _resolve_signal_dates(
     else:
         raise ValueError(f"Unsupported ml_strategy rebalance_freq: {frequency}")
     return [pd.Timestamp(date).normalize() for date in signals]
+
+
+def _training_start_date(signal_date: pd.Timestamp, train_years: float) -> pd.Timestamp:
+    years = max(float(train_years), 0.0)
+    whole_years = int(np.floor(years))
+    fractional_years = years - whole_years
+    start = pd.Timestamp(signal_date).normalize() - pd.DateOffset(years=whole_years)
+    if fractional_years > 0:
+        start -= pd.Timedelta(days=max(1, int(round(fractional_years * 365.25))))
+    return pd.Timestamp(start).normalize()
 
 
 def _prepare_training_matrix(

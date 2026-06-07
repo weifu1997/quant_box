@@ -57,6 +57,9 @@ def run_parameter_grid(
     grid: dict[str, Iterable] | None = None,
     ic_weights: pd.Series | None = None,
     use_rolling_ic: bool = False,
+    ic_horizon: int = 1,
+    ic_method: str = "spearman",
+    ic_min_obs: int = 20,
     ic_window: int = 252,
     ic_min_periods: int = 60,
     ic_min_abs: float = 0.02,
@@ -78,7 +81,15 @@ def run_parameter_grid(
     grid = grid or DEFAULT_GRID
     dynamic_weights = None
     if "ic_weighted" in set(grid.get("factor_group", [])) and use_rolling_ic:
-        rolling_ic = calculate_rolling_ic(factor_df, price_df, window=ic_window, min_periods=ic_min_periods)
+        rolling_ic = calculate_rolling_ic(
+            factor_df,
+            price_df,
+            horizon=ic_horizon,
+            method=ic_method,
+            window=ic_window,
+            min_periods=ic_min_periods,
+            min_obs=ic_min_obs,
+        )
         dynamic_weights = make_rolling_ic_weights(
             rolling_ic,
             top_k=ic_top_k,
@@ -89,7 +100,7 @@ def run_parameter_grid(
             max_weight_turnover=ic_max_weight_turnover,
         )
     elif "ic_weighted" in set(grid.get("factor_group", [])) and ic_weights is None:
-        ic_df = calculate_factor_ic(factor_df, price_df)
+        ic_df = calculate_factor_ic(factor_df, price_df, horizon=ic_horizon, method=ic_method, min_obs=ic_min_obs)
         ic_weights = make_ic_weights(summarize_ic(ic_df), top_k=ic_top_k, min_abs_ic=ic_min_abs)
 
     score_cache: dict[tuple[str, str], pd.Series] = {}
@@ -153,6 +164,9 @@ def run_walk_forward_optimization(
     test_months: int = 12,
     step_months: int = 6,
     use_rolling_ic: bool = True,
+    ic_horizon: int = 1,
+    ic_method: str = "spearman",
+    ic_min_obs: int = 20,
     ic_window: int = 252,
     ic_min_periods: int = 60,
     ic_min_abs: float = 0.02,
@@ -200,6 +214,9 @@ def run_walk_forward_optimization(
             end_date=train_end.strftime("%Y-%m-%d"),
             grid=grid,
             use_rolling_ic=use_rolling_ic,
+            ic_horizon=ic_horizon,
+            ic_method=ic_method,
+            ic_min_obs=ic_min_obs,
             ic_window=ic_window,
             ic_min_periods=ic_min_periods,
             ic_min_abs=ic_min_abs,
@@ -227,7 +244,15 @@ def run_walk_forward_optimization(
         dynamic_weights = None
         if factor_group == "ic_weighted":
             if use_rolling_ic:
-                rolling_ic = calculate_rolling_ic(train_factors, train_prices, window=ic_window, min_periods=ic_min_periods)
+                rolling_ic = calculate_rolling_ic(
+                    train_factors,
+                    train_prices,
+                    horizon=ic_horizon,
+                    method=ic_method,
+                    window=ic_window,
+                    min_periods=ic_min_periods,
+                    min_obs=ic_min_obs,
+                )
                 train_dynamic_weights = make_rolling_ic_weights(
                     rolling_ic,
                     top_k=ic_top_k,
@@ -241,7 +266,7 @@ def run_walk_forward_optimization(
                 dynamic_weights = {pd.Timestamp(date).normalize(): last_weights for date in pd.to_datetime(test_factors.index.get_level_values(0).unique())}
                 score_source = test_factors
             else:
-                ic_df = calculate_factor_ic(train_factors, train_prices)
+                ic_df = calculate_factor_ic(train_factors, train_prices, horizon=ic_horizon, method=ic_method, min_obs=ic_min_obs)
                 weights = make_ic_weights(summarize_ic(ic_df), top_k=ic_top_k, min_abs_ic=ic_min_abs)
                 score_source = test_factors
         else:
@@ -299,6 +324,9 @@ def run_walk_forward_grid_validation(
     test_months: int = 12,
     step_months: int = 6,
     use_rolling_ic: bool = True,
+    ic_horizon: int = 1,
+    ic_method: str = "spearman",
+    ic_min_obs: int = 20,
     ic_window: int = 252,
     ic_min_periods: int = 60,
     ic_min_abs: float = 0.02,
@@ -349,7 +377,15 @@ def run_walk_forward_grid_validation(
         if "ic_weighted" in set(grid.get("factor_group", [])):
             logger.info("Preparing IC weights for validation window %s to %s.", test_start.date(), test_end.date())
             if use_rolling_ic:
-                rolling_ic = calculate_rolling_ic(train_factors, train_prices, window=ic_window, min_periods=ic_min_periods)
+                rolling_ic = calculate_rolling_ic(
+                    train_factors,
+                    train_prices,
+                    horizon=ic_horizon,
+                    method=ic_method,
+                    window=ic_window,
+                    min_periods=ic_min_periods,
+                    min_obs=ic_min_obs,
+                )
                 train_dynamic_weights = make_rolling_ic_weights(
                     rolling_ic,
                     top_k=ic_top_k,
@@ -365,7 +401,7 @@ def run_walk_forward_grid_validation(
                     for date in pd.to_datetime(test_factors.index.get_level_values(0).unique())
                 }
             else:
-                ic_df = calculate_factor_ic(train_factors, train_prices)
+                ic_df = calculate_factor_ic(train_factors, train_prices, horizon=ic_horizon, method=ic_method, min_obs=ic_min_obs)
                 static_ic_weights = make_ic_weights(summarize_ic(ic_df), top_k=ic_top_k, min_abs_ic=ic_min_abs)
 
         score_cache: dict[tuple[str, str], pd.Series] = {}
