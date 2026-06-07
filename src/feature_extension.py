@@ -54,7 +54,7 @@ def append_daily_basic_features(
         return factors, {"enabled": True, "features_added": 0, "dates_matched": 0}
 
     factor_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
-    factor_symbols = factors.index.get_level_values(1).astype(str).str.upper()
+    factor_symbols = pd.Index([_normalize_instrument(value) for value in factors.index.get_level_values(1)])
     lookup_dates = factor_dates - pd.Timedelta(days=lag_days)
     aligned = _align_daily_basic_asof(basics, lookup_dates, factor_symbols, factors.index)
     aligned.index = factors.index
@@ -98,7 +98,7 @@ def append_price_derived_features(
         feature_frame = feature_frame.groupby(level=1, group_keys=False).shift(lag_sessions)
 
     factor_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
-    factor_symbols = factors.index.get_level_values(1).astype(str).str.upper()
+    factor_symbols = pd.Index([_normalize_instrument(value) for value in factors.index.get_level_values(1)])
     lookup_index = pd.MultiIndex.from_arrays([factor_dates, factor_symbols], names=["datetime", "instrument"])
     aligned = feature_frame.reindex(lookup_index)
     aligned.index = factors.index
@@ -130,7 +130,7 @@ def _normalize_daily_basic(daily_basic: pd.DataFrame, fields: list[str]) -> pd.D
         index = pd.MultiIndex.from_arrays(
             [
                 pd.to_datetime(frame.index.get_level_values(date_level)).normalize(),
-                frame.index.get_level_values(symbol_level).astype(str).str.upper(),
+                [_normalize_instrument(value) for value in frame.index.get_level_values(symbol_level)],
             ],
             names=["datetime", "instrument"],
         )
@@ -140,11 +140,13 @@ def _normalize_daily_basic(daily_basic: pd.DataFrame, fields: list[str]) -> pd.D
             return pd.DataFrame()
         frame = frame.copy()
         frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce").dt.normalize()
-        frame["ts_code"] = frame["ts_code"].astype(str).str.upper()
+        frame["ts_code"] = [_normalize_instrument(value) for value in frame["ts_code"]]
         frame = frame.dropna(subset=["trade_date", "ts_code"])
+        frame = frame[frame["ts_code"] != ""]
         frame = frame.set_index(["trade_date", "ts_code"])
         frame.index = frame.index.set_names(["datetime", "instrument"])
 
+    frame = frame[frame.index.get_level_values("instrument") != ""]
     selected = [field for field in fields if field in frame.columns]
     if not selected:
         return pd.DataFrame()
@@ -164,7 +166,7 @@ def _align_daily_basic_asof(
     requests = pd.DataFrame(
         {
             "lookup_date": pd.DatetimeIndex(pd.to_datetime(lookup_dates).normalize()),
-            "instrument": pd.Index(factor_symbols).astype(str).str.upper(),
+            "instrument": [_normalize_instrument(value) for value in factor_symbols],
         },
         index=pd.RangeIndex(len(factor_index)),
     )
@@ -230,7 +232,7 @@ def _price_feature_frame(prices: pd.DataFrame, fields: list[str]) -> pd.DataFram
     for name, panel in panels.items():
         normalized = panel.copy()
         normalized.index = pd.to_datetime(normalized.index).normalize()
-        normalized.columns = normalized.columns.astype(str).str.upper()
+        normalized.columns = [_normalize_instrument(value) for value in normalized.columns]
         stacked = normalized.stack(future_stack=True).rename(name)
         stacked_parts.append(stacked)
     result = pd.concat(stacked_parts, axis=1).replace([np.inf, -np.inf], np.nan)
