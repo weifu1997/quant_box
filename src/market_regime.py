@@ -286,16 +286,18 @@ def _load_benchmark_file(path_value: str | Path) -> pd.Series:
         frame = pd.read_csv(path)
     else:
         frame = pd.read_parquet(path)
+    lower_columns = {} if isinstance(frame, pd.Series) else {str(column).strip().lower(): column for column in frame.columns}
     if isinstance(frame, pd.Series):
         series = frame
-    elif "close" in frame.columns:
-        series = frame["close"]
+    elif "close" in lower_columns:
+        series = frame[lower_columns["close"]]
     else:
         series = frame.iloc[:, -1]
-    if not isinstance(series.index, pd.DatetimeIndex) and "date" in frame.columns:
-        series.index = pd.to_datetime(frame["date"])
-    elif not isinstance(series.index, pd.DatetimeIndex) and "trade_date" in frame.columns:
-        series.index = pd.to_datetime(frame["trade_date"])
+    if not isinstance(series.index, pd.DatetimeIndex) and lower_columns:
+        if "date" in lower_columns:
+            series.index = pd.to_datetime(frame[lower_columns["date"]])
+        elif "trade_date" in lower_columns:
+            series.index = pd.to_datetime(frame[lower_columns["trade_date"]])
     return pd.to_numeric(series, errors="coerce").dropna().rename("benchmark_close")
 
 
@@ -303,14 +305,15 @@ def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
     if price_df.empty:
         return pd.DataFrame()
     if isinstance(price_df.columns, pd.MultiIndex):
-        fields = price_df.columns.get_level_values(0).astype(str).str.lower()
+        fields = price_df.columns.get_level_values(0).astype(str).str.strip().str.lower()
         if "close" not in set(fields):
             return pd.DataFrame(index=price_df.index)
         close = price_df.loc[:, fields == "close"].copy()
         close.columns = close.columns.get_level_values(-1).astype(str)
         return close
-    if "close" in price_df.columns:
-        return price_df[["close"]]
+    lower_columns = {str(column).strip().lower(): column for column in price_df.columns}
+    if "close" in lower_columns:
+        return price_df[[lower_columns["close"]]]
     return price_df
 
 

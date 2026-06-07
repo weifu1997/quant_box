@@ -42,6 +42,34 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(regimes.iloc[0], REGIME_SIDEWAYS)
         self.assertIn(REGIME_BULL, set(regimes))
 
+    def test_detect_market_regime_normalizes_benchmark_file_columns(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=6)
+        with TemporaryDirectory() as tmp:
+            benchmark_file = Path(tmp) / "benchmark.csv"
+            pd.DataFrame(
+                {
+                    " date ": dates.strftime("%Y-%m-%d"),
+                    " close ": [10.0, 10.2, 10.5, 10.8, 11.1, 11.4],
+                }
+            ).to_csv(benchmark_file, index=False)
+            config = {
+                "market_regime": {
+                    "enabled": True,
+                    "benchmark_file": str(benchmark_file),
+                    "ma_window": 2,
+                    "momentum_window": 1,
+                    "volatility_window": 2,
+                    "min_periods": 1,
+                    "high_volatility_threshold": 10.0,
+                    "lag_days": 0,
+                }
+            }
+
+            regimes = detect_market_regime(pd.DataFrame(), config)
+
+        self.assertFalse(regimes.empty)
+        self.assertIn(REGIME_BULL, set(regimes))
+
     def test_reporting_regime_uses_objective_unlagged_labels(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=12)
         close = pd.DataFrame({"A": [10, 10.2, 10.4, 10.7, 11.0, 11.2, 11.5, 11.8, 12.1, 12.3, 12.6, 12.9]}, index=dates)
@@ -137,7 +165,7 @@ class MarketRegimeTests(unittest.TestCase):
             },
             index=dates,
         )
-        prices = pd.concat({"close": close}, axis=1)
+        prices = pd.concat({" close ": close}, axis=1)
         with TemporaryDirectory() as tmp:
             constituents = Path(tmp) / "hs300_constituents.csv"
             pd.DataFrame({"con_code": ["000001.SZ"], "trade_date": ["2024-01-02"]}).to_csv(constituents, index=False)
