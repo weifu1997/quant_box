@@ -70,12 +70,13 @@ def selection_risk_eligible_instruments(
     if instrument_index.empty:
         return set()
 
-    missing_count = _missing_required_price_counts(normalized_prices, instrument_index, lookback_dates, required_fields)
-    if require_positive_volume:
-        missing_count = missing_count.add(
-            _missing_volume_counts(normalized_prices, instrument_index, lookback_dates),
-            fill_value=0,
-        )
+    missing_count = _missing_price_session_counts(
+        normalized_prices,
+        instrument_index,
+        lookback_dates,
+        required_fields,
+        require_positive_volume=require_positive_volume,
+    )
     eligible_mask = missing_count <= max_missing
     if max_limit_down_days is not None:
         limit_down_count = _recent_limit_down_day_counts(normalized_prices, instrument_index, lookback_dates, config or {}, cfg)
@@ -88,29 +89,32 @@ def _selection_risk_config(config: dict[str, Any]) -> dict[str, Any]:
     return cfg if isinstance(cfg, dict) else {}
 
 
-def _missing_required_price_counts(
+def _missing_price_session_counts(
     prices: pd.DataFrame,
     instruments: pd.Index,
     lookback_dates: pd.DatetimeIndex,
     required_fields: list[str],
+    require_positive_volume: bool,
 ) -> pd.Series:
-    missing = pd.Series(0, index=instruments, dtype="int64")
+    missing_sessions = pd.DataFrame(False, index=lookback_dates, columns=instruments)
     for field in required_fields:
-        frame = _price_field(prices, field)
-        if frame.empty:
-            missing += len(lookback_dates)
-            continue
-        values = _numeric_frame(frame.reindex(lookback_dates).reindex(columns=instruments))
-        missing += (values.isna() | (values <= 0)).sum(axis=0).astype("int64")
-    return missing
+        missing_sessions |= _missing_field_sessions(prices, field, instruments, lookback_dates)
+    if require_positive_volume:
+        missing_sessions |= _missing_field_sessions(prices, "volume", instruments, lookback_dates)
+    return missing_sessions.sum(axis=0).astype("int64")
 
 
-def _missing_volume_counts(prices: pd.DataFrame, instruments: pd.Index, lookback_dates: pd.DatetimeIndex) -> pd.Series:
-    volume = _price_field(prices, "volume")
-    if volume.empty:
-        return pd.Series(len(lookback_dates), index=instruments, dtype="int64")
-    values = _numeric_frame(volume.reindex(lookback_dates).reindex(columns=instruments))
-    return (values.isna() | (values <= 0)).sum(axis=0).astype("int64")
+def _missing_field_sessions(
+    prices: pd.DataFrame,
+    field: str,
+    instruments: pd.Index,
+    lookback_dates: pd.DatetimeIndex,
+) -> pd.DataFrame:
+    frame = _price_field(prices, field)
+    if frame.empty:
+        return pd.DataFrame(True, index=lookback_dates, columns=instruments)
+    values = _numeric_frame(frame.reindex(lookback_dates).reindex(columns=instruments))
+    return values.isna() | (values <= 0)
 
 
 def _recent_limit_down_day_counts(

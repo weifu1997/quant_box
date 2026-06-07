@@ -88,6 +88,28 @@ class SelectionRiskTests(unittest.TestCase):
 
         self.assertEqual(float(filtered.loc[stock]), 1.0)
 
+    def test_missing_price_allowance_counts_sessions_not_fields(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        prices = pd.concat(
+            {
+                "open": pd.DataFrame({"A": [10.0, None], "B": [None, None], "C": [10.0, 10.1]}, index=dates),
+                "close": pd.DataFrame({"A": [10.0, None], "B": [None, None], "C": [10.0, 10.1]}, index=dates),
+                "low": pd.DataFrame({"A": [10.0, None], "B": [None, None], "C": [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, None], "B": [None, None], "C": [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+        scores = pd.Series([3.0, 2.0, 1.0], index=["A", "B", "C"], name="score")
+        config = _config()
+        config["selection_risk_filter"]["max_missing_price_sessions"] = 1
+        config["selection_risk_filter"]["max_limit_down_days"] = None
+
+        filtered = filter_scores_by_selection_risk(scores, prices, "2024-01-03", config)
+
+        self.assertEqual(float(filtered.loc["A"]), 3.0)
+        self.assertTrue(pd.isna(filtered.loc["B"]))
+        self.assertEqual(float(filtered.loc["C"]), 1.0)
+
 
 def _config() -> dict:
     return {
