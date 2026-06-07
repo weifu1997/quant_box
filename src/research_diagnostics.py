@@ -1090,17 +1090,19 @@ def _normalize_holdings(holdings: pd.DataFrame) -> pd.DataFrame:
 def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
     if price_df.empty:
         return pd.DataFrame()
+    field = str(field).strip().lower()
     if isinstance(price_df.columns, pd.MultiIndex):
-        fields = price_df.columns.get_level_values(0).astype(str).str.lower()
-        if field.lower() not in set(fields):
+        fields = price_df.columns.get_level_values(0).astype(str).str.strip().str.lower()
+        if field not in set(fields):
             return pd.DataFrame(index=price_df.index)
-        frame = price_df.loc[:, fields == field.lower()].copy()
+        frame = price_df.loc[:, fields == field].copy()
         frame.columns = [_normalize_instrument(value) for value in frame.columns.get_level_values(-1)]
-    elif field in price_df.columns:
-        frame = price_df[[field]].copy()
+    elif field == "close":
+        frame = price_df.copy()
     else:
         return pd.DataFrame(index=price_df.index)
     frame.index = pd.to_datetime(frame.index).normalize()
+    frame.columns = [_normalize_instrument(value) for value in frame.columns]
     frame = frame.loc[:, frame.columns != ""]
     frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
     return frame.sort_index().apply(pd.to_numeric, errors="coerce")

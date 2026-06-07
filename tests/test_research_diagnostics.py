@@ -202,6 +202,39 @@ class ResearchDiagnosticsTests(unittest.TestCase):
 
         self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 1.0)
 
+    def test_research_diagnostics_accepts_plain_close_price_panel(self) -> None:
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+        equity = pd.Series([100.0, 101.0, 103.0], index=dates, name="equity")
+        prices = pd.DataFrame(
+            {
+                "000001.sz": [10.0, 11.0, 12.0],
+                "600519.sh": [100.0, 99.0, 101.0],
+            },
+            index=dates,
+        )
+        holdings = pd.DataFrame(
+            [
+                {"date": "2024-01-01", "instrument": "000001.SZ", "value": 100.0},
+                {"date": "2024-01-02", "instrument": "000001.SZ", "value": 100.0},
+            ]
+        )
+
+        diagnostics, tables = build_research_diagnostics(
+            equity,
+            holdings,
+            pd.DataFrame(),
+            prices,
+            {
+                "backtest": {"annual_trading_days": 252},
+                "research": {"benchmark": {"method": "equal_weight_universe"}},
+            },
+        )
+
+        self.assertNotIn("benchmark_unavailable", diagnostics["benchmark"]["issues"])
+        self.assertIn("benchmark_total_return", diagnostics["benchmark"])
+        self.assertTrue(diagnostics["holding_attribution"]["enabled"])
+        self.assertIn("holding_contributions", tables)
+
     def test_hs300_equal_weight_benchmark_deduplicates_constituent_snapshots(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
