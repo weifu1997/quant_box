@@ -33,7 +33,8 @@ def main() -> None:
     columns = factor_cache_columns(config["factors"]["cache_file"])
     if args.limit_columns:
         columns = columns[: args.limit_columns]
-    component_columns = _score_component_columns(config, factor_cache_columns(config["factors"]["cache_file"]))
+    use_direct_scores = not _requires_full_score_pipeline(config)
+    component_columns = [] if use_direct_scores else _score_component_columns(config, factor_cache_columns(config["factors"]["cache_file"]))
     top_ns = [int(value.strip()) for value in args.top_n.split(",") if value.strip()]
     liquidity_modes = [_parse_liquidity_mode(value) for value in args.liquidity_modes.split(",") if value.strip()]
     trade_price_field = str(config.get("backtest", {}).get("trade_price_field", "close")).lower()
@@ -55,18 +56,22 @@ def main() -> None:
         batch = columns[batch_start : batch_start + args.batch_size]
         read_columns = list(dict.fromkeys([*batch, *component_columns]))
         factors = _read_factor_subset(config["factors"]["cache_file"], read_columns, start_date, end_date)
+        score_factors = _slice_rebalance_factor_dates(factors, "monthly") if use_direct_scores else factors
         for column in batch:
-            score_columns = [col for col in [column, *component_columns] if col in factors.columns]
+            score_columns = [col for col in [column, *component_columns] if col in score_factors.columns]
             for direction_name, factor_group in [
                 ("long_high", f"factor:{column}"),
                 ("long_low", f"inverse_factor:{column}"),
             ]:
                 try:
-                    directional_scores = build_strategy_scores(
-                        factors[score_columns],
-                        _screen_config(config, factor_group, {"enabled": False}),
-                        price_df=prices,
-                    )
+                    if use_direct_scores:
+                        directional_scores = _single_factor_scores(score_factors, column, direction_name)
+                    else:
+                        directional_scores = build_strategy_scores(
+                            score_factors[score_columns],
+                            _screen_config(config, factor_group, {"enabled": False}),
+                            price_df=prices,
+                        )
                 except Exception as exc:
                     for liquidity_mode in liquidity_modes:
                         rows.append(_error_row(column, direction_name, liquidity_mode, str(exc)))
@@ -77,7 +82,8 @@ def main() -> None:
                     except Exception as exc:
                         rows.append(_error_row(column, direction_name, liquidity_mode, str(exc)))
                         continue
-                    scores = resample_signals(scores, "monthly")
+                    if not use_direct_scores:
+                        scores = resample_signals(scores, "monthly")
                     prepared = prepare_fast_period_data(scores, prices, start_date, end_date, trade_price_field=trade_price_field)
                     for top_n in top_ns:
                         bt_config = {
@@ -116,6 +122,58 @@ def _screen_config(config: dict, factor_group: str, liquidity_mode: dict[str, ob
     result["strategy"] = {**config.get("strategy", {}), "factor_group": factor_group, "rebalance_freq": "monthly"}
     result["liquidity_filter"] = {**config.get("liquidity_filter", {}), **liquidity_mode}
     return result
+
+
+def _requires_full_score_pipeline(config: dict) -> bool:
+    return bool(
+        config.get("ml_strategy", {}).get("enabled", False)
+        or config.get("regime_score_blend", {}).get("enabled", False)
+        or config.get("regime_score_filter", {}).get("enabled", False)
+    )
+
+
+def _single_factor_scores(factors: pd.DataFrame, column: str, direction_name: str) -> pd.Series:
+    if column not in factors.columns:
+        raise ValueError(f"factor column not found: {column}")
+    if not isinstance(factors.index, pd.MultiIndex):
+        raise ValueError("factor screen requires MultiIndex factors: datetime/instrument.")
+
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(0), errors="coerce"))
+    instruments = factors.index.get_level_values(1).astype(str).str.strip().str.upper()
+    values = pd.to_numeric(factors[column], errors="coerce")
+    direction = -1.0 if str(direction_name).strip().lower() == "long_low" else 1.0
+    frame = pd.DataFrame(
+        {
+            "date": raw_dates.normalize(),
+            "instrument": instruments,
+            "score": values.to_numpy(dtype=float) * direction,
+            "position": range(len(factors)),
+        }
+    )
+    frame = frame[frame["date"].notna() & (frame["instrument"] != "")]
+    if frame.empty:
+        return pd.Series(dtype=float, name="score")
+    frame = frame.sort_values(["date", "instrument", "position"], kind="mergesort")
+    frame = frame.drop_duplicates(["date", "instrument"], keep="last")
+    index = pd.MultiIndex.from_arrays([frame["date"], frame["instrument"]], names=["datetime", "instrument"])
+    return pd.Series(frame["score"].to_numpy(), index=index, name="score").sort_index()
+
+
+def _slice_rebalance_factor_dates(factors: pd.DataFrame, rebalance_freq: str) -> pd.DataFrame:
+    if factors.empty or rebalance_freq == "daily":
+        return factors
+    if not isinstance(factors.index, pd.MultiIndex):
+        raise ValueError("factor screen requires MultiIndex factors: datetime/instrument.")
+    dates = pd.Index(pd.to_datetime(factors.index.get_level_values(0)).normalize().unique()).sort_values()
+    date_series = pd.Series(dates, index=dates)
+    if rebalance_freq == "weekly":
+        keep_dates = set(date_series.resample("W-FRI").last().dropna())
+    elif rebalance_freq == "monthly":
+        keep_dates = set(date_series.resample("ME").last().dropna())
+    else:
+        raise ValueError(f"Unsupported rebalance_freq: {rebalance_freq}")
+    normalized_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
+    return factors.loc[normalized_dates.isin(keep_dates)].sort_index()
 
 
 def _filter_scores(

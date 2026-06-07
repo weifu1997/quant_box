@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.run_goal_fast_factor_screen import _screen_quality_fields
+import pandas as pd
+
+from scripts.run_goal_fast_factor_screen import _screen_quality_fields, _single_factor_scores, _slice_rebalance_factor_dates
 
 
 class RunGoalFastFactorScreenTests(unittest.TestCase):
@@ -64,6 +66,36 @@ class RunGoalFastFactorScreenTests(unittest.TestCase):
         self.assertFalse(fields["yearly_annual_return_pass"])
         self.assertFalse(fields["yearly_drawdown_pass"])
         self.assertAlmostEqual(fields["target_gap"], 0.20)
+
+    def test_single_factor_scores_reverse_long_low_direction_and_deduplicate(self) -> None:
+        index = pd.MultiIndex.from_tuples(
+            [
+                (pd.Timestamp("2024-01-02 09:30"), "a"),
+                (pd.Timestamp("2024-01-02 15:00"), "a"),
+                (pd.Timestamp("2024-01-02 15:00"), "b"),
+            ],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0]}, index=index)
+
+        scores = _single_factor_scores(factors, "F1", "long_low")
+
+        daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
+        self.assertEqual(daily.index.tolist(), ["A", "B"])
+        self.assertEqual(float(daily.loc["A"]), -2.0)
+        self.assertEqual(float(daily.loc["B"]), -3.0)
+
+    def test_slice_rebalance_factor_dates_keeps_month_end_signal_dates(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-31", "2024-02-01", "2024-02-29"])
+        index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": range(len(index))}, index=index)
+
+        sliced = _slice_rebalance_factor_dates(factors, "monthly")
+
+        self.assertEqual(
+            sliced.index.get_level_values("datetime").unique().tolist(),
+            [pd.Timestamp("2024-01-31"), pd.Timestamp("2024-02-29")],
+        )
 
 
 if __name__ == "__main__":
