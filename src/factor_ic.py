@@ -26,21 +26,22 @@ def calculate_factor_ic(
     factors = factor_df.select_dtypes("number")
     factor_cols = list(factors.columns)
     date_level = factors.index.names[0] or 0
+    factor_dates = pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(date_level)).normalize())
     method_name = method.lower()
 
     rows: list[pd.Series] = []
     return_dates = set(pd.to_datetime(returns.index.get_level_values(0)).normalize())
-    for date, daily_factors in factors.groupby(level=date_level, sort=True):
-        date_key = pd.Timestamp(date).normalize()
+    for date_key in pd.DatetimeIndex(factor_dates.dropna().unique()).sort_values():
         if date_key not in return_dates:
             continue
+        daily_factors = factors[factor_dates == date_key]
         try:
             daily_returns = returns.xs(date_key, level=0, drop_level=True)
         except KeyError:
             continue
         daily = daily_factors.droplevel(date_level).copy()
-        daily.index = [_normalize_instrument(value) for value in daily.index]
-        daily_returns.index = [_normalize_instrument(value) for value in daily_returns.index]
+        daily = _normalize_instrument_frame(daily)
+        daily_returns = _normalize_instrument_series(daily_returns)
         aligned = daily.join(daily_returns, how="inner").dropna(subset=["forward_return"])
         if aligned.empty:
             continue
@@ -296,6 +297,24 @@ def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
         result = result.loc[:, ~result.columns.duplicated(keep="last")]
     result = result[~result.index.duplicated(keep="last")].sort_index()
     return result.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+
+def _normalize_instrument_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    result.index = pd.Index([_normalize_instrument(value) for value in result.index], name=frame.index.name)
+    result = result[result.index != ""]
+    if result.index.has_duplicates:
+        result = result[~result.index.duplicated(keep="last")]
+    return result
+
+
+def _normalize_instrument_series(series: pd.Series) -> pd.Series:
+    result = series.copy()
+    result.index = pd.Index([_normalize_instrument(value) for value in result.index], name=series.index.name)
+    result = result[result.index != ""]
+    if result.index.has_duplicates:
+        result = result[~result.index.duplicated(keep="last")]
+    return result
 
 
 def _normalize_instrument(value: object) -> str:

@@ -107,6 +107,56 @@ class FactorICTests(unittest.TestCase):
         self.assertEqual(ic.index.to_list(), factor_dates.to_list())
         self.assertTrue(ic["F1"].notna().all())
 
+    def test_calculate_factor_ic_deduplicates_normalized_factor_instruments(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        index = pd.MultiIndex.from_tuples(
+            [
+                (dates[0], "a"),
+                (dates[0], " A "),
+                (dates[0], "b"),
+                (dates[0], "c"),
+            ],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": [100.0, 1.0, 2.0, 3.0]}, index=index)
+        prices = pd.DataFrame(
+            {
+                "A": [10.0, 11.0],
+                "B": [10.0, 12.0],
+                "C": [10.0, 13.0],
+            },
+            index=dates,
+        )
+
+        ic = calculate_factor_ic(factors, prices, method="spearman", min_obs=3)
+
+        self.assertAlmostEqual(float(ic.loc[dates[0], "F1"]), 1.0)
+
+    def test_calculate_factor_ic_groups_factor_rows_by_normalized_date(self) -> None:
+        base_date = pd.Timestamp("2024-01-02")
+        index = pd.MultiIndex.from_tuples(
+            [
+                (pd.Timestamp("2024-01-02 09:30"), "A"),
+                (pd.Timestamp("2024-01-02 09:30"), "B"),
+                (pd.Timestamp("2024-01-02 15:00"), "C"),
+            ],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0]}, index=index)
+        prices = pd.DataFrame(
+            {
+                "A": [10.0, 11.0],
+                "B": [10.0, 12.0],
+                "C": [10.0, 13.0],
+            },
+            index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
+        )
+
+        ic = calculate_factor_ic(factors, prices, method="spearman", min_obs=3)
+
+        self.assertEqual(ic.index.to_list(), [base_date])
+        self.assertAlmostEqual(float(ic.loc[base_date, "F1"]), 1.0)
+
     def test_calculate_factor_ic_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates[:2], ["a", "b", "c"]], names=["datetime", "instrument"])
