@@ -14,6 +14,18 @@ import pandas as pd
 
 
 class RunAutoSignalTests(unittest.TestCase):
+    def test_signal_output_date_infers_latest_factor_date_for_empty_signal(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"ROC5": [1.0, 2.0]}, index=index)
+
+        output_date = module._signal_output_date(pd.DataFrame(columns=["date", "instrument", "action"]), "latest", factors=factors)
+
+        self.assertEqual(output_date, "2024-01-03")
+
     def test_skip_optimize_defaults_to_candidate_outputs(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
@@ -37,6 +49,28 @@ class RunAutoSignalTests(unittest.TestCase):
             report = (root / "daily_signal_report.md").read_text(encoding="utf-8")
             self.assertIn("## Data Governance", report)
             self.assertIn("## Execution Loop", report)
+
+    def test_empty_latest_signal_uses_factor_date_for_candidate_outputs(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            latest = root / "latest_holdings.csv"
+            latest.write_text("instrument\n", encoding="utf-8")
+            empty_signal = pd.DataFrame(columns=["date", "instrument", "action"])
+
+            with _patched_auto_run(
+                module,
+                config,
+                factors,
+                ["run_auto_signal.py", "--skip-update", "--skip-convert", "--skip-optimize", "--skip-backtest", "--no-archive"],
+            ), patch.object(module, "generate_signal", return_value=(empty_signal, [])):
+                module.main()
+
+            self.assertTrue((root / "candidate_signal_2024-01-03.csv").exists())
+            self.assertFalse((root / "candidate_signal_latest.csv").exists())
+            status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["status"], "blocked")
 
     def test_skip_optimize_uses_validated_strategy_evidence(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")

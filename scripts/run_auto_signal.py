@@ -402,7 +402,7 @@ def main() -> None:
             factors=factors,
             price_df=prices,
         )
-        output_date = _signal_output_date(signal_df, signal_date_arg)
+        output_date = _signal_output_date(signal_df, signal_date_arg, factors=factors)
         intended = next_trade_date(output_date, price_df=prices) or next_business_day(
             output_date,
             config=selected_config,
@@ -548,10 +548,32 @@ def _resolve_signal_date_arg(value: str, target_end_date: str) -> str:
     return target_end_date if str(value).strip().lower() in {"auto", "latest_trade_date", "latest_trading_day"} else value
 
 
-def _signal_output_date(signal_df: pd.DataFrame, signal_date_arg: str) -> str:
+def _signal_output_date(signal_df: pd.DataFrame, signal_date_arg: str, factors: pd.DataFrame | None = None) -> str:
     if not signal_df.empty and "date" in signal_df.columns:
         return str(signal_df["date"].iloc[0])
+    inferred = _infer_signal_output_date(signal_date_arg, factors)
+    if inferred:
+        return inferred
     return signal_date_arg
+
+
+def _infer_signal_output_date(signal_date_arg: str, factors: pd.DataFrame | None) -> str | None:
+    if factors is None or factors.empty or not isinstance(factors.index, pd.MultiIndex):
+        return None
+    date_level = factors.index.names[0] or 0
+    dates = pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(date_level)).normalize()).unique().sort_values()
+    if dates.empty:
+        return None
+    arg = str(signal_date_arg).strip().lower()
+    if arg in {"", "none", "latest"}:
+        return str(pd.Timestamp(dates.max()).date())
+    requested = pd.to_datetime(signal_date_arg, errors="coerce")
+    if pd.isna(requested):
+        return None
+    eligible = dates[dates <= pd.Timestamp(requested).normalize()]
+    if eligible.empty:
+        return None
+    return str(pd.Timestamp(eligible.max()).date())
 
 
 def _stage(status: dict[str, Any], out_dir: Path, name: str, state: str, message: str = "") -> None:
