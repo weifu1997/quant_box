@@ -168,24 +168,33 @@ def summarize_regime_performance(equity_curve: pd.Series, regimes: pd.Series, co
     annual_days = int((config or {}).get("annual_trading_days", 252))
     equity = equity_curve.sort_index().astype(float)
     equity.index = pd.to_datetime(equity.index).normalize()
-    aligned_regimes = regimes_for_dates(regimes, equity.index)
+    returns = equity.pct_change(fill_method=None).dropna()
+    if returns.empty:
+        return pd.DataFrame(columns=["regime", "start", "end", "days", "total_return", "annual_return", "max_drawdown"])
+    aligned_regimes = regimes_for_dates(regimes, returns.index)
 
     rows: list[dict[str, object]] = []
     group_id = (aligned_regimes != aligned_regimes.shift()).cumsum()
     for _group, state_series in aligned_regimes.groupby(group_id):
-        segment = equity.reindex(state_series.index).dropna()
-        if segment.empty:
+        segment_returns = pd.to_numeric(returns.reindex(state_series.index), errors="coerce").dropna()
+        if segment_returns.empty:
             continue
-        total_return = float(segment.iloc[-1] / segment.iloc[0] - 1) if segment.iloc[0] else 0.0
-        periods = max(len(segment) - 1, 1)
+        total_return = float((1.0 + segment_returns).prod() - 1.0)
+        periods = max(len(segment_returns), 1)
         annual_return = float((1 + total_return) ** (annual_days / periods) - 1) if total_return > -1 else -1.0
-        drawdown = segment / segment.cummax() - 1
+        wealth = pd.concat(
+            [
+                pd.Series([1.0], index=[segment_returns.index[0] - pd.Timedelta(nanoseconds=1)]),
+                (1.0 + segment_returns).cumprod(),
+            ]
+        )
+        drawdown = wealth / wealth.cummax() - 1
         rows.append(
             {
                 "regime": normalize_regime(str(state_series.iloc[0])),
-                "start": segment.index.min().date().isoformat(),
-                "end": segment.index.max().date().isoformat(),
-                "days": int(len(segment)),
+                "start": segment_returns.index.min().date().isoformat(),
+                "end": segment_returns.index.max().date().isoformat(),
+                "days": int(len(segment_returns)),
                 "total_return": total_return,
                 "annual_return": annual_return,
                 "max_drawdown": float(drawdown.min()),

@@ -197,6 +197,17 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(set(summary["regime"]), {REGIME_BULL, REGIME_BEAR})
         self.assertIn("worst_drawdown", summary.columns)
 
+    def test_regime_performance_includes_switch_day_return(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=2)
+        equity = pd.Series([100.0, 90.0], index=dates)
+        regimes = pd.Series([REGIME_BULL, REGIME_BEAR], index=dates)
+
+        stats = summarize_regime_performance(equity, regimes, {"annual_trading_days": 252})
+
+        bear = stats[stats["regime"] == REGIME_BEAR].iloc[0]
+        self.assertAlmostEqual(float(bear["total_return"]), -0.10)
+        self.assertAlmostEqual(float(bear["max_drawdown"]), -0.10)
+
 
 if __name__ == "__main__":
     unittest.main()
