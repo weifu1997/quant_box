@@ -31,6 +31,7 @@ DEFAULT_PRICE_FEATURES = [
     "volatility_20",
     "illiquidity_20",
 ]
+PRICE_FIELD_NAMES = {"open", "high", "low", "close", "volume", "amount", "vwap", "is_st"}
 
 
 def append_daily_basic_features(
@@ -238,20 +239,40 @@ def _price_feature_frame(prices: pd.DataFrame, fields: list[str]) -> pd.DataFram
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
+    field = str(field).strip().lower()
     if prices.empty:
         return pd.DataFrame()
     if isinstance(prices.columns, pd.MultiIndex):
-        fields = prices.columns.get_level_values(0).astype(str).str.lower()
+        fields = prices.columns.get_level_values(0).astype(str).str.strip().str.lower()
         if field not in set(fields):
             return pd.DataFrame(index=prices.index)
         frame = prices.loc[:, fields == field].copy()
-        frame.columns = frame.columns.get_level_values(-1).astype(str)
-    elif field in prices.columns:
-        frame = prices[[field]].copy()
+        frame.columns = [_normalize_instrument(value) for value in frame.columns.get_level_values(-1)]
+    elif field == "close" and not _looks_like_field_table(prices.columns):
+        frame = prices.copy()
+    elif field in {str(column).strip().lower() for column in prices.columns}:
+        columns = prices.columns.astype(str).str.strip().str.lower()
+        frame = prices.loc[:, columns == field].copy()
+        frame.columns = [_normalize_instrument(value) for value in frame.columns]
     else:
         return pd.DataFrame(index=prices.index)
     frame.index = pd.to_datetime(frame.index).normalize()
+    frame.columns = [_normalize_instrument(value) for value in frame.columns]
+    frame = frame.loc[:, frame.columns != ""]
+    if frame.columns.has_duplicates:
+        frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
     return frame.sort_index().apply(pd.to_numeric, errors="coerce")
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and "close" in labels and labels.issubset(PRICE_FIELD_NAMES)
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _feature_window(field: str, prefix: str) -> int:
