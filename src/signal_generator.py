@@ -122,11 +122,11 @@ def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
 def _normalize_score_index(scores: pd.Series) -> pd.Series:
     if scores.empty:
         return scores
-    result = scores.copy()
+    result = scores.sort_values(ascending=False, kind="mergesort", na_position="last").copy()
     result.index = pd.Index([_normalize_instrument(value) for value in result.index], name=result.index.name)
     result = result[result.index != ""]
     if result.index.has_duplicates:
-        result = result.groupby(level=0, sort=False).last()
+        result = result[~result.index.duplicated(keep="first")]
     result.attrs = dict(getattr(scores, "attrs", {}))
     return result
 
