@@ -70,6 +70,30 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(holdings, ["E"])
         self.assertEqual(signal["date"].unique().tolist(), ["2024-01-02"])
 
+    def test_empty_signal_keeps_effective_signal_date_metadata(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"ROC5": range(1, 6)}, index=index)
+        config = {
+            "data": {"start_date": "2024-01-01", "end_date": "2024-01-03"},
+            "strategy": {"factor_group": "momentum", "top_n": 0, "max_turnover": 0, "rank_buffer": 0},
+            "factors": {"cache_file": "unused.parquet"},
+            "outputs": {"holdings_file": "unused.csv"},
+        }
+
+        with patch("src.signal_generator.load_config", return_value=config), patch(
+            "src.signal_generator.load_or_compute_factors",
+            return_value=factors,
+        ):
+            signal, holdings = generate_signal("latest", previous_holdings=[])
+
+        self.assertEqual(holdings, [])
+        self.assertTrue(signal.empty)
+        self.assertEqual(signal.columns.tolist(), ["date", "instrument", "action"])
+        self.assertEqual(signal.attrs["signal_date"], "2024-01-02")
+
     def test_generate_signal_applies_max_industry_weight(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D"]],

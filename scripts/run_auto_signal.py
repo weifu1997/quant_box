@@ -551,6 +551,9 @@ def _resolve_signal_date_arg(value: str, target_end_date: str) -> str:
 def _signal_output_date(signal_df: pd.DataFrame, signal_date_arg: str, factors: pd.DataFrame | None = None) -> str:
     if not signal_df.empty and "date" in signal_df.columns:
         return str(signal_df["date"].iloc[0])
+    signal_date = getattr(signal_df, "attrs", {}).get("signal_date")
+    if signal_date:
+        return str(signal_date)
     inferred = _infer_signal_output_date(signal_date_arg, factors)
     if inferred:
         return inferred

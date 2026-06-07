@@ -83,7 +83,9 @@ def generate_signal(
         rows.append({"date": signal_date, "instrument": code, "action": "HOLD" if code in old_set else "BUY"})
     for code in sorted(old_set - new_set):
         rows.append({"date": signal_date, "instrument": code, "action": "SELL"})
-    return pd.DataFrame(rows), holdings
+    signal_df = pd.DataFrame(rows, columns=["date", "instrument", "action"])
+    signal_df.attrs["signal_date"] = signal_date
+    return signal_df, holdings
 
 
 def _load_price_frame(price_file: str | Path | None, config: dict) -> pd.DataFrame:
