@@ -1419,9 +1419,18 @@ def _normalize_exposure_schedule(schedule: object, price_dates: pd.Index) -> pd.
     if series.empty:
         return None
 
-    series.index = pd.to_datetime(series.index).normalize()
-    series = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(series.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    series = pd.to_numeric(series.loc[valid_dates], errors="coerce")
+    raw_dates = raw_dates[valid_dates]
+    if not series.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        series = series.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    series.index = raw_dates.normalize()
+    series = series.dropna()
     series = series[~series.index.duplicated(keep="last")]
+    series = series.sort_index()
     if series.empty:
         return None
 

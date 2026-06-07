@@ -267,8 +267,18 @@ def _exposure_schedule(value: object, price_dates: pd.DatetimeIndex) -> pd.Serie
     if not isinstance(value, pd.Series):
         return pd.Series(1.0, index=price_dates, dtype=float)
     exposure = value.copy()
-    exposure.index = pd.to_datetime(exposure.index).normalize()
-    return pd.to_numeric(exposure, errors="coerce").reindex(price_dates).ffill().fillna(1.0).clip(lower=0.0, upper=1.0)
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(exposure.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    exposure = pd.to_numeric(exposure.loc[valid_dates], errors="coerce")
+    raw_dates = raw_dates[valid_dates]
+    if not exposure.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        exposure = exposure.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    exposure.index = raw_dates.normalize()
+    exposure = exposure.dropna()
+    exposure = exposure[~exposure.index.duplicated(keep="last")].sort_index()
+    return exposure.reindex(price_dates).ffill().fillna(1.0).clip(lower=0.0, upper=1.0)
 
 
 def _scale_for_date(exposure: pd.Series, date: pd.Timestamp) -> float:

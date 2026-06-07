@@ -79,8 +79,7 @@ def regime_for_date(regimes: pd.Series, date: pd.Timestamp | str, default: str =
     if regimes.empty:
         return normalize_regime(default)
     target = pd.Timestamp(date).normalize()
-    normalized = regimes.copy()
-    normalized.index = pd.to_datetime(normalized.index).normalize()
+    normalized = _normalize_regime_index(regimes)
     eligible = normalized.loc[normalized.index <= target]
     if eligible.empty:
         return normalize_regime(default)
@@ -91,8 +90,7 @@ def regimes_for_dates(regimes: pd.Series, dates: pd.Index, default: str = REGIME
     normalized_dates = pd.DatetimeIndex(pd.to_datetime(dates).normalize())
     if regimes.empty:
         return pd.Series(default, index=normalized_dates, dtype="object")
-    normalized = regimes.copy()
-    normalized.index = pd.to_datetime(normalized.index).normalize()
+    normalized = _normalize_regime_index(regimes)
     aligned = normalized.reindex(normalized_dates, method="ffill").fillna(default)
     return aligned.map(lambda value: normalize_regime(str(value), default)).rename("market_regime")
 
@@ -100,6 +98,21 @@ def regimes_for_dates(regimes: pd.Series, dates: pd.Index, default: str = REGIME
 def normalize_regime(value: str | None, default: str = REGIME_SIDEWAYS) -> str:
     state = str(value or default).strip().lower()
     return state if state in REGIME_STATES else default
+
+
+def _normalize_regime_index(regimes: pd.Series) -> pd.Series:
+    normalized = regimes.copy()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(normalized.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    normalized = normalized.loc[valid_dates].copy()
+    raw_dates = raw_dates[valid_dates]
+    if not normalized.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        normalized = normalized.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    normalized.index = raw_dates.normalize()
+    normalized = normalized[~normalized.index.duplicated(keep="last")]
+    return normalized.sort_index()
 
 
 def defensive_exposure_schedule(regimes: pd.Series, config: dict[str, Any], dates: pd.Index | None = None) -> pd.Series:

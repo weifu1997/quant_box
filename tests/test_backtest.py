@@ -892,6 +892,42 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(sells.empty)
         self.assertEqual(pd.Timestamp(sells.iloc[0]["date"]), dates[-1])
 
+    def test_exposure_schedule_uses_latest_intraday_value_per_trade_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+        exposure = pd.Series(
+            [0.5, 1.0],
+            index=pd.to_datetime(["2024-01-03 15:00", "2024-01-03 09:30"]),
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "exposure_schedule": exposure,
+            },
+        )
+
+        buy = result.trades[result.trades["side"] == "BUY"].iloc[0]
+        self.assertEqual(int(buy["shares"]), 5000)
+
     def test_exposure_schedule_signal_only_does_not_rebalance_between_signals(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])

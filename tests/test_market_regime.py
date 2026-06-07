@@ -125,6 +125,25 @@ class MarketRegimeTests(unittest.TestCase):
 
         self.assertEqual(exposure.to_list(), [1.0, 0.8, 0.4])
 
+    def test_defensive_exposure_schedule_uses_latest_intraday_regime_per_date(self) -> None:
+        regimes = pd.Series(
+            [REGIME_BEAR, REGIME_BULL],
+            index=pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30"]),
+        )
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        config = {
+            "defensive_timing": {
+                "enabled": True,
+                "bull_exposure": 1.0,
+                "sideways_exposure": 0.8,
+                "bear_exposure": 0.4,
+            }
+        }
+
+        exposure = defensive_exposure_schedule(regimes, config, dates)
+
+        self.assertEqual(exposure.to_list(), [0.4, 0.4])
+
     def test_detect_market_regime_can_mark_benchmark_drawdown_as_bear(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=6)
         close = pd.DataFrame({"A": [10.0, 11.0, 12.0, 11.5, 10.7, 10.6]}, index=dates)

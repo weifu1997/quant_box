@@ -176,6 +176,36 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertAlmostEqual(result.equity_curve.iloc[-1], 100.0)
         self.assertTrue(result.weights.empty or result.weights["weight"].sum() == 0.0)
 
+    def test_fast_period_backtest_uses_latest_intraday_exposure_per_trade_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
+        prices = pd.DataFrame(
+            {
+                ("close", "A"): [10.0, 10.0, 20.0],
+            },
+            index=dates,
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(dates[0], "A")], names=["datetime", "instrument"]),
+            name="score",
+        )
+        exposure = pd.Series(
+            [0.5, 1.0],
+            index=pd.to_datetime(["2024-02-01 15:00", "2024-02-01 09:30"]),
+        )
+
+        result = run_fast_period_backtest(
+            scores,
+            prices,
+            "2024-01-01",
+            "2024-02-29",
+            {"initial_capital": 100.0, "top_n": 1, "max_turnover": 1, "exposure_schedule": exposure},
+        )
+
+        self.assertAlmostEqual(float(result.weights.iloc[0]["weight"]), 0.5)
+        self.assertAlmostEqual(result.equity_curve.iloc[-1], 150.0)
+
     def test_fast_period_backtest_applies_max_industry_weight(self) -> None:
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29", "2024-03-01"])
         signal_dates = dates[[0, 2]]
