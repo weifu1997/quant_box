@@ -346,14 +346,16 @@ def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg:
     adv_stack = adv.stack(future_stack=True).rename("adv")
     adv_stack.index = adv_stack.index.set_names(["datetime", "instrument"])
     aligned_adv = adv_stack.reindex(lookup_index).to_numpy()
-    thresholds = adv.quantile(quantile, axis=1).reindex(score_dates).to_numpy()
+    quantile = max(0.0, min(quantile, 1.0))
+    threshold_quantile = quantile if side == "low" else 1.0 - quantile
+    thresholds = adv.quantile(threshold_quantile, axis=1).reindex(score_dates).to_numpy()
 
     if side == "low":
-        mask_values = aligned_adv <= thresholds
+        reject_values = aligned_adv <= thresholds
     else:
-        mask_values = aligned_adv >= thresholds
-    mask_values &= pd.notna(aligned_adv) & pd.notna(thresholds)
-    mask = pd.Series(mask_values, index=scores.index)
+        reject_values = aligned_adv >= thresholds
+    has_liquidity = pd.notna(aligned_adv) & pd.notna(thresholds)
+    mask = pd.Series(has_liquidity & ~reject_values, index=scores.index)
     return scores.where(mask).sort_index().rename(scores.name)
 
 

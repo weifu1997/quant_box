@@ -47,8 +47,8 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(DEFAULT_CONFIG["data"]["daily_basic_file"], "data/factors/daily_basic.parquet")
         self.assertEqual(DEFAULT_CONFIG["data"]["st_calendar_file"], "data/raw/st_calendar.csv")
 
-    def test_default_scoring_uses_high_liquidity_bucket_and_stable_dynamic_ic(self) -> None:
-        self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "high")
+    def test_default_scoring_excludes_low_liquidity_bucket_and_uses_stable_dynamic_ic(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "low")
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["quantile"], 0.20)
         self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["top_k"], 3)
         self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["metric"], "ic_ir")

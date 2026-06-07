@@ -206,7 +206,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "window": 10,
         "min_periods": 5,
         "quantile": 0.20,
-        "side": "high",
+        "side": "low",
     },
     "selection_risk_filter": {
         "enabled": False,

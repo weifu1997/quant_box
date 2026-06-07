@@ -146,7 +146,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(weights.to_dict(), {"F1": 1.0})
         self.assertEqual(set(captured_dates), set(dates[-4:]))
 
-    def test_build_strategy_scores_applies_low_liquidity_filter(self) -> None:
+    def test_build_strategy_scores_excludes_low_liquidity_bucket(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
         instruments = ["A", "B", "C", "D", "E"]
         index = pd.MultiIndex.from_product([[dates[-1]], instruments], names=["datetime", "instrument"])
@@ -172,8 +172,8 @@ class ScoringTests(unittest.TestCase):
         scores = build_strategy_scores(factors, config, price_df=prices)
 
         daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
-        self.assertFalse(daily.loc[["A", "B"]].isna().any())
-        self.assertTrue(daily.loc[["C", "D", "E"]].isna().all())
+        self.assertTrue(daily.loc[["A", "B"]].isna().all())
+        self.assertFalse(daily.loc[["C", "D", "E"]].isna().any())
 
     def test_build_strategy_scores_liquidity_filter_matches_price_columns_case_insensitively(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
@@ -207,10 +207,10 @@ class ScoringTests(unittest.TestCase):
         scores = build_strategy_scores(factors, config, price_df=prices)
 
         daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
-        self.assertFalse(pd.isna(daily.loc["000001.SZ"]))
-        self.assertTrue(pd.isna(daily.loc["600519.SH"]))
+        self.assertTrue(pd.isna(daily.loc["000001.SZ"]))
+        self.assertFalse(pd.isna(daily.loc["600519.SH"]))
 
-    def test_build_strategy_scores_applies_high_liquidity_filter(self) -> None:
+    def test_build_strategy_scores_excludes_high_liquidity_bucket(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
         instruments = ["A", "B", "C", "D", "E"]
         index = pd.MultiIndex.from_product([[dates[-1]], instruments], names=["datetime", "instrument"])
@@ -236,8 +236,8 @@ class ScoringTests(unittest.TestCase):
         scores = build_strategy_scores(factors, config, price_df=prices)
 
         daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
-        self.assertTrue(daily.loc[["A", "B"]].isna().all())
-        self.assertFalse(daily.loc[["C", "D", "E"]].isna().any())
+        self.assertFalse(daily.loc[["A", "B", "C"]].isna().any())
+        self.assertTrue(daily.loc[["D", "E"]].isna().all())
 
     def test_build_strategy_scores_applies_regime_score_blend(self) -> None:
         date = pd.Timestamp("2024-01-02")
