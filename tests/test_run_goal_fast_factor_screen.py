@@ -4,7 +4,12 @@ import unittest
 
 import pandas as pd
 
-from scripts.run_goal_fast_factor_screen import _screen_quality_fields, _single_factor_scores, _slice_rebalance_factor_dates
+from scripts.run_goal_fast_factor_screen import (
+    _screen_quality_fields,
+    _select_screen_columns,
+    _single_factor_scores,
+    _slice_rebalance_factor_dates,
+)
 
 
 class RunGoalFastFactorScreenTests(unittest.TestCase):
@@ -96,6 +101,12 @@ class RunGoalFastFactorScreenTests(unittest.TestCase):
             sliced.index.get_level_values("datetime").unique().tolist(),
             [pd.Timestamp("2024-01-31"), pd.Timestamp("2024-02-29")],
         )
+
+    def test_select_screen_columns_supports_start_index_and_limit(self) -> None:
+        columns = ["A", "B", "C", "D"]
+
+        self.assertEqual(_select_screen_columns(columns, 2, 2), ["B", "C"])
+        self.assertEqual(_select_screen_columns(columns, 0, 0), columns)
 
 
 if __name__ == "__main__":

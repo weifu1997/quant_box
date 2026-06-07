@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--top-n", default="7,10,15,20")
     parser.add_argument("--liquidity-modes", default="none,low:0.20,low:0.35,high:0.20")
+    parser.add_argument("--start-column-index", type=int, default=1, help="1-based factor column index to start screening from.")
     parser.add_argument("--limit-columns", type=int, default=0)
     args = parser.parse_args()
 
@@ -31,8 +32,7 @@ def main() -> None:
     start_date = config["data"]["start_date"]
     end_date = resolve_target_date_value(config["data"]["end_date"], config=config)
     columns = factor_cache_columns(config["factors"]["cache_file"])
-    if args.limit_columns:
-        columns = columns[: args.limit_columns]
+    columns = _select_screen_columns(columns, args.start_column_index, args.limit_columns)
     use_direct_scores = not _requires_full_score_pipeline(config)
     component_columns = [] if use_direct_scores else _score_component_columns(config, factor_cache_columns(config["factors"]["cache_file"]))
     top_ns = [int(value.strip()) for value in args.top_n.split(",") if value.strip()]
@@ -327,6 +327,14 @@ def _read_factor_subset(path_value: str | Path, columns: list[str], start_date: 
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
     mask = (dates >= pd.Timestamp(start_date).normalize()) & (dates <= pd.Timestamp(end_date).normalize())
     return factors.loc[mask, [column for column in columns if column in factors.columns]].sort_index()
+
+
+def _select_screen_columns(columns: list[str], start_column_index: int, limit_columns: int) -> list[str]:
+    start = max(int(start_column_index), 1) - 1
+    selected = columns[start:]
+    if limit_columns:
+        selected = selected[: max(int(limit_columns), 0)]
+    return selected
 
 
 def _read_price_fields(path_value: str | Path, fields: list[str], start_date: str, end_date: str) -> pd.DataFrame:

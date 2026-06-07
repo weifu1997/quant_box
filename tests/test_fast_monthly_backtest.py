@@ -44,6 +44,36 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertGreater(result.equity_curve.iloc[-1], 119.0)
         self.assertEqual(result.weights["instrument"].tolist(), ["A"])
 
+    def test_fast_period_backtest_does_not_filter_candidates_by_future_price(self) -> None:
+        dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
+        prices = pd.DataFrame(
+            {
+                ("close", "A"): [10.0, 10.0, None],
+                ("close", "B"): [10.0, 10.0, 12.0],
+            },
+            index=dates,
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        scores = pd.Series(
+            [10.0, 1.0],
+            index=pd.MultiIndex.from_tuples(
+                [(dates[0], "A"), (dates[0], "B")],
+                names=["datetime", "instrument"],
+            ),
+            name="score",
+        )
+
+        result = run_fast_period_backtest(
+            scores,
+            prices,
+            "2024-01-01",
+            "2024-02-29",
+            {"initial_capital": 100.0, "top_n": 1, "max_turnover": 1},
+        )
+
+        self.assertEqual(result.weights["instrument"].tolist(), ["A"])
+        self.assertAlmostEqual(result.equity_curve.iloc[-1], 100.0)
+
     def test_fast_period_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(

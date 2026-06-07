@@ -349,10 +349,12 @@ def _score_weights(scores: pd.Series, holdings: list[str]) -> pd.Series:
 
 
 def _period_returns(close: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, instruments: pd.Index) -> pd.Series:
-    start_prices = close.loc[start].reindex(instruments)
-    end_prices = close.loc[end].reindex(instruments)
+    start_prices = pd.to_numeric(close.loc[start].reindex(instruments), errors="coerce").replace([np.inf, -np.inf], np.nan)
+    end_prices = pd.to_numeric(close.loc[end].reindex(instruments), errors="coerce").replace([np.inf, -np.inf], np.nan)
+    valid_start = start_prices.notna() & (start_prices > 0.0)
     returns = end_prices.divide(start_prices).sub(1.0)
-    return returns.replace([np.inf, -np.inf], np.nan).dropna()
+    returns = returns.replace([np.inf, -np.inf], np.nan)
+    return returns.loc[valid_start]
 
 
 def _round_trip_cost_rate(config: dict[str, Any]) -> float:
