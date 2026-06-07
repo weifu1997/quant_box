@@ -202,6 +202,19 @@ class StrategyTests(unittest.TestCase):
             ["2024-01-31", "2024-02-29"],
         )
 
+    def test_resample_signals_accepts_string_date_index(self) -> None:
+        dates = ["2024-01-02", "2024-01-31", "2024-02-01", "2024-02-29"]
+        index = pd.MultiIndex.from_product([dates, ["A", "B"]], names=["datetime", "instrument"])
+        scores = pd.Series(range(len(index)), index=index, name="score")
+
+        sampled = resample_signals(scores, "monthly")
+
+        self.assertEqual(
+            sorted(sampled.index.get_level_values(0).unique().strftime("%Y-%m-%d").tolist()),
+            ["2024-01-31", "2024-02-29"],
+        )
+        self.assertEqual(sampled.index.get_level_values(1).tolist(), ["A", "B", "A", "B"])
+
 
 if __name__ == "__main__":
     unittest.main()

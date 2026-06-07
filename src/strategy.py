@@ -469,7 +469,15 @@ def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
     if not isinstance(score_panel.index, pd.MultiIndex):
         raise ValueError("score_panel must use MultiIndex: datetime/instrument.")
 
-    dates = pd.Index(pd.to_datetime(score_panel.index.get_level_values(0).unique())).sort_values()
+    normalized = score_panel.copy()
+    normalized.index = pd.MultiIndex.from_arrays(
+        [
+            pd.to_datetime(score_panel.index.get_level_values(0)).normalize(),
+            score_panel.index.get_level_values(1).astype(str),
+        ],
+        names=score_panel.index.names,
+    )
+    dates = pd.Index(pd.to_datetime(normalized.index.get_level_values(0).unique())).sort_values()
     date_series = pd.Series(dates, index=dates)
     if rebalance_freq == "weekly":
         keep_dates = set(date_series.resample("W-FRI").last().dropna())
@@ -477,7 +485,7 @@ def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
         keep_dates = set(date_series.resample("ME").last().dropna())
     else:
         raise ValueError(f"Unsupported rebalance_freq: {rebalance_freq}")
-    return score_panel[score_panel.index.get_level_values(0).isin(keep_dates)]
+    return normalized[normalized.index.get_level_values(0).isin(keep_dates)].sort_index().rename(score_panel.name)
 
 
 def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:

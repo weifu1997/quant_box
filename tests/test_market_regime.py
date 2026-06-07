@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pandas as pd
 
@@ -124,6 +126,37 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertIn("exposure_schedule", bt_config)
         self.assertLess(float(bt_config["exposure_schedule"].iloc[-1]), 1.0)
         self.assertEqual(defensive_exposure_for_date(prices, config, dates[-1]), float(bt_config["exposure_schedule"].iloc[-1]))
+
+    def test_detect_market_regime_reads_hs300_con_code_constituents(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=6)
+        close = pd.DataFrame(
+            {
+                "000001.SZ": [10.0, 10.4, 10.8, 11.2, 11.6, 12.0],
+                "000002.SZ": [20.0, 19.0, 18.0, 17.0, 16.0, 15.0],
+                "000003.SZ": [30.0, 29.0, 28.0, 27.0, 26.0, 25.0],
+            },
+            index=dates,
+        )
+        prices = pd.concat({"close": close}, axis=1)
+        with TemporaryDirectory() as tmp:
+            constituents = Path(tmp) / "hs300_constituents.csv"
+            pd.DataFrame({"con_code": ["000001.SZ"], "trade_date": ["2024-01-02"]}).to_csv(constituents, index=False)
+            config = {
+                "data": {"hs300_constituents_file": str(constituents)},
+                "market_regime": {
+                    "enabled": True,
+                    "ma_window": 2,
+                    "momentum_window": 1,
+                    "volatility_window": 2,
+                    "min_periods": 1,
+                    "high_volatility_threshold": 10.0,
+                    "lag_days": 0,
+                },
+            }
+
+            regimes = detect_market_regime(prices, config)
+
+        self.assertEqual(regimes.iloc[-1], REGIME_BULL)
 
     def test_regime_performance_summarizes_segments_and_aggregates_by_state(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=5)

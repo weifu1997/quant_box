@@ -55,8 +55,7 @@ def append_daily_basic_features(
     factor_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
     factor_symbols = factors.index.get_level_values(1).astype(str).str.upper()
     lookup_dates = factor_dates - pd.Timedelta(days=lag_days)
-    lookup_index = pd.MultiIndex.from_arrays([lookup_dates, factor_symbols], names=["datetime", "instrument"])
-    aligned = basics.reindex(lookup_index)
+    aligned = _align_daily_basic_asof(basics, lookup_dates, factor_symbols, factors.index)
     aligned.index = factors.index
     aligned = _transform_daily_basic_features(aligned)
     if min_coverage > 0:
@@ -150,6 +149,41 @@ def _normalize_daily_basic(daily_basic: pd.DataFrame, fields: list[str]) -> pd.D
         return pd.DataFrame()
     numeric = frame[selected].apply(pd.to_numeric, errors="coerce")
     return numeric.sort_index()
+
+
+def _align_daily_basic_asof(
+    basics: pd.DataFrame,
+    lookup_dates: pd.DatetimeIndex,
+    factor_symbols: pd.Index,
+    factor_index: pd.Index,
+) -> pd.DataFrame:
+    if basics.empty:
+        return pd.DataFrame(index=factor_index)
+
+    requests = pd.DataFrame(
+        {
+            "lookup_date": pd.DatetimeIndex(pd.to_datetime(lookup_dates).normalize()),
+            "instrument": pd.Index(factor_symbols).astype(str).str.upper(),
+        },
+        index=pd.RangeIndex(len(factor_index)),
+    )
+    aligned = pd.DataFrame(np.nan, index=requests.index, columns=basics.columns, dtype="float64")
+    for instrument, row_index in requests.groupby("instrument", sort=False).groups.items():
+        try:
+            history = basics.xs(instrument, level=1).sort_index()
+        except KeyError:
+            continue
+        if history.empty:
+            continue
+        dates = pd.DatetimeIndex(requests.loc[row_index, "lookup_date"])
+        positions = history.index.searchsorted(dates, side="right") - 1
+        valid = positions >= 0
+        if not bool(valid.any()):
+            continue
+        rows = row_index.to_numpy()[valid]
+        aligned.iloc[rows, :] = history.iloc[positions[valid]].to_numpy(dtype="float64", copy=False)
+    aligned.index = factor_index
+    return aligned
 
 
 def _transform_daily_basic_features(frame: pd.DataFrame) -> pd.DataFrame:

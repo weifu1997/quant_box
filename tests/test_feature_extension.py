@@ -36,6 +36,32 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertTrue(pd.isna(extended.loc[(dates[0], "000001.SZ"), "DB_circ_mv"]))
         self.assertAlmostEqual(float(extended.loc[(dates[1], "000001.SZ"), "DB_turnover_rate"]), 1.5)
 
+    def test_append_daily_basic_features_uses_most_recent_available_lagged_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-08", "2024-01-10"])
+        index = pd.MultiIndex.from_product([dates, ["000001.SZ"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": [1.0, 2.0]}, index=index)
+        daily_basic = pd.DataFrame(
+            {
+                "trade_date": ["2024-01-05", "2024-01-08", "2024-01-10"],
+                "ts_code": ["000001.SZ", "000001.SZ", "000001.SZ"],
+                "turnover_rate": [1.5, 2.5, 9.9],
+            }
+        )
+
+        extended, summary = append_daily_basic_features(
+            factors,
+            daily_basic,
+            {
+                "enabled": True,
+                "daily_basic_lag_days": 1,
+                "daily_basic_fields": ["turnover_rate"],
+            },
+        )
+
+        self.assertEqual(summary["features_added"], 1)
+        self.assertAlmostEqual(float(extended.loc[(dates[0], "000001.SZ"), "DB_turnover_rate"]), 1.5)
+        self.assertAlmostEqual(float(extended.loc[(dates[1], "000001.SZ"), "DB_turnover_rate"]), 2.5)
+
     def test_append_daily_basic_features_respects_daily_basic_toggle(self) -> None:
         date = pd.Timestamp("2024-01-03")
         index = pd.MultiIndex.from_product([[date], ["000001.SZ"]], names=["datetime", "instrument"])

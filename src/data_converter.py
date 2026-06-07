@@ -78,7 +78,7 @@ def convert_to_qlib_format(
 
     if calendar_file:
         calendar_path = resolve_path(calendar_file)
-        calendar = pd.read_csv(calendar_path, header=None).iloc[:, 0].astype(str).sort_values().tolist()
+        calendar = _read_calendar_dates(calendar_path)
     else:
         calendar = sorted(all_dates)
     calendar_index = {date: idx for idx, date in enumerate(calendar)}
@@ -160,6 +160,19 @@ def _load_tradable_codes(path_value: str | Path) -> set[str]:
     if col is None:
         raise ValueError(f"{path} must contain one of: ts_code, instrument, code, con_code.")
     return set(df[col].dropna().astype(str).str.upper())
+
+
+def _read_calendar_dates(path: Path) -> list[str]:
+    frame = pd.read_csv(path, header=None)
+    if frame.empty:
+        return []
+    raw = frame.iloc[:, 0].dropna().astype(str).str.strip()
+    raw = raw[~raw.str.lower().isin({"cal_date", "trade_date", "date", "datetime"})]
+    compact = raw.str.replace("-", "", regex=False).str.replace("/", "", regex=False)
+    parsed = pd.to_datetime(compact, format="%Y%m%d", errors="coerce")
+    fallback = pd.to_datetime(raw, errors="coerce")
+    dates = pd.Series(parsed).where(pd.Series(parsed).notna(), pd.Series(fallback))
+    return sorted({pd.Timestamp(date).strftime("%Y-%m-%d") for date in dates.dropna()})
 
 
 def _close_panel(feature_df: pd.DataFrame, code: str) -> pd.Series:

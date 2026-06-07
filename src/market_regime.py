@@ -315,7 +315,7 @@ def _load_hs300_symbols(path_value: str | Path | None) -> set[str]:
         frame = pd.read_csv(path)
     except (OSError, pd.errors.EmptyDataError):
         return set()
-    for column in ("ts_code", "instrument", "symbol"):
+    for column in ("ts_code", "con_code", "instrument", "symbol"):
         if column in frame.columns:
             return {_normalize_symbol(value) for value in frame[column].dropna().astype(str)}
     return set()
