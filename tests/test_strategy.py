@@ -40,6 +40,22 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(len(selected), len(set(selected)))
         self.assertEqual(len(selected), 3)
 
+    def test_select_stocks_normalizes_codes_before_turnover_check(self) -> None:
+        scores = pd.Series([10, 9, 8, 7], index=[" a ", "b", "C", "D"])
+        previous = ["A", " B ", "c"]
+
+        selected = select_stocks(scores, top_n=3, previous_holdings=previous, max_turnover=1)
+
+        self.assertEqual(selected, ["A", "B", "C"])
+        self.assertLessEqual(len(set(selected) - {"A", "B", "C"}), 1)
+
+    def test_select_stocks_keeps_highest_score_when_normalized_codes_duplicate(self) -> None:
+        scores = pd.Series([100, 1, 99], index=[" a ", "A", "B"])
+
+        selected = select_stocks(scores, top_n=1)
+
+        self.assertEqual(selected, ["A"])
+
     def test_select_stocks_caps_group_concentration_without_previous_holdings(self) -> None:
         scores = pd.Series([10, 9, 8, 7, 6], index=["A", "B", "C", "D", "E"])
         groups = {"A": "bank", "B": "bank", "C": "bank", "D": "tech", "E": "health"}

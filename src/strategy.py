@@ -185,14 +185,14 @@ def select_stocks(
     group_map: Mapping[str, object] | pd.Series | None = None,
     max_group_weight: float | None = None,
 ) -> list[str]:
-    scores = score_series.dropna().sort_values(ascending=False)
-    ranked = [str(code) for code in scores.index.tolist()]
+    scores = _normalize_score_series(score_series)
+    ranked = scores.index.astype(str).tolist()
     if top_n <= 0 or not ranked:
         return []
     if previous_holdings is None:
         return _apply_group_cap(ranked, top_n, group_map, max_group_weight)
 
-    previous = [str(code) for code in previous_holdings]
+    previous = _normalize_instruments(previous_holdings)
     previous_set = set(previous)
     allowed_new = max(0, min(max_turnover, top_n))
     rank_map = {code: rank for rank, code in enumerate(ranked)}
@@ -317,6 +317,38 @@ def _group_limit(top_n: int, max_group_weight: float | None) -> int | None:
     if top_n <= 0 or not np.isfinite(weight) or weight <= 0 or weight >= 1:
         return None
     return max(1, int(np.floor(top_n * weight + 1e-12)))
+
+
+def _normalize_score_series(score_series: pd.Series) -> pd.Series:
+    scores = score_series.dropna().sort_values(ascending=False)
+    if scores.empty:
+        return scores
+
+    normalized_index = pd.Index([_normalize_instrument(code) for code in scores.index], name=scores.index.name)
+    result = pd.Series(scores.to_numpy(), index=normalized_index, name=scores.name)
+    result = result[result.index != ""]
+    if result.index.has_duplicates:
+        result = result[~result.index.duplicated(keep="first")]
+    result.attrs = dict(getattr(score_series, "attrs", {}))
+    return result
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _normalize_instruments(values: Iterable[object]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        instrument = _normalize_instrument(value)
+        if not instrument or instrument in seen:
+            continue
+        result.append(instrument)
+        seen.add(instrument)
+    return result
 
 
 def _normalize_group_map(group_map: Mapping[str, object] | pd.Series | None) -> dict[str, str] | None:
