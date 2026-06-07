@@ -185,9 +185,9 @@ def run_walk_forward_optimization(
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     price_df = price_df.copy()
-    price_df.index = pd.to_datetime(price_df.index)
-    start = pd.Timestamp(start_date)
-    end = pd.Timestamp(end_date)
+    price_df.index = pd.to_datetime(price_df.index).normalize()
+    start = pd.Timestamp(start_date).normalize()
+    end = pd.Timestamp(end_date).normalize()
     rows: list[dict[str, object]] = []
     train_start = start
 
@@ -347,11 +347,11 @@ def run_walk_forward_grid_validation(
 ) -> pd.DataFrame:
     """Evaluate every parameter combination on rolling out-of-sample windows."""
     price_df = price_df.copy()
-    price_df.index = pd.to_datetime(price_df.index)
+    price_df.index = pd.to_datetime(price_df.index).normalize()
     grid = grid or DEFAULT_GRID
     keys = list(grid)
-    start = pd.Timestamp(start_date)
-    end = pd.Timestamp(end_date)
+    start = pd.Timestamp(start_date).normalize()
+    end = pd.Timestamp(end_date).normalize()
     rows: list[dict[str, object]] = []
     train_start = start
 
@@ -465,12 +465,16 @@ def run_walk_forward_grid_validation(
 
 
 def _slice_factor_dates(factor_df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    dates = pd.to_datetime(factor_df.index.get_level_values(0))
+    dates = pd.to_datetime(factor_df.index.get_level_values(0)).normalize()
+    start = pd.Timestamp(start).normalize()
+    end = pd.Timestamp(end).normalize()
     return factor_df[(dates >= start) & (dates <= end)]
 
 
 def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
-    dates = pd.to_datetime(score_panel.index.get_level_values(0))
+    dates = pd.to_datetime(score_panel.index.get_level_values(0)).normalize()
+    start = pd.Timestamp(start).normalize()
+    end = pd.Timestamp(end).normalize()
     return score_panel[(dates >= start) & (dates <= end)]
 
 

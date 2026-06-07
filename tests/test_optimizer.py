@@ -5,7 +5,15 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.optimizer import BASELINE_GRID, DEFAULT_GRID, _optimization_score, run_walk_forward_grid_validation, run_walk_forward_optimization
+from src.optimizer import (
+    BASELINE_GRID,
+    DEFAULT_GRID,
+    _optimization_score,
+    _slice_factor_dates,
+    _slice_score_dates,
+    run_walk_forward_grid_validation,
+    run_walk_forward_optimization,
+)
 
 
 class OptimizerTests(unittest.TestCase):
@@ -156,6 +164,61 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(kwargs["horizon"], 3)
         self.assertEqual(kwargs["method"], "pearson")
         self.assertEqual(kwargs["min_obs"], 4)
+
+    def test_date_slices_include_intraday_timestamps_on_boundary_dates(self) -> None:
+        dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-03 15:00"])
+        factor_index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"ROC5": [1.0, 2.0]}, index=factor_index)
+        scores = pd.Series([1.0, 2.0], index=factor_index, name="score")
+
+        factor_slice = _slice_factor_dates(factors, pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-02"))
+        score_slice = _slice_score_dates(scores, pd.Timestamp("2024-01-03"), pd.Timestamp("2024-01-03"))
+
+        self.assertEqual(len(factor_slice), 1)
+        self.assertEqual(factor_slice.index.get_level_values("datetime")[0], dates[0])
+        self.assertEqual(len(score_slice), 1)
+        self.assertEqual(score_slice.index.get_level_values("datetime")[0], dates[1])
+
+    def test_grid_validation_includes_intraday_boundary_prices(self) -> None:
+        dates = pd.to_datetime(["2024-01-01 15:00", "2024-01-02 15:00", "2024-02-01 15:00"])
+        instruments = ["A", "B", "C", "D", "E"]
+        index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {"ROC5": [float(idx % len(instruments)) for idx in range(len(index))]},
+            index=index,
+        )
+        prices = pd.DataFrame(
+            {
+                instrument: [10.0 + offset, 10.1 + offset, 10.2 + offset]
+                for offset, instrument in enumerate(instruments)
+            },
+            index=dates,
+        )
+        grid = {
+            "factor_group": ["momentum"],
+            "top_n": [1],
+            "max_turnover": [1],
+            "rank_buffer": [0],
+            "rebalance_freq": ["daily"],
+        }
+
+        result = run_walk_forward_grid_validation(
+            factors,
+            prices,
+            base_config=_base_backtest_config(),
+            start_date="2023-01-02",
+            end_date="2024-02-01",
+            grid=grid,
+            train_years=1,
+            test_months=1,
+            step_months=12,
+            use_rolling_ic=False,
+            scoring_config={"strategy": {"min_cross_section_obs": 5}},
+        )
+
+        self.assertFalse(result.empty)
+        self.assertEqual(pd.Timestamp(result.iloc[0]["train_end"]).date().isoformat(), "2024-01-01")
+        self.assertEqual(pd.Timestamp(result.iloc[0]["test_end"]).date().isoformat(), "2024-02-01")
 
 
 def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
