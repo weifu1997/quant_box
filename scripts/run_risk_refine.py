@@ -47,6 +47,7 @@ def main() -> None:
     parser.add_argument("--top-n", default=str(config.get("strategy", {}).get("top_n", 15)))
     parser.add_argument("--rank-buffer", default=str(config.get("strategy", {}).get("rank_buffer", 30)))
     parser.add_argument("--max-industry-weight", default=str(config.get("strategy", {}).get("max_industry_weight", "none")))
+    parser.add_argument("--score-weighted", default=str(config.get("strategy", {}).get("score_weighted", config.get("backtest", {}).get("score_weighted", False))))
     parser.add_argument("--stop-loss-pct", default=str(config.get("strategy", {}).get("stop_loss_pct", "none")))
     parser.add_argument("--take-profit-pct", default=str(config.get("strategy", {}).get("take_profit_pct", "none")))
     parser.add_argument("--circuit-breaker-drawdown", default="0.06,0.08,0.10")
@@ -94,6 +95,7 @@ def main() -> None:
             _csv_values(args.top_n, int),
             _csv_values(args.rank_buffer, int),
             _csv_optional_values(args.max_industry_weight, float),
+            _csv_bool_values(args.score_weighted),
             _csv_optional_values(args.stop_loss_pct, float),
             _csv_optional_values(args.take_profit_pct, float),
             _csv_optional_values(args.circuit_breaker_drawdown, float),
@@ -119,6 +121,7 @@ def main() -> None:
         top_n,
         rank_buffer,
         max_industry_weight,
+        score_weighted,
         stop_loss,
         take_profit,
         circuit_drawdown,
@@ -141,6 +144,7 @@ def main() -> None:
             top_n,
             rank_buffer,
             max_industry_weight,
+            score_weighted,
             stop_loss,
             take_profit,
             circuit_drawdown,
@@ -204,6 +208,7 @@ def main() -> None:
                 "top_n": top_n,
                 "rank_buffer": rank_buffer,
                 "max_industry_weight": max_industry_weight,
+                "score_weighted": score_weighted,
                 "stop_loss_pct": stop_loss,
                 "take_profit_pct": take_profit,
                 "circuit_breaker_drawdown": circuit_drawdown,
@@ -226,6 +231,7 @@ def main() -> None:
             "top_n": top_n,
             "rank_buffer": rank_buffer,
             "max_industry_weight": max_industry_weight,
+            "score_weighted": score_weighted,
             "stop_loss_pct": stop_loss,
             "take_profit_pct": take_profit,
             "circuit_breaker_drawdown": circuit_drawdown,
@@ -319,6 +325,21 @@ def _csv_optional_values(value: str, cast: Callable[[str], Any]) -> list[Any]:
     return values
 
 
+def _csv_bool_values(value: str) -> list[bool]:
+    return [_bool_value(item.strip()) for item in str(value).split(",") if item.strip()]
+
+
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "disabled"}:
+        return False
+    raise ValueError(f"Expected boolean value, got {value!r}")
+
+
 def _with_timing_overrides(
     config: dict[str, Any],
     mode: str,
@@ -345,6 +366,7 @@ def _combo_key(
     top_n: int,
     rank_buffer: int,
     max_industry_weight: float | None,
+    score_weighted: bool,
     stop_loss: float | None,
     take_profit: float | None,
     circuit_drawdown: float | None,
@@ -366,6 +388,7 @@ def _combo_key(
     int,
     int,
     float | None,
+    bool,
     float | None,
     float | None,
     float | None,
@@ -388,6 +411,7 @@ def _combo_key(
         int(top_n),
         int(rank_buffer),
         _optional_key(max_industry_weight),
+        _bool_value(score_weighted),
         _optional_key(stop_loss),
         _optional_key(take_profit),
         _optional_key(circuit_drawdown),
@@ -421,6 +445,7 @@ def _completed_keys(
         int,
         int,
         float | None,
+        bool,
         float | None,
         float | None,
         float | None,
@@ -447,6 +472,7 @@ def _completed_keys(
         "top_n",
         "rank_buffer",
         "max_industry_weight",
+        "score_weighted",
         "stop_loss_pct",
         "take_profit_pct",
         "circuit_breaker_drawdown",
@@ -472,6 +498,7 @@ def _completed_keys(
             row["top_n"],
             row["rank_buffer"],
             row["max_industry_weight"],
+            row["score_weighted"],
             row["stop_loss_pct"],
             row["take_profit_pct"],
             row["circuit_breaker_drawdown"],
