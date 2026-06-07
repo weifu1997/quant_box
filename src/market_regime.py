@@ -324,7 +324,7 @@ def _load_hs300_symbols(path_value: str | Path | None) -> set[str]:
 def _equal_weight_proxy(close: pd.DataFrame) -> pd.Series:
     numeric = close.apply(pd.to_numeric, errors="coerce")
     returns = numeric.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
-    proxy_returns = returns.median(axis=1, skipna=True).fillna(0.0)
+    proxy_returns = returns.mean(axis=1, skipna=True).fillna(0.0)
     proxy = (1.0 + proxy_returns).cumprod()
     proxy.index = pd.to_datetime(proxy.index).normalize()
     return proxy.rename("benchmark_close")

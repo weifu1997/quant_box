@@ -158,6 +158,33 @@ class MarketRegimeTests(unittest.TestCase):
 
         self.assertEqual(regimes.iloc[-1], REGIME_BULL)
 
+    def test_detect_market_regime_uses_equal_weight_mean_proxy(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=2)
+        close = pd.DataFrame(
+            {
+                "A": [100.0, 200.0],
+                "B": [100.0, 90.0],
+                "C": [100.0, 90.0],
+            },
+            index=dates,
+        )
+        prices = pd.concat({"close": close}, axis=1)
+        config = {
+            "market_regime": {
+                "enabled": True,
+                "ma_window": 2,
+                "momentum_window": 1,
+                "volatility_window": 2,
+                "min_periods": 1,
+                "high_volatility_threshold": 10.0,
+                "lag_days": 0,
+            }
+        }
+
+        regimes = detect_market_regime(prices, config)
+
+        self.assertEqual(regimes.iloc[-1], REGIME_BULL)
+
     def test_regime_performance_summarizes_segments_and_aggregates_by_state(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=5)
         equity = pd.Series([100.0, 110.0, 105.0, 120.0, 114.0], index=dates)
