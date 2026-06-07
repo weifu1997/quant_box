@@ -224,6 +224,46 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(row["model_used"], "ridge_numpy")
         self.assertGreater(int(row["train_rows_used"]), 0)
 
+    def test_build_ml_scores_normalizes_price_and_factor_instruments(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=18)
+        instruments = ["000001.SZ", "600519.SH", "000002.SZ"]
+        index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {"F1": range(len(index)), "F2": range(len(index), 0, -1)},
+            index=index,
+            dtype=float,
+        )
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame(
+                    {
+                        instrument.lower(): [10.0 + day + offset for day in range(len(dates))]
+                        for offset, instrument in enumerate(instruments)
+                    },
+                    index=dates,
+                )
+            },
+            axis=1,
+        )
+        config = {
+            "ml_strategy": {
+                "enabled": True,
+                "model_type": "ridge_numpy",
+                "train_years": 1,
+                "label_horizon_sessions": 1,
+                "min_train_rows": 6,
+                "max_train_rows": 100,
+                "feature_limit": None,
+            }
+        }
+
+        result = build_ml_scores(factors, prices, config, signal_dates=[dates[-1]])
+
+        self.assertFalse(result.scores.dropna().empty)
+        self.assertEqual(result.diagnostics.iloc[0]["model_used"], "ridge_numpy")
+        self.assertGreater(int(result.diagnostics.iloc[0]["train_rows_available"]), 0)
+        self.assertEqual(set(result.scores.index.get_level_values("instrument")), set(instruments))
+
     def test_build_ml_scores_supports_fractional_train_years(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=140)
         instruments = ["A", "B", "C"]

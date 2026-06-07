@@ -274,7 +274,7 @@ def build_ml_scores(
 
 def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
-    instruments = factors.index.get_level_values(1).astype(str)
+    instruments = [_normalize_instrument(value) for value in factors.index.get_level_values(1)]
     normalized_index = pd.MultiIndex.from_arrays([dates, instruments], names=["datetime", "instrument"])
     if factors.index.equals(normalized_index):
         return factors
@@ -304,19 +304,23 @@ def _close_frame(prices: pd.DataFrame) -> pd.DataFrame:
     if prices.empty:
         return pd.DataFrame()
     if isinstance(prices.columns, pd.MultiIndex):
-        fields = prices.columns.get_level_values(0).astype(str).str.lower()
+        fields = prices.columns.get_level_values(0).astype(str).str.strip().str.lower()
         if "close" not in set(fields):
             return pd.DataFrame(index=prices.index)
         close = prices.loc[:, fields == "close"].copy()
-        close.columns = close.columns.get_level_values(-1).astype(str)
+        close.columns = [_normalize_instrument(value) for value in close.columns.get_level_values(-1)]
     elif "close" in prices.columns:
         close = prices[["close"]].copy()
     else:
         close = prices.copy()
-        close.columns = close.columns.astype(str)
+        close.columns = [_normalize_instrument(value) for value in close.columns]
     close.index = pd.to_datetime(close.index).normalize()
+    close.columns = [_normalize_instrument(value) for value in close.columns]
+    close = close.loc[:, close.columns != ""]
+    if close.columns.has_duplicates:
+        close = close.loc[:, ~close.columns.duplicated(keep="last")]
     close = close[~close.index.duplicated(keep="last")].sort_index()
-    return close.apply(pd.to_numeric, errors="coerce")
+    return close.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
 
 
 def _price_history_counts(close: pd.DataFrame, target_index: pd.MultiIndex, min_sessions: int) -> pd.Series | None:
@@ -328,11 +332,17 @@ def _price_history_counts(close: pd.DataFrame, target_index: pd.MultiIndex, min_
     normalized_index = pd.MultiIndex.from_arrays(
         [
             pd.to_datetime(target_index.get_level_values(0)).normalize(),
-            target_index.get_level_values(1).astype(str),
+            [_normalize_instrument(value) for value in target_index.get_level_values(1)],
         ],
         names=["datetime", "instrument"],
     )
     return stacked.reindex(normalized_index).fillna(0.0)
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _resolve_signal_dates(
