@@ -527,6 +527,7 @@ def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:
         std = df.std(ddof=0).replace(0, pd.NA)
         return _mask_nonfinite((df - df.mean()) / std)
 
+    df = _normalize_factor_frame_for_scoring(df)
     date_level = df.index.names[0] or 0
     parts: list[pd.DataFrame] = []
     for _date, daily in df.groupby(level=date_level, sort=False):
@@ -545,6 +546,37 @@ def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:
     if not parts:
         return pd.DataFrame(index=df.index, columns=df.columns, dtype="float32")
     return pd.concat(parts).sort_index()
+
+
+def _normalize_factor_frame_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    if df.index.nlevels != 2:
+        raise ValueError("factor_df must use two index levels: datetime/instrument.")
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(df.index.get_level_values(0), errors="coerce"))
+    raw_instruments = pd.Index(df.index.get_level_values(1))
+    frame = pd.DataFrame(
+        {
+            "date": raw_dates.normalize(),
+            "raw_date": raw_dates,
+            "instrument": raw_instruments.astype(object).to_numpy(),
+            "instrument_key": raw_instruments.astype(str).to_numpy(),
+            "position": range(len(df)),
+        }
+    )
+    frame = frame[frame["date"].notna() & pd.notna(frame["instrument"])]
+    if frame.empty:
+        result = df.iloc[0:0].copy()
+        result.index = pd.MultiIndex.from_arrays([[], []], names=df.index.names)
+        return result
+    frame = frame.sort_values(
+        ["date", "instrument_key", "raw_date", "position"],
+        kind="mergesort",
+        na_position="first",
+    ).drop_duplicates(["date", "instrument_key"], keep="last")
+    result = df.iloc[frame["position"].to_numpy()].copy()
+    result.index = pd.MultiIndex.from_arrays([frame["date"], frame["instrument"]], names=df.index.names)
+    return result.sort_index()
 
 
 def _mask_nonfinite(df: pd.DataFrame) -> pd.DataFrame:

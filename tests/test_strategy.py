@@ -146,6 +146,25 @@ class StrategyTests(unittest.TestCase):
 
         self.assertTrue(pd.notna(scores.loc[(pd.Timestamp("2024-01-02"), "C")]))
 
+    def test_composite_factor_groups_intraday_rows_by_trade_date(self) -> None:
+        index = pd.MultiIndex.from_tuples(
+            [
+                (pd.Timestamp("2024-01-02 15:00"), "A"),
+                (pd.Timestamp("2024-01-02 09:30"), "B"),
+                (pd.Timestamp("2024-01-02 09:30"), "C"),
+            ],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"ROC5": [3.0, 2.0, 1.0]}, index=index)
+
+        scores = composite_factor(factors, method="momentum", min_obs=3)
+
+        self.assertEqual(set(scores.index.get_level_values(0)), {pd.Timestamp("2024-01-02")})
+        self.assertFalse(scores.isna().any())
+        daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
+        self.assertGreater(float(daily.loc["A"]), float(daily.loc["B"]))
+        self.assertGreater(float(daily.loc["B"]), float(daily.loc["C"]))
+
     def test_composite_factor_selects_group_columns_before_scoring(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
