@@ -30,11 +30,12 @@ def apply_regime_score_blend(
         REGIME_BEAR: float(cfg.get("bear_defensive_weight", 1.0)),
     }
 
+    normalized_scores = _normalize_score_index(scores)
     normalized_factors = _normalize_factor_index(factors)
     parts: list[pd.Series] = []
     dates_blended = 0
     component_hits = 0
-    for date, daily_scores in scores.groupby(level=0, sort=True):
+    for date, daily_scores in normalized_scores.groupby(level=0, sort=True):
         date_key = pd.Timestamp(date).normalize()
         daily = _normalize_daily_scores(daily_scores)
         state = regime_for_date(regimes, date_key)
@@ -86,12 +87,13 @@ def apply_regime_score_filter(
     if not rules:
         return scores, {"enabled": True, "dates_filtered": 0, "rules": 0}
 
+    normalized_scores = _normalize_score_index(scores)
     normalized_factors = _normalize_factor_index(factors)
     parts: list[pd.Series] = []
     dates_filtered = 0
     rows_before = 0
     rows_after = 0
-    for date, daily_scores in scores.groupby(level=0, sort=True):
+    for date, daily_scores in normalized_scores.groupby(level=0, sort=True):
         date_key = pd.Timestamp(date).normalize()
         daily = _normalize_daily_scores(daily_scores)
         rule = _rule_for_regime(rules, regime_for_date(regimes, date_key))
@@ -178,13 +180,54 @@ def _filter_threshold(filter_score: pd.Series, rule: dict[str, Any]) -> float:
 
 
 def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
-    dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(0), errors="coerce"))
     instruments = [_normalize_instrument(value) for value in factors.index.get_level_values(1)]
-    normalized = factors.copy(deep=False)
-    normalized.index = pd.MultiIndex.from_arrays([dates, instruments], names=["datetime", "instrument"])
-    normalized = normalized[normalized.index.get_level_values("instrument") != ""]
-    if normalized.index.has_duplicates:
-        normalized = normalized.groupby(level=["datetime", "instrument"], sort=False).last()
+    frame = pd.DataFrame(
+        {
+            "date": raw_dates.normalize(),
+            "raw_date": raw_dates,
+            "instrument": instruments,
+            "position": range(len(factors)),
+        }
+    )
+    frame = frame[frame["date"].notna() & (frame["instrument"] != "")]
+    if frame.empty:
+        empty = factors.iloc[0:0].copy()
+        empty.index = pd.MultiIndex.from_arrays([[], []], names=["datetime", "instrument"])
+        return empty
+    frame = frame.sort_values(
+        ["date", "instrument", "raw_date", "position"],
+        kind="mergesort",
+        na_position="first",
+    ).drop_duplicates(["date", "instrument"], keep="last")
+    normalized = factors.iloc[frame["position"].to_numpy()].copy()
+    normalized.index = pd.MultiIndex.from_arrays([frame["date"], frame["instrument"]], names=["datetime", "instrument"])
+    return normalized.sort_index()
+
+
+def _normalize_score_index(scores: pd.Series) -> pd.Series:
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0), errors="coerce"))
+    values = pd.to_numeric(pd.Series(scores.to_numpy()), errors="coerce").to_numpy()
+    frame = pd.DataFrame(
+        {
+            "date": raw_dates.normalize(),
+            "raw_date": raw_dates,
+            "instrument": [_normalize_instrument(value) for value in scores.index.get_level_values(1)],
+            "score": values,
+            "position": range(len(scores)),
+        }
+    )
+    frame = frame[frame["date"].notna() & (frame["instrument"] != "")]
+    if frame.empty:
+        return pd.Series(dtype=float, name=scores.name)
+    frame = frame.sort_values(
+        ["date", "instrument", "raw_date", "score", "position"],
+        kind="mergesort",
+        na_position="first",
+    ).drop_duplicates(["date", "instrument"], keep="last")
+    index = pd.MultiIndex.from_arrays([frame["date"], frame["instrument"]], names=scores.index.names)
+    normalized = pd.Series(frame["score"].to_numpy(), index=index, name=scores.name)
+    normalized.attrs = dict(getattr(scores, "attrs", {}))
     return normalized.sort_index()
 
 

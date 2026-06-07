@@ -91,6 +91,72 @@ class ScoreBlendingTests(unittest.TestCase):
         daily = blended.xs(date, level=0)
         self.assertGreater(float(daily.loc["A"]), float(daily.loc["B"]))
 
+    def test_regime_score_blend_uses_latest_intraday_scores_per_date(self) -> None:
+        date = pd.Timestamp("2024-01-31")
+        scores = pd.Series(
+            [100.0, 1.0, 1.0, 100.0],
+            index=pd.MultiIndex.from_tuples(
+                [
+                    (pd.Timestamp("2024-01-31 09:30"), "A"),
+                    (pd.Timestamp("2024-01-31 09:30"), "B"),
+                    (pd.Timestamp("2024-01-31 15:00"), "A"),
+                    (pd.Timestamp("2024-01-31 15:00"), "B"),
+                ],
+                names=["datetime", "instrument"],
+            ),
+            name="score",
+        )
+        factor_index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"ROC20": [0.0, 0.0]}, index=factor_index)
+        regimes = pd.Series(["bear"], index=[date], name="market_regime")
+
+        blended, summary = apply_regime_score_blend(
+            scores,
+            factors,
+            regimes,
+            {
+                "enabled": True,
+                "bear_defensive_weight": 0.5,
+                "defensive_components": [{"column": "ROC20", "direction": 1.0}],
+            },
+        )
+
+        self.assertFalse(blended.index.has_duplicates)
+        self.assertEqual(summary["dates_blended"], 1)
+        daily = blended.xs(date, level=0)
+        self.assertGreater(float(daily.loc["B"]), float(daily.loc["A"]))
+
+    def test_regime_score_blend_uses_latest_intraday_factors_per_instrument(self) -> None:
+        date = pd.Timestamp("2024-01-31")
+        index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
+        scores = pd.Series([0.0, 0.0], index=index, name="score")
+        factors = pd.DataFrame(
+            {"ROC20": [1.0, -1.0, 0.0]},
+            index=pd.MultiIndex.from_tuples(
+                [
+                    (pd.Timestamp("2024-01-31 15:00"), "A"),
+                    (pd.Timestamp("2024-01-31 09:30"), "A"),
+                    (pd.Timestamp("2024-01-31 15:00"), "B"),
+                ],
+                names=["datetime", "instrument"],
+            ),
+        )
+        regimes = pd.Series(["bear"], index=[date], name="market_regime")
+
+        blended, _summary = apply_regime_score_blend(
+            scores,
+            factors,
+            regimes,
+            {
+                "enabled": True,
+                "bear_defensive_weight": 1.0,
+                "defensive_components": [{"column": "ROC20", "direction": 1.0}],
+            },
+        )
+
+        daily = blended.xs(date, level=0)
+        self.assertGreater(float(daily.loc["A"]), float(daily.loc["B"]))
+
     def test_regime_score_filter_masks_weak_bear_candidates(self) -> None:
         date = pd.Timestamp("2024-01-31")
         index = pd.MultiIndex.from_product([[date], ["A", "B", "C"]], names=["datetime", "instrument"])
