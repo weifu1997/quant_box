@@ -331,10 +331,10 @@ def _read_calendar_file(path: Path) -> pd.DatetimeIndex:
     if set(first_row) & known_headers:
         frame.columns = first_row
         frame = frame.iloc[1:].reset_index(drop=True)
-    lower_columns = {str(col).lower(): col for col in frame.columns}
+    lower_columns = {str(col).strip().lower(): col for col in frame.columns}
     if "is_open" in lower_columns:
         open_col = lower_columns["is_open"]
-        frame = frame[frame[open_col].astype(str).isin({"1", "1.0", "true", "True"})]
+        frame = frame[_open_day_mask(frame[open_col])]
     date_col = next(
         (lower_columns[name] for name in ["cal_date", "trade_date", "date", "datetime"] if name in lower_columns),
         frame.columns[0],
@@ -374,8 +374,13 @@ def _tushare_trade_calendar(config: dict, now_dt: datetime) -> pd.DatetimeIndex:
     if frame.empty or "cal_date" not in frame.columns:
         return pd.DatetimeIndex([])
     if "is_open" in frame.columns:
-        frame = frame[frame["is_open"].astype(str).isin({"1", "1.0", "true", "True"})]
+        frame = frame[_open_day_mask(frame["is_open"])]
     return _normalize_calendar(frame["cal_date"])
+
+
+def _open_day_mask(series: pd.Series) -> pd.Series:
+    text = series.astype("string").str.strip().str.lower()
+    return text.isin({"1", "1.0", "true", "t", "yes", "y", "open"})
 
 
 def _a_trade_calendar(config: dict, now_dt: datetime) -> pd.DatetimeIndex:

@@ -177,13 +177,30 @@ def _read_calendar_dates(path: Path) -> list[str]:
     frame = pd.read_csv(path, header=None)
     if frame.empty:
         return []
-    raw = frame.iloc[:, 0].dropna().astype(str).str.strip()
+    first_row = [str(value).strip().lower() for value in frame.iloc[0].tolist()]
+    known_headers = {"cal_date", "trade_date", "date", "datetime", "is_open"}
+    if set(first_row) & known_headers:
+        frame.columns = first_row
+        frame = frame.iloc[1:].reset_index(drop=True)
+    lower_columns = {str(col).strip().lower(): col for col in frame.columns}
+    if "is_open" in lower_columns:
+        frame = frame[_open_day_mask(frame[lower_columns["is_open"]])]
+    date_col = next(
+        (lower_columns[name] for name in ["cal_date", "trade_date", "date", "datetime"] if name in lower_columns),
+        frame.columns[0],
+    )
+    raw = frame[date_col].dropna().astype(str).str.strip()
     raw = raw[~raw.str.lower().isin({"cal_date", "trade_date", "date", "datetime"})]
     compact = raw.str.replace("-", "", regex=False).str.replace("/", "", regex=False)
     parsed = pd.to_datetime(compact, format="%Y%m%d", errors="coerce")
     fallback = pd.to_datetime(raw, errors="coerce")
     dates = pd.Series(parsed).where(pd.Series(parsed).notna(), pd.Series(fallback))
     return sorted({pd.Timestamp(date).strftime("%Y-%m-%d") for date in dates.dropna()})
+
+
+def _open_day_mask(series: pd.Series) -> pd.Series:
+    text = series.astype("string").str.strip().str.lower()
+    return text.isin({"1", "1.0", "true", "t", "yes", "y", "open"})
 
 
 def _close_panel(feature_df: pd.DataFrame, code: str) -> pd.Series:

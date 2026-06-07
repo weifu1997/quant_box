@@ -118,6 +118,24 @@ class TradingCalendarTests(unittest.TestCase):
 
         self.assertEqual(str(next_date.date()), "2024-02-19")
 
+    def test_next_business_day_normalizes_calendar_is_open_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = Path(tmp) / "qlib_data"
+            calendar_dir = provider / "calendars"
+            calendar_dir.mkdir(parents=True)
+            (calendar_dir / "day.txt").write_text(
+                "cal_date,is_open\n2024-02-08, TRUE \n2024-02-09, false \n2024-02-19,1\n",
+                encoding="utf-8",
+            )
+            config = {"qlib": {"provider_uri": str(provider)}, "ic": {"price_file": str(Path(tmp) / "missing.parquet")}}
+
+            with patch("src.trading_calendar._a_trade_calendar_next_trade_date", return_value=None):
+                first = next_business_day("2024-02-07", config=config)
+                second = next_business_day("2024-02-08", config=config)
+
+        self.assertEqual(str(first.date()), "2024-02-08")
+        self.assertEqual(str(second.date()), "2024-02-19")
+
     def test_next_business_day_strict_raises_without_trade_calendar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.trading_calendar._a_trade_calendar_next_trade_date", return_value=None):
