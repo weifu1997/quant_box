@@ -172,6 +172,32 @@ class FactorICTests(unittest.TestCase):
         self.assertEqual(ic.index.to_list(), [base_date])
         self.assertAlmostEqual(float(ic.loc[base_date, "F1"]), 1.0)
 
+    def test_calculate_factor_ic_uses_latest_intraday_factor_per_instrument(self) -> None:
+        base_date = pd.Timestamp("2024-01-02")
+        index = pd.MultiIndex.from_tuples(
+            [
+                (pd.Timestamp("2024-01-02 15:00"), "A"),
+                (pd.Timestamp("2024-01-02 09:30"), "A"),
+                (pd.Timestamp("2024-01-02 15:00"), "B"),
+                (pd.Timestamp("2024-01-02 15:00"), "C"),
+            ],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": [1.0, 100.0, 50.0, 10.0]}, index=index)
+        prices = pd.DataFrame(
+            {
+                "A": [10.0, 11.0],
+                "B": [10.0, 13.0],
+                "C": [10.0, 12.0],
+            },
+            index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
+        )
+
+        ic = calculate_factor_ic(factors, prices, method="spearman", min_obs=3)
+
+        self.assertEqual(ic.index.to_list(), [base_date])
+        self.assertAlmostEqual(float(ic.loc[base_date, "F1"]), 1.0)
+
     def test_calculate_factor_ic_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates[:2], ["a", "b", "c"]], names=["datetime", "instrument"])

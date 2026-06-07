@@ -39,8 +39,7 @@ def calculate_factor_ic(
             daily_returns = returns.xs(date_key, level=0, drop_level=True)
         except KeyError:
             continue
-        daily = daily_factors.droplevel(date_level).copy()
-        daily = _normalize_instrument_frame(daily)
+        daily = _normalize_daily_factor_frame(daily_factors, date_level)
         daily_returns = _normalize_instrument_series(daily_returns)
         aligned = daily.join(daily_returns, how="inner").dropna(subset=["forward_return"])
         if aligned.empty:
@@ -318,6 +317,36 @@ def _normalize_instrument_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if result.index.has_duplicates:
         result = result[~result.index.duplicated(keep="last")]
     return result
+
+
+def _normalize_daily_factor_frame(frame: pd.DataFrame, date_level: str | int) -> pd.DataFrame:
+    if frame.empty:
+        return frame.droplevel(date_level)
+    instrument_level = _instrument_level(frame.index, date_level)
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(frame.index.get_level_values(date_level), errors="coerce"))
+    instruments = [_normalize_instrument(value) for value in frame.index.get_level_values(instrument_level)]
+    keep_by_instrument: dict[str, int] = {}
+    for position, (raw_date, instrument) in enumerate(zip(raw_dates, instruments)):
+        if pd.isna(raw_date) or not instrument:
+            continue
+        current = keep_by_instrument.get(instrument)
+        if current is None or (pd.Timestamp(raw_date), position) >= (pd.Timestamp(raw_dates[current]), current):
+            keep_by_instrument[instrument] = position
+    if not keep_by_instrument:
+        result = frame.iloc[0:0].copy()
+        result.index = pd.Index([], name="instrument")
+        return result
+    keep_positions = sorted(keep_by_instrument.values())
+    result = frame.iloc[keep_positions].copy()
+    result.index = pd.Index([instruments[position] for position in keep_positions], name="instrument")
+    return result
+
+
+def _instrument_level(index: pd.MultiIndex, date_level: str | int) -> str | int:
+    if index.nlevels != 2:
+        raise ValueError("factor_df must use two index levels: datetime/instrument.")
+    date_position = index.names.index(date_level) if isinstance(date_level, str) else int(date_level)
+    return 1 - date_position
 
 
 def _normalize_instrument_series(series: pd.Series) -> pd.Series:
