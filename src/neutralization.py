@@ -32,12 +32,16 @@ def load_daily_basic(path: str | Path) -> pd.DataFrame:
     if frame.empty or "ts_code" not in frame.columns or "trade_date" not in frame.columns:
         return pd.DataFrame()
     frame = frame.copy()
-    frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce").dt.normalize()
+    raw_trade_dates = _parse_datetime_values(frame["trade_date"])
+    frame["_raw_trade_date"] = raw_trade_dates
+    frame["trade_date"] = raw_trade_dates.dt.normalize()
     frame["ts_code"] = frame["ts_code"].map(_normalize_instrument)
     frame = frame.dropna(subset=["trade_date", "ts_code"])
     frame = frame[frame["ts_code"] != ""]
+    frame["_position"] = range(len(frame))
+    frame = frame.sort_values(["trade_date", "ts_code", "_raw_trade_date", "_position"], kind="mergesort")
     frame = frame.drop_duplicates(["trade_date", "ts_code"], keep="last")
-    return frame.set_index(["trade_date", "ts_code"]).sort_index()
+    return frame.drop(columns=["_raw_trade_date", "_position"]).set_index(["trade_date", "ts_code"]).sort_index()
 
 
 def neutralize_score_panel(
@@ -70,7 +74,8 @@ def neutralize_score_panel(
     dates_neutralized = 0
     industry_dates = 0
     market_cap_dates = 0
-    for date, daily_scores in scores.groupby(level=0, sort=True):
+    normalized_scores = _normalize_score_index(scores)
+    for date, daily_scores in normalized_scores.groupby(level=0, sort=True):
         daily = daily_scores.droplevel(0).astype(float).copy()
         neutralized = daily.copy()
         normalized_symbols = pd.Index([_normalize_instrument(value) for value in neutralized.index])
@@ -118,10 +123,45 @@ def neutralize_score_panel(
     }
 
 
+def _normalize_score_index(scores: pd.Series) -> pd.Series:
+    raw_dates = _parse_datetime_values(scores.index.get_level_values(0))
+    raw_instruments = scores.index.get_level_values(1)
+    values = pd.to_numeric(pd.Series(scores.to_numpy()), errors="coerce").to_numpy()
+    frame = pd.DataFrame(
+        {
+            "date": raw_dates.dt.normalize(),
+            "raw_date": raw_dates,
+            "instrument": [_normalize_instrument(value) for value in raw_instruments],
+            "label": list(raw_instruments),
+            "score": values,
+            "position": range(len(scores)),
+        }
+    )
+    frame = frame[frame["date"].notna() & (frame["instrument"] != "")]
+    if frame.empty:
+        return pd.Series(dtype=float, name=scores.name)
+    frame = frame.sort_values(
+        ["date", "instrument", "raw_date", "score", "position"],
+        kind="mergesort",
+        na_position="first",
+    ).drop_duplicates(["date", "instrument"], keep="last")
+    index = pd.MultiIndex.from_arrays([frame["date"], frame["label"]], names=scores.index.names)
+    result = pd.Series(frame["score"].to_numpy(), index=index, name=scores.name)
+    return result.sort_index()
+
+
 def _normalize_instrument(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
+
+
+def _parse_datetime_values(values: object) -> pd.Series:
+    parsed = pd.to_datetime(values, errors="coerce")
+    if pd.Series(parsed).isna().any():
+        mixed = pd.to_datetime(values, errors="coerce", format="mixed")
+        parsed = pd.Series(parsed).where(pd.Series(parsed).notna(), pd.Series(mixed))
+    return pd.Series(parsed)
 
 
 def _market_cap_residual(scores: pd.Series, market_cap: pd.Series, min_obs: int) -> pd.Series | None:

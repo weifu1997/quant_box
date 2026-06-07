@@ -70,6 +70,34 @@ class NeutralizationTests(unittest.TestCase):
         self.assertAlmostEqual(float(daily.loc["d"]), 2.0)
         self.assertEqual(summary["industry_dates"], 1)
 
+    def test_neutralize_score_panel_uses_latest_intraday_scores_per_date(self) -> None:
+        date = pd.Timestamp("2024-01-31")
+        scores = pd.Series(
+            [100.0, 1.0, 1.0, 100.0],
+            index=pd.MultiIndex.from_tuples(
+                [
+                    (pd.Timestamp("2024-01-31 09:30"), "A"),
+                    (pd.Timestamp("2024-01-31 09:30"), "B"),
+                    (pd.Timestamp("2024-01-31 15:00"), "A"),
+                    (pd.Timestamp("2024-01-31 15:00"), "B"),
+                ],
+                names=["datetime", "instrument"],
+            ),
+            name="score",
+        )
+        industry = pd.Series({"A": "bank", "B": "bank"})
+
+        neutralized, summary = neutralize_score_panel(
+            scores,
+            industry_map=industry,
+            config={"enabled": True, "industry": True, "market_cap": False},
+        )
+
+        self.assertFalse(neutralized.index.has_duplicates)
+        self.assertEqual(summary["dates_neutralized"], 1)
+        daily = neutralized.xs(date, level=0)
+        self.assertGreater(float(daily.loc["B"]), float(daily.loc["A"]))
+
     def test_neutralize_score_panel_can_residualize_market_cap(self) -> None:
         date = pd.Timestamp("2024-01-31")
         instruments = ["A", "B", "C", "D"]
@@ -121,9 +149,9 @@ class NeutralizationTests(unittest.TestCase):
             pd.DataFrame({"ts_code": [" 000001.sz "], "industry": ["Bank"]}).to_csv(industry_file, index=False)
             pd.DataFrame(
                 {
-                    "trade_date": ["2024-01-31"],
-                    "ts_code": [" 000001.sz "],
-                    "circ_mv": [100.0],
+                    "trade_date": ["2024-01-31", "2024-01-31 15:00", "2024-01-31 09:30"],
+                    "ts_code": [" 000001.sz ", "600519.SH", "600519.SH"],
+                    "circ_mv": [100.0, 200.0, 999.0],
                 }
             ).to_parquet(basic_file)
 
@@ -131,7 +159,8 @@ class NeutralizationTests(unittest.TestCase):
             daily_basic = load_daily_basic(basic_file)
 
         self.assertEqual(industry.index.tolist(), ["000001.SZ"])
-        self.assertEqual(daily_basic.index.get_level_values("ts_code").tolist(), ["000001.SZ"])
+        self.assertEqual(daily_basic.index.get_level_values("ts_code").tolist(), ["000001.SZ", "600519.SH"])
+        self.assertEqual(float(daily_basic.loc[(pd.Timestamp("2024-01-31"), "600519.SH"), "circ_mv"]), 200.0)
 
 
 if __name__ == "__main__":
