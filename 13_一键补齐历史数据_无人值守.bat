@@ -8,7 +8,7 @@ set "PYTHON=python"
 if exist "%~dp0.venv\Scripts\python.exe" set "PYTHON=%~dp0.venv\Scripts\python.exe"
 
 set "START_DATE=2012-01-01"
-set "END_DATE=2026-06-04"
+set "END_DATE=auto"
 set "RAW_LOOPS=100"
 set "RAW_CHUNK_SIZE=40"
 set "RAW_SLEEP_SECONDS=0"

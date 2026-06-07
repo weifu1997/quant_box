@@ -52,6 +52,23 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("刷新缺失和过期股票", readme)
         self.assertIn("data health", readme)
 
+    def test_unattended_history_backfill_uses_auto_target_date(self) -> None:
+        backfill = (ROOT / "13_一键补齐历史数据_无人值守.bat").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn('set "END_DATE=auto"', backfill)
+        self.assertNotIn('set "END_DATE=2026-06-04"', backfill)
+        self.assertIn("自动解析的目标交易日", readme)
+
+    def test_strategy_summary_matches_current_settings(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("因子组：`momentum`", readme)
+        self.assertIn("排名缓冲：20", readme)
+        self.assertIn("底部 35% 股票", readme)
+        self.assertIn("固定组合熔断当前关闭", readme)
+        self.assertIn("配置 35% 个股止盈", readme)
+
     def test_bat_files_are_utf8_and_use_crlf_line_endings(self) -> None:
         for path in BAT_FILES:
             data = path.read_bytes()

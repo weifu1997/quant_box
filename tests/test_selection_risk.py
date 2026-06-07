@@ -39,6 +39,21 @@ class SelectionRiskTests(unittest.TestCase):
         self.assertEqual(float(filtered.loc["A"]), 2.0)
         self.assertEqual(float(filtered.loc["B"]), 1.0)
 
+    def test_limit_down_uses_previous_close_before_lookback_window(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        prices = _price_panel(
+            dates,
+            open_values={"A": [10.0, 8.9, 9.1], "B": [10.0, 9.2, 9.3]},
+            close_values={"A": [10.0, 8.9, 9.1], "B": [10.0, 9.2, 9.3]},
+            low_values={"A": [10.0, 8.9, 9.1], "B": [10.0, 9.2, 9.3]},
+        )
+        scores = pd.Series([2.0, 1.0], index=["A", "B"], name="score")
+
+        filtered = filter_scores_by_selection_risk(scores, prices, "2024-01-04", _config())
+
+        self.assertTrue(pd.isna(filtered.loc["A"]))
+        self.assertEqual(float(filtered.loc["B"]), 1.0)
+
     def test_filter_matches_price_columns_case_insensitively(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         prices = pd.concat(
