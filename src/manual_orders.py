@@ -68,7 +68,7 @@ def load_current_holdings(config: dict | None = None) -> pd.DataFrame:
     result["instrument"] = result["instrument"].map(_normalize_instrument)
     result["shares"] = pd.to_numeric(result["shares"], errors="coerce")
     result = result[result["instrument"] != ""]
-    return result.drop_duplicates("instrument", keep="last").reset_index(drop=True)
+    return result.reset_index(drop=True)
 
 
 def generate_manual_orders(
@@ -299,15 +299,15 @@ def save_execution_templates(
 
 
 def apply_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFrame) -> pd.DataFrame:
+    issues = validate_fill_feedback(current_holdings, fill_feedback)
+    if issues:
+        raise ValueError("Invalid fill feedback: " + ",".join(issues[:10]))
     current_map = _current_share_map(current_holdings)
     if fill_feedback.empty:
         return pd.DataFrame(
             {"instrument": list(current_map), "shares": [current_map[instrument] for instrument in current_map]}
         ).sort_values("instrument").reset_index(drop=True)
     fills = fill_feedback.copy()
-    issues = validate_fill_feedback(current_holdings, fills)
-    if issues:
-        raise ValueError("Invalid fill feedback: " + ",".join(issues[:10]))
     status = fills.get("fill_status", pd.Series("FILLED", index=fills.index)).fillna("").astype(str).str.strip().str.upper()
     valid_status = status.isin({"FILLED", "PARTIAL"})
     for _, row in fills[valid_status].iterrows():
@@ -329,13 +329,17 @@ def apply_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFr
 
 
 def validate_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFrame) -> list[str]:
+    current_issues = _current_holdings_feedback_issues(current_holdings)
     if fill_feedback.empty:
-        return []
-    issues: list[str] = []
+        return current_issues
+    issues: list[str] = list(current_issues)
     required_columns = ["instrument", "side", "planned_order_shares", "fill_status", "executed_shares"]
     missing_columns = [column for column in required_columns if column not in fill_feedback.columns]
     if missing_columns:
-        return ["fill_feedback_missing_columns:" + ",".join(missing_columns)]
+        issues.append("fill_feedback_missing_columns:" + ",".join(missing_columns))
+        return issues
+    if current_issues:
+        return issues
 
     fills = fill_feedback.copy()
     current_map = {instrument: float(shares or 0.0) for instrument, shares in _current_share_map(current_holdings).items()}
@@ -410,6 +414,32 @@ def _current_share_map(current_holdings: pd.DataFrame) -> dict[str, float | None
         shares = row.get("shares")
         result[instrument] = None if pd.isna(shares) else float(shares)
     return result
+
+
+def _current_holdings_feedback_issues(current_holdings: pd.DataFrame) -> list[str]:
+    if current_holdings.empty:
+        return []
+    missing_columns = [column for column in ("instrument", "shares") if column not in current_holdings.columns]
+    if missing_columns:
+        return ["current_holdings_missing_columns:" + ",".join(missing_columns)]
+    issues: list[str] = []
+    seen: set[str] = set()
+    for idx, row in current_holdings.iterrows():
+        instrument = _normalize_instrument(row.get("instrument", ""))
+        row_ref = instrument or f"row_{idx}"
+        if not _valid_instrument(instrument):
+            issues.append(f"invalid_current_holding:{row_ref}")
+        if instrument:
+            if instrument in seen:
+                issues.append(f"duplicate_current_holding:{instrument}")
+            seen.add(instrument)
+        shares = pd.to_numeric(row.get("shares"), errors="coerce")
+        if pd.isna(shares):
+            issues.append(f"invalid_current_shares:{row_ref}")
+            continue
+        if float(shares) < 0:
+            issues.append(f"negative_current_shares:{row_ref}")
+    return issues
 
 
 def _signal_action_map(signal_df: pd.DataFrame) -> dict[str, str]:

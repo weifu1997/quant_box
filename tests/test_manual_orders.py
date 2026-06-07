@@ -15,6 +15,7 @@ from src.manual_orders import (
     load_current_holdings,
     save_execution_templates,
     validate_fill_feedback,
+    validate_current_holdings,
 )
 
 
@@ -442,7 +443,7 @@ class ManualOrdersTests(unittest.TestCase):
                 config={"strategy": {}},
             )
 
-    def test_load_current_holdings_normalizes_and_deduplicates_instruments(self) -> None:
+    def test_load_current_holdings_preserves_duplicates_for_validation(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "current_holdings.csv"
             pd.DataFrame(
@@ -454,10 +455,19 @@ class ManualOrdersTests(unittest.TestCase):
 
             holdings = load_current_holdings({"account": {"current_holdings_file": str(path)}})
 
-        by_code = holdings.set_index("instrument")
-        self.assertEqual(sorted(by_code.index.tolist()), ["000001.SZ", "600519.SH"])
-        self.assertEqual(float(by_code.loc["000001.SZ", "shares"]), 300.0)
-        self.assertEqual(float(by_code.loc["600519.SH", "shares"]), 400.0)
+        self.assertEqual(holdings["instrument"].tolist(), ["000001.SZ", "000001.SZ", "600519.SH"])
+        self.assertEqual([float(value) for value in holdings["shares"].tolist()], [100.0, 300.0, 400.0])
+        account = AccountState(
+            total_asset=100000,
+            cash=10000,
+            max_position_pct=None,
+            lot_size=100,
+            star_market_lot_size=200,
+            source_file="",
+            holdings_file="",
+            holdings_loaded=True,
+        )
+        self.assertIn("duplicate_instrument:000001.SZ", validate_current_holdings(holdings, account))
 
     def test_execution_templates_mark_actionable_orders_for_confirmation_and_fill_feedback(self) -> None:
         orders = pd.DataFrame(
@@ -551,6 +561,26 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(updated.loc["000001.SZ", "shares"]), 1200.0)
         self.assertEqual(float(updated.loc["600519.SH", "shares"]), 200.0)
         self.assertNotIn("000002.SZ", updated.index)
+
+    def test_apply_fill_feedback_rejects_duplicate_current_holdings(self) -> None:
+        current = pd.DataFrame({"instrument": ["000001.SZ", "000001.sz"], "shares": [100, 500]})
+        fills = pd.DataFrame(
+            [
+                {
+                    "instrument": "000001.SZ",
+                    "side": "SELL",
+                    "planned_order_shares": -400,
+                    "executed_shares": 400,
+                    "fill_status": "FILLED",
+                }
+            ]
+        )
+
+        issues = validate_fill_feedback(current, fills)
+
+        self.assertIn("duplicate_current_holding:000001.SZ", issues)
+        with self.assertRaisesRegex(ValueError, "duplicate_current_holding"):
+            apply_fill_feedback(current, fills)
 
     def test_validate_fill_feedback_blocks_unfinished_or_invalid_manual_entries(self) -> None:
         current = pd.DataFrame({"instrument": ["000001.SZ"], "shares": [100]})
