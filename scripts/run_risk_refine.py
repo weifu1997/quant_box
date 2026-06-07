@@ -55,6 +55,9 @@ def main() -> None:
     parser.add_argument("--cooldown-days", default="5,10")
     parser.add_argument("--circuit-breaker-target-exposure", default="0.0,0.30")
     parser.add_argument("--rebalance-drift-threshold", default="0.0,0.02,0.05")
+    parser.add_argument("--annual-guard-drawdown", default="none", help="Comma-separated per-year drawdown triggers, or none.")
+    parser.add_argument("--annual-guard-target-exposure", default="0.0", help="Comma-separated target exposures after annual guard triggers.")
+    parser.add_argument("--annual-guard-release-drawdown", default="none", help="Comma-separated same-year release drawdowns, or none.")
     parser.add_argument("--bull-exposure", default=str(config.get("defensive_timing", {}).get("bull_exposure", 1.0)))
     parser.add_argument("--sideways-exposure", default=str(config.get("defensive_timing", {}).get("sideways_exposure", 0.60)))
     parser.add_argument("--bear-exposure", default=str(config.get("defensive_timing", {}).get("bear_exposure", 0.30)))
@@ -104,6 +107,9 @@ def main() -> None:
             _csv_values(args.cooldown_days, int),
             _csv_values(args.circuit_breaker_target_exposure, float),
             _csv_values(args.rebalance_drift_threshold, float),
+            _csv_optional_values(args.annual_guard_drawdown, float),
+            _csv_values(args.annual_guard_target_exposure, float),
+            _csv_optional_values(args.annual_guard_release_drawdown, float),
             _csv_values(args.bull_exposure, float),
             _csv_values(args.sideways_exposure, float),
             _csv_values(args.bear_exposure, float),
@@ -131,6 +137,9 @@ def main() -> None:
         cooldown_days,
         target_exposure,
         rebalance_drift_threshold,
+        annual_guard_drawdown,
+        annual_guard_target_exposure,
+        annual_guard_release_drawdown,
         bull_exposure,
         sideways_exposure,
         bear_exposure,
@@ -140,6 +149,11 @@ def main() -> None:
         bear_defensive_weight,
     ) in enumerate(combos, start=1):
         liquidity_enabled, liquidity_side_key, liquidity_quantile_key = _liquidity_filter_state(liquidity_side, liquidity_quantile)
+        annual_guard_enabled, annual_guard_drawdown_key, annual_guard_target_key, annual_guard_release_key = _annual_guard_state(
+            annual_guard_drawdown,
+            annual_guard_target_exposure,
+            annual_guard_release_drawdown,
+        )
         key = _combo_key(
             factor_group,
             liquidity_side_key,
@@ -155,6 +169,10 @@ def main() -> None:
             cooldown_days,
             target_exposure,
             rebalance_drift_threshold,
+            annual_guard_enabled,
+            annual_guard_drawdown_key,
+            annual_guard_target_key,
+            annual_guard_release_key,
             args.defensive_timing,
             bull_exposure,
             sideways_exposure,
@@ -220,6 +238,12 @@ def main() -> None:
                 "circuit_breaker_cooldown_days": cooldown_days,
                 "circuit_breaker_target_exposure": target_exposure,
                 "rebalance_drift_threshold": rebalance_drift_threshold,
+                "annual_drawdown_guard": _annual_guard_config(
+                    annual_guard_enabled,
+                    annual_guard_drawdown_key,
+                    annual_guard_target_key,
+                    annual_guard_release_key,
+                ),
             }
         )
         bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
@@ -244,6 +268,10 @@ def main() -> None:
             "circuit_breaker_cooldown_days": cooldown_days,
             "circuit_breaker_target_exposure": target_exposure,
             "rebalance_drift_threshold": rebalance_drift_threshold,
+            "annual_guard_enabled": annual_guard_enabled,
+            "annual_guard_drawdown": annual_guard_drawdown_key,
+            "annual_guard_target_exposure": annual_guard_target_key,
+            "annual_guard_release_drawdown": annual_guard_release_key,
             "bull_exposure": bull_exposure,
             "sideways_exposure": sideways_exposure,
             "bear_exposure": bear_exposure,
@@ -293,6 +321,34 @@ def _liquidity_filter_state(side: str, quantile: float) -> tuple[bool, str, floa
     if normalized in LIQUIDITY_DISABLED_SIDES:
         return False, "none", 0.0
     return True, normalized, float(quantile)
+
+
+def _annual_guard_state(
+    drawdown: float | None,
+    target_exposure: float,
+    release_drawdown: float | None,
+) -> tuple[bool, float | None, float, float | None]:
+    if drawdown is None:
+        return False, None, 0.0, None
+    return True, abs(float(drawdown)), max(0.0, min(float(target_exposure), 1.0)), release_drawdown
+
+
+def _annual_guard_config(
+    enabled: bool,
+    drawdown: float | None,
+    target_exposure: float,
+    release_drawdown: float | None,
+) -> dict[str, object]:
+    if not enabled:
+        return {"enabled": False}
+    result: dict[str, object] = {
+        "enabled": True,
+        "drawdown": drawdown,
+        "target_exposure": target_exposure,
+    }
+    if release_drawdown is not None:
+        result["release_drawdown"] = release_drawdown
+    return result
 
 
 def _requested_factor_columns_for_groups(factor_file: str, config: dict[str, Any], factor_groups: list[str]) -> list[str] | None:
@@ -380,6 +436,10 @@ def _combo_key(
     cooldown_days: int,
     target_exposure: float,
     rebalance_drift_threshold: float,
+    annual_guard_enabled: bool,
+    annual_guard_drawdown: float | None,
+    annual_guard_target_exposure: float,
+    annual_guard_release_drawdown: float | None,
     defensive_timing: str,
     bull_exposure: float,
     sideways_exposure: float,
@@ -403,6 +463,10 @@ def _combo_key(
     int,
     float,
     float,
+    bool,
+    float | None,
+    float,
+    float | None,
     str,
     float,
     float,
@@ -427,6 +491,10 @@ def _combo_key(
         int(cooldown_days),
         round(float(target_exposure), 6),
         round(float(rebalance_drift_threshold), 6),
+        _bool_value(annual_guard_enabled),
+        _optional_key(annual_guard_drawdown),
+        round(float(annual_guard_target_exposure), 6),
+        _optional_key(annual_guard_release_drawdown),
         str(defensive_timing).strip().lower(),
         round(float(bull_exposure), 6),
         round(float(sideways_exposure), 6),
@@ -462,6 +530,10 @@ def _completed_keys(
         int,
         float,
         float,
+        bool,
+        float | None,
+        float,
+        float | None,
         str,
         float,
         float,
@@ -490,6 +562,10 @@ def _completed_keys(
         "circuit_breaker_cooldown_days",
         "circuit_breaker_target_exposure",
         "rebalance_drift_threshold",
+        "annual_guard_enabled",
+        "annual_guard_drawdown",
+        "annual_guard_target_exposure",
+        "annual_guard_release_drawdown",
         "defensive_timing",
         "bull_exposure",
         "sideways_exposure",
@@ -517,6 +593,10 @@ def _completed_keys(
             row["circuit_breaker_cooldown_days"],
             row["circuit_breaker_target_exposure"],
             row["rebalance_drift_threshold"],
+            row["annual_guard_enabled"],
+            row["annual_guard_drawdown"],
+            row["annual_guard_target_exposure"],
+            row["annual_guard_release_drawdown"],
             row["defensive_timing"],
             row["bull_exposure"],
             row["sideways_exposure"],
