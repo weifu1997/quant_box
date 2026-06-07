@@ -967,10 +967,12 @@ def _execute_stale_price_exits(
         return capital
 
     close_values = _row_price_dict(close)
-    volume_values = _row_price_dict(_field_on_date(prices, "volume", trade_date))
+    volume_frame = _field(prices, "volume")
+    volume_required = not volume_frame.empty
+    volume_values = _row_price_dict(_field_on_date(prices, "volume", trade_date)) if volume_required else {}
     for stock, shares in list(holdings.items()):
         has_price = stock in close_values
-        has_volume = volume_values.get(stock, 0.0) > 0
+        has_volume = (not volume_required) or volume_values.get(stock, 0.0) > 0
         if has_price and has_volume:
             stale_unpriced_days[stock] = 0
             continue

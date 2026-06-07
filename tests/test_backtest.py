@@ -556,6 +556,29 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(stale_trade["status"], "risk_exit")
         self.assertAlmostEqual(float(stale_trade["price"]), 5.0)
 
+    def test_stale_price_exit_does_not_require_missing_volume_field(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.DataFrame({"A": [10.0, 10.0, 10.0, 10.0]}, index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-05",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "stale_price_exit_days": 2,
+                "slippage": 0.0,
+            },
+        )
+
+        self.assertFalse((result.trades["reason"] == "stale_price_exit").any())
+        self.assertEqual(result.holdings[result.holdings["date"] == dates[-1]]["instrument"].tolist(), ["A"])
+
     def test_circuit_breaker_cooldown_allows_reentry(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09"])
         index = pd.MultiIndex.from_product([dates[:-1], ["A"]], names=["datetime", "instrument"])
