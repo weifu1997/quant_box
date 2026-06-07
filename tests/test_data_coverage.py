@@ -27,6 +27,19 @@ class DataCoverageTests(unittest.TestCase):
         self.assertEqual(summary["gap_dates"], 1)
         self.assertAlmostEqual(float(summary["min_coverage"]), 0.5)
 
+    def test_price_coverage_uses_latest_intraday_snapshot_per_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"])
+        close = pd.DataFrame({"A": [10.0, None, 11.0], "B": [20.0, 21.0, 22.0]}, index=dates)
+        prices = pd.concat({"close": close}, axis=1)
+
+        gaps = build_price_data_gaps(prices, "2024-01-02", "2024-01-03")
+        summary = price_coverage_summary(prices, "2024-01-02", "2024-01-03")
+
+        self.assertTrue(gaps.empty)
+        self.assertEqual(summary["price_dates"], 2)
+        self.assertEqual(summary["gap_dates"], 0)
+        self.assertAlmostEqual(float(summary["min_coverage"]), 1.0)
+
     def test_price_coverage_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         prices = pd.DataFrame(

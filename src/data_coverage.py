@@ -121,7 +121,15 @@ def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
         if _looks_like_field_table(price_df.columns):
             raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
         close = price_df.copy()
-    close.index = pd.to_datetime(close.index).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(close.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    close = close.loc[valid_dates].copy()
+    raw_dates = raw_dates[valid_dates]
+    if not close.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        close = close.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    close.index = raw_dates.normalize()
     close = close[~close.index.duplicated(keep="last")].sort_index()
     return close.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
 

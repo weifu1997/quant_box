@@ -548,7 +548,15 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
 
 def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
     prices = price_df
-    normalized_index = pd.to_datetime(prices.index).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    prices = prices.loc[valid_dates].copy(deep=False)
+    raw_dates = raw_dates[valid_dates]
+    if not prices.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        prices = prices.iloc[order].copy(deep=False)
+        raw_dates = raw_dates[order]
+    normalized_index = raw_dates.normalize()
     if isinstance(prices.columns, pd.MultiIndex):
         if prices.columns.nlevels != 2:
             raise ValueError("price_df MultiIndex columns must be field/instrument.")
