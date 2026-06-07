@@ -370,8 +370,29 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
         frame = frame.loc[:, frame.columns != ""]
         if frame.columns.has_duplicates:
             frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
-        return frame
+        return _normalize_price_field_index(frame)
     return pd.DataFrame(index=prices.index)
+
+
+def _normalize_price_field_index(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(frame.index, errors="coerce"))
+    valid_dates = ~pd.isna(raw_dates)
+    if not valid_dates.all():
+        frame = frame.loc[valid_dates].copy()
+        raw_dates = raw_dates[valid_dates]
+    if frame.empty:
+        return frame
+
+    order = pd.Series(range(len(raw_dates)), index=raw_dates).sort_index(kind="mergesort").to_numpy()
+    if not pd.Index(order).equals(pd.RangeIndex(len(raw_dates))):
+        frame = frame.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    frame.index = raw_dates.normalize()
+    if frame.index.has_duplicates:
+        frame = frame.loc[~frame.index.duplicated(keep="last")]
+    return frame.sort_index()
 
 
 def _normalize_instrument(value: object) -> str:
