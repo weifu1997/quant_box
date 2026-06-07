@@ -63,6 +63,34 @@ class ScoreBlendingTests(unittest.TestCase):
         self.assertGreater(float(daily.loc["000001.SZ"]), float(daily.loc["600519.SH"]))
         self.assertEqual(summary["dates_blended"], 1)
 
+    def test_regime_score_blend_keeps_highest_score_when_normalized_codes_duplicate(self) -> None:
+        date = pd.Timestamp("2024-01-31")
+        scores = pd.Series(
+            [10.0, 1.0, 5.0],
+            index=pd.MultiIndex.from_tuples(
+                [(date, " a "), (date, "A"), (date, "B")],
+                names=["datetime", "instrument"],
+            ),
+            name="score",
+        )
+        factor_index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"ROC20": [1.0, 1.0]}, index=factor_index)
+        regimes = pd.Series(["bear"], index=[date], name="market_regime")
+
+        blended, _summary = apply_regime_score_blend(
+            scores,
+            factors,
+            regimes,
+            {
+                "enabled": True,
+                "bear_defensive_weight": 0.5,
+                "defensive_components": [{"column": "ROC20", "direction": 1.0}],
+            },
+        )
+
+        daily = blended.xs(date, level=0)
+        self.assertGreater(float(daily.loc["A"]), float(daily.loc["B"]))
+
     def test_regime_score_filter_masks_weak_bear_candidates(self) -> None:
         date = pd.Timestamp("2024-01-31")
         index = pd.MultiIndex.from_product([[date], ["A", "B", "C"]], names=["datetime", "instrument"])

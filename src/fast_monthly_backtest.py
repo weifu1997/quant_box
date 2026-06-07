@@ -200,7 +200,8 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
     result = pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=index, name="score")
     result = result[result.index.get_level_values("instrument") != ""]
     if result.index.has_duplicates:
-        result = result.groupby(level=["datetime", "instrument"], sort=False).last()
+        result = result.sort_values(ascending=False, kind="mergesort", na_position="last")
+        result = result[~result.index.duplicated(keep="first")]
     return result.sort_index()
 
 

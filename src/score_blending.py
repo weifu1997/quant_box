@@ -189,11 +189,11 @@ def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_daily_scores(daily_scores: pd.Series) -> pd.Series:
-    daily = daily_scores.droplevel(0).astype(float).copy()
+    daily = daily_scores.droplevel(0).astype(float).sort_values(ascending=False, kind="mergesort", na_position="last").copy()
     daily.index = [_normalize_instrument(value) for value in daily.index]
     daily = daily[daily.index != ""]
     if daily.index.has_duplicates:
-        daily = daily.groupby(level=0, sort=False).last()
+        daily = daily[~daily.index.duplicated(keep="first")]
     return daily
 
 
