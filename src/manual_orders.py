@@ -675,7 +675,15 @@ def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
         return pd.DataFrame(index=price_df.index)
     frame = price_df.loc[:, fields == field.lower()].copy()
     frame.columns = [_normalize_instrument(value) for value in frame.columns.get_level_values(1)]
-    return frame.loc[:, frame.columns != ""]
+    frame = frame.loc[:, frame.columns != ""]
+    frame = frame.loc[:, ~pd.Index(frame.columns).duplicated(keep="last")]
+    if frame.empty:
+        return frame
+    timestamps = pd.to_datetime(frame.index)
+    ordered_positions = sorted(range(len(frame)), key=lambda pos: (pd.Timestamp(timestamps[pos]), pos))
+    frame = frame.iloc[ordered_positions].copy()
+    frame.index = pd.DatetimeIndex(pd.to_datetime(frame.index).normalize())
+    return frame.loc[~frame.index.duplicated(keep="last")]
 
 
 def _looks_like_field_table(columns: pd.Index) -> bool:
