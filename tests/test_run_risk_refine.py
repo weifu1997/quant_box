@@ -130,7 +130,7 @@ class RunRiskRefineTests(unittest.TestCase):
     def test_target_quality_fields_reject_total_pass_with_weak_year(self) -> None:
         yearly = pd.DataFrame(
             [
-                {"year": 2024, "annual_return": 0.12, "max_drawdown": -0.10},
+                {"year": 2024, "annual_return": 0.12, "max_drawdown": -0.25},
                 {"year": 2025, "annual_return": -0.02, "max_drawdown": -0.18},
             ]
         )
@@ -153,8 +153,11 @@ class RunRiskRefineTests(unittest.TestCase):
         self.assertGreater(fields["annual_return_gap"], 0)
         self.assertGreater(fields["drawdown_buffer"], 0)
         self.assertEqual(fields["year_ann_pass"], 1)
-        self.assertEqual(fields["year_dd_pass"], 2)
+        self.assertEqual(fields["year_dd_pass"], 1)
+        self.assertEqual(fields["years_below_return_target"], "2025")
+        self.assertEqual(fields["years_breaching_drawdown_limit"], "2024")
         self.assertFalse(fields["yearly_annual_return_pass"])
+        self.assertFalse(fields["yearly_drawdown_pass"])
         self.assertFalse(fields["meets_target"])
 
     def test_target_quality_fields_reject_missing_year_coverage(self) -> None:

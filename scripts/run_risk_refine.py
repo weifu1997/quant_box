@@ -577,6 +577,8 @@ def _yearly_quality_fields(
         "max_yearly_drawdown_limit": max_yearly_drawdown,
         "year_coverage_pass": False,
         "missing_years": "",
+        "years_below_return_target": "",
+        "years_breaching_drawdown_limit": "",
         "yearly_annual_return_pass": False,
         "yearly_drawdown_pass": False,
     }
@@ -592,6 +594,12 @@ def _yearly_quality_fields(
             fields["worst_year_drawdown"] = float(drawdown[valid].min())
             fields["yearly_annual_return_pass"] = bool(fields["year_ann_pass"] == fields["year_count"])
             fields["yearly_drawdown_pass"] = bool(fields["year_dd_pass"] == fields["year_count"])
+            if "year" in yearly.columns:
+                years = pd.to_numeric(yearly["year"], errors="coerce")
+                return_fail_years = years[valid & (annual < min_yearly_return)].dropna().astype(int).astype(str)
+                drawdown_fail_years = years[valid & (drawdown < max_yearly_drawdown)].dropna().astype(int).astype(str)
+                fields["years_below_return_target"] = ",".join(return_fail_years.tolist())
+                fields["years_breaching_drawdown_limit"] = ",".join(drawdown_fail_years.tolist())
     if yearly_coverage is None:
         fields["expected_year_count"] = int(fields["year_count"])
         fields["year_coverage_pass"] = bool(fields["year_count"] > 0)
