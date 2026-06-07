@@ -996,18 +996,27 @@ def _market_cap_exposure(latest_holdings: pd.DataFrame, latest_date: pd.Timestam
     if daily_basic.empty or "trade_date" not in daily_basic.columns or "ts_code" not in daily_basic.columns or market_cap_field not in daily_basic.columns:
         return pd.DataFrame()
     frame = daily_basic.copy()
-    frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce").dt.normalize()
+    raw_trade_dates = _parse_datetime_values(frame["trade_date"])
+    frame["trade_date"] = raw_trade_dates.dt.normalize()
+    frame["_raw_trade_date"] = raw_trade_dates
+    frame["_position"] = range(len(frame))
     frame["ts_code"] = frame["ts_code"].map(_normalize_instrument)
     frame[market_cap_field] = pd.to_numeric(frame[market_cap_field], errors="coerce")
     frame = frame[
         (frame["ts_code"] != "")
+        & frame["trade_date"].notna()
         & (frame["trade_date"] <= pd.Timestamp(latest_date).normalize())
         & frame[market_cap_field].notna()
     ]
     if frame.empty:
         return pd.DataFrame()
     last_basic_date = frame["trade_date"].max()
-    cross_section = frame[frame["trade_date"] == last_basic_date].drop_duplicates("ts_code", keep="last").copy()
+    cross_section = (
+        frame[frame["trade_date"] == last_basic_date]
+        .sort_values(["ts_code", "_raw_trade_date", "_position"], kind="mergesort", na_position="first")
+        .drop_duplicates("ts_code", keep="last")
+        .copy()
+    )
     if cross_section.empty:
         return pd.DataFrame()
     cross_section["market_cap_rank_pct"] = cross_section[market_cap_field].rank(pct=True)
@@ -1079,6 +1088,15 @@ def _numeric_column_sum(frame: pd.DataFrame, column: str) -> float:
     if column not in frame.columns:
         return 0.0
     return float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
+
+
+def _parse_datetime_values(values: Any) -> pd.Series:
+    parsed = pd.to_datetime(values, errors="coerce")
+    parsed_series = pd.Series(parsed)
+    if parsed_series.isna().any():
+        mixed = pd.to_datetime(values, errors="coerce", format="mixed")
+        parsed_series = parsed_series.where(parsed_series.notna(), pd.Series(mixed))
+    return parsed_series
 
 
 def _normalize_holdings(holdings: pd.DataFrame) -> pd.DataFrame:

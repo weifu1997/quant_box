@@ -404,6 +404,46 @@ class ResearchDiagnosticsTests(unittest.TestCase):
             self.assertNotIn("market_cap_exposure_unavailable", diagnostics["exposure"]["issues"])
             self.assertIn("market_cap_exposure", tables)
 
+    def test_market_cap_exposure_uses_latest_intraday_snapshot(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            daily_basic_file = root / "daily_basic.parquet"
+            pd.DataFrame(
+                {
+                    "trade_date": [
+                        "2024-01-03 15:00",
+                        "2024-01-03 09:30",
+                        "2024-01-03",
+                        "2024-01-03",
+                    ],
+                    "ts_code": ["000001.SZ", "000001.SZ", "600519.SH", "000002.SZ"],
+                    "circ_mv": [10.0, 999.0, 20.0, 40.0],
+                }
+            ).to_parquet(daily_basic_file)
+
+            dates = pd.to_datetime(["2024-01-04", "2024-01-05"])
+            prices = pd.concat(
+                {
+                    "close": pd.DataFrame(
+                        {"000001.SZ": [10.0, 10.1], "600519.SH": [100.0, 100.2], "000002.SZ": [8.0, 8.1]},
+                        index=dates,
+                    )
+                },
+                axis=1,
+            )
+            equity = pd.Series([100000.0, 100100.0], index=dates, name="equity")
+            holdings = pd.DataFrame([{"date": "2024-01-05", "instrument": "000001.SZ", "value": 100000.0}])
+            config = {
+                "backtest": {"annual_trading_days": 252},
+                "research": {"exposure": {"daily_basic_file": str(daily_basic_file), "market_cap_field": "circ_mv"}},
+            }
+
+            diagnostics, tables = build_research_diagnostics(equity, holdings, pd.DataFrame(), prices, config)
+
+            self.assertEqual(diagnostics["exposure"]["market_cap_buckets"][0]["bucket"], "small")
+            self.assertAlmostEqual(diagnostics["exposure"]["market_cap_buckets"][0]["market_cap_median"], 10.0)
+            self.assertEqual(tables["market_cap_exposure"].iloc[0]["bucket"], "small")
+
 
 if __name__ == "__main__":
     unittest.main()
