@@ -45,6 +45,7 @@ def main() -> None:
         help="Shell-style candidate name pattern to run, for example '*selrisk3'. May be repeated or comma-separated.",
     )
     parser.add_argument("--skip-diagnostics", action="store_true", help="Skip candidate-level research diagnostics.")
+    parser.add_argument("--include-recorded-hints", action="store_true", help="Include historical recorded_hint values in the summary.")
     parser.add_argument("--resume", action="store_true", help="Skip candidates already present in the output CSV.")
     args = parser.parse_args()
 
@@ -124,9 +125,10 @@ def main() -> None:
         row = {
             "candidate": candidate["name"],
             "seconds": time.monotonic() - started,
-            **candidate.get("recorded_hint", {}),
             **result.metrics,
         }
+        if args.include_recorded_hints:
+            row.update(candidate.get("recorded_hint", {}))
         row.update(_quality_flags(row, config.get("quality", {}), yearly, yearly_coverage))
         prefix = out_path.with_name(f"{out_path.stem}_{candidate['name']}")
         print(f"{idx}/{len(candidates)} {candidate['name']}: writing artifacts", flush=True)

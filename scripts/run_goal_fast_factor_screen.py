@@ -89,6 +89,7 @@ def main() -> None:
                             "rebalance_drift_threshold": 0.02,
                         }
                         result = run_fast_prepared_backtest(prepared, bt_config)
+                        yearly_fields = _yearly_quality_fields(result.equity_curve, config)
                         row = {
                             "factor_group": factor_group,
                             "factor": column,
@@ -96,6 +97,7 @@ def main() -> None:
                             **_liquidity_row(liquidity_mode),
                             "top_n": top_n,
                             **result.metrics,
+                            **yearly_fields,
                         }
                         row.update(_screen_quality_fields(row, config))
                         rows.append(row)
@@ -160,20 +162,93 @@ def _error_row(column: str, direction_name: str, liquidity_mode: dict[str, objec
 
 
 def _screen_quality_fields(metrics: dict[str, object], config: dict) -> dict[str, object]:
-    return_threshold, drawdown_limit = _quality_thresholds(config)
+    return_threshold, drawdown_limit, yearly_return_threshold, yearly_drawdown_limit = _quality_thresholds(config)
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
+    min_year_return = _metric_float(metrics.get("min_year_annual_return"))
+    worst_year_drawdown = _metric_float(metrics.get("worst_year_drawdown"))
+    annual_pass = annual_return >= return_threshold
+    drawdown_pass = max_drawdown >= drawdown_limit
+    yearly_return_pass = min_year_return >= yearly_return_threshold
+    yearly_drawdown_pass = worst_year_drawdown >= yearly_drawdown_limit
     return {
-        "meets_full_target": bool(annual_return >= return_threshold and max_drawdown >= drawdown_limit),
-        "target_gap": max(0.0, return_threshold - annual_return) + max(0.0, drawdown_limit - max_drawdown),
+        "meets_full_target": bool(annual_pass and drawdown_pass and yearly_return_pass and yearly_drawdown_pass),
+        "target_gap": (
+            max(0.0, return_threshold - annual_return)
+            + max(0.0, drawdown_limit - max_drawdown)
+            + max(0.0, yearly_return_threshold - min_year_return)
+            + max(0.0, yearly_drawdown_limit - worst_year_drawdown)
+        ),
+        "yearly_annual_return_pass": bool(yearly_return_pass),
+        "yearly_drawdown_pass": bool(yearly_drawdown_pass),
     }
 
 
-def _quality_thresholds(config: dict) -> tuple[float, float]:
+def _yearly_quality_fields(equity_curve: pd.Series, config: dict) -> dict[str, object]:
+    yearly = _yearly_stats(equity_curve)
+    _return_threshold, _drawdown_limit, yearly_return_threshold, yearly_drawdown_limit = _quality_thresholds(config)
+    if yearly.empty:
+        return {
+            "year_count": 0,
+            "year_ann_pass": 0,
+            "year_dd_pass": 0,
+            "min_year_annual_return": 0.0,
+            "worst_year_drawdown": 0.0,
+            "min_yearly_annual_return": yearly_return_threshold,
+            "max_yearly_drawdown_limit": yearly_drawdown_limit,
+        }
+    annual = pd.to_numeric(yearly["annual_return"], errors="coerce")
+    drawdown = pd.to_numeric(yearly["max_drawdown"], errors="coerce")
+    return {
+        "year_count": int(len(yearly)),
+        "year_ann_pass": int((annual >= yearly_return_threshold).sum()),
+        "year_dd_pass": int((drawdown >= yearly_drawdown_limit).sum()),
+        "min_year_annual_return": float(annual.min()) if not annual.dropna().empty else 0.0,
+        "worst_year_drawdown": float(drawdown.min()) if not drawdown.dropna().empty else 0.0,
+        "min_yearly_annual_return": yearly_return_threshold,
+        "max_yearly_drawdown_limit": yearly_drawdown_limit,
+    }
+
+
+def _yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
+    if equity_curve.empty:
+        return pd.DataFrame(columns=["year", "days", "annual_return", "max_drawdown"])
+    rows: list[dict[str, object]] = []
+    equity = equity_curve.sort_index().astype(float)
+    equity.index = pd.to_datetime(equity.index).normalize()
+    for year, group in equity.groupby(equity.index.year):
+        if len(group) <= 1 or float(group.iloc[0]) <= 0:
+            continue
+        total_return = float(group.iloc[-1] / group.iloc[0] - 1.0)
+        calendar_days = max(int((group.index[-1] - group.index[0]).days), 1)
+        annual_return = float((1.0 + total_return) ** (365.25 / calendar_days) - 1.0) if total_return > -1 else -1.0
+        drawdown = group / group.cummax() - 1.0
+        rows.append(
+            {
+                "year": int(year),
+                "days": int(len(group)),
+                "annual_return": annual_return,
+                "max_drawdown": float(drawdown.min()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _metric_float(value: object) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return result if pd.notna(result) else 0.0
+
+
+def _quality_thresholds(config: dict) -> tuple[float, float, float, float]:
     quality = config.get("quality", {})
     return_threshold = float(quality.get("min_backtest_annual_return", quality.get("target_annual_return", 0.20)))
     drawdown_limit = float(quality.get("max_backtest_drawdown_limit", quality.get("max_drawdown_limit", -0.20)))
-    return return_threshold, drawdown_limit
+    yearly_return_threshold = float(quality.get("min_yearly_annual_return", return_threshold))
+    yearly_drawdown_limit = float(quality.get("max_yearly_drawdown_limit", drawdown_limit))
+    return return_threshold, drawdown_limit, yearly_return_threshold, yearly_drawdown_limit
 
 
 def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:
