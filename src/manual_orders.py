@@ -440,6 +440,7 @@ def _target_weight(target_holdings: list[str], account: AccountState, config: di
 def _price_row(price_df: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Series:
     if price_df.empty:
         return pd.Series(dtype=float)
+    field = str(field).strip().lower()
     target = pd.Timestamp(date).normalize()
     normalized_index = pd.DatetimeIndex(pd.to_datetime(price_df.index).normalize())
     matches = normalized_index == target
@@ -447,15 +448,20 @@ def _price_row(price_df: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Ser
         return pd.Series(dtype=float)
     row_key = price_df.index[matches][0]
     if isinstance(price_df.columns, pd.MultiIndex):
-        if field not in price_df.columns.get_level_values(0):
+        fields = price_df.columns.get_level_values(0).astype(str).str.strip().str.lower()
+        if field not in set(fields):
             return pd.Series(dtype=float)
-        row = price_df.xs(field, level=0, axis=1).loc[row_key]
+        selected = price_df.loc[:, fields == field]
+        row = selected.loc[row_key].copy()
+        row.index = [_normalize_instrument(value) for value in selected.columns.get_level_values(-1)]
     else:
-        row = price_df.loc[row_key]
+        if field != "close":
+            return pd.Series(dtype=float)
+        row = price_df.loc[row_key].copy()
     row.index = [_normalize_instrument(value) for value in row.index]
     row = row[row.index != ""]
     row = row[~row.index.duplicated(keep="last")]
-    return row.astype(float)
+    return pd.to_numeric(row, errors="coerce")
 
 
 def _reference_price(instrument: str, close: pd.Series) -> float | None:

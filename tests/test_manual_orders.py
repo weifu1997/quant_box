@@ -299,6 +299,43 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(orders.iloc[0]["reference_price"]), 20.0)
         self.assertEqual(float(orders.iloc[0]["target_shares"]), 5000.0)
 
+    def test_generate_manual_orders_does_not_treat_plain_close_panel_as_st_flags(self) -> None:
+        signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "600000.SH", "action": "BUY"}])
+        prices = pd.DataFrame(
+            {"600000.SH": [10.0, 10.6]},
+            index=pd.to_datetime(["2024-01-03", "2024-01-04"]),
+        )
+        account = AccountState(
+            total_asset=100000,
+            cash=100000,
+            max_position_pct=None,
+            lot_size=100,
+            star_market_lot_size=200,
+            source_file="",
+            holdings_file="",
+            holdings_loaded=True,
+        )
+
+        orders = generate_manual_orders(
+            signal,
+            ["600000.SH"],
+            prices,
+            signal_date="2024-01-03",
+            intended_trade_date="2024-01-04",
+            account=account,
+            current_holdings=pd.DataFrame(columns=["instrument", "shares"]),
+            config={
+                "strategy": {},
+                "backtest": {
+                    "limit_up_threshold": 0.099,
+                    "st_limit_up_threshold": 0.049,
+                },
+            },
+        )
+
+        self.assertFalse(bool(orders.iloc[0]["is_st"]))
+        self.assertFalse(bool(orders.iloc[0]["is_limit_up"]))
+
     def test_load_current_holdings_normalizes_and_deduplicates_instruments(self) -> None:
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "current_holdings.csv"
