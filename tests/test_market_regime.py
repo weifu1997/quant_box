@@ -10,6 +10,7 @@ from src.market_regime import (
     REGIME_BEAR,
     REGIME_BULL,
     REGIME_SIDEWAYS,
+    _benchmark_close,
     aggregate_regime_performance,
     apply_defensive_timing_to_backtest_config,
     defensive_exposure_for_date,
@@ -226,6 +227,16 @@ class MarketRegimeTests(unittest.TestCase):
         regimes = detect_market_regime(prices, config)
 
         self.assertEqual(regimes.iloc[-1], REGIME_BULL)
+
+    def test_equal_weight_proxy_uses_last_intraday_close_per_trade_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00", "2024-01-04 15:00"])
+        close = pd.DataFrame({"A": [10.0, 30.0, 20.0, 20.0]}, index=dates)
+        prices = pd.concat({"close": close}, axis=1)
+
+        benchmark = _benchmark_close(prices, {}, {})
+
+        self.assertEqual(benchmark.index.tolist(), pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]).tolist())
+        self.assertEqual(benchmark.tolist(), [1.0, 2.0, 2.0])
 
     def test_regime_performance_summarizes_segments_and_aggregates_by_state(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=5)

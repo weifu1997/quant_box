@@ -311,10 +311,35 @@ def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame(index=price_df.index)
         close = price_df.loc[:, fields == "close"].copy()
         close.columns = close.columns.get_level_values(-1).astype(str)
-        return close
+        return _normalize_close_frame(close)
     if _looks_like_field_table(price_df.columns):
         raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
-    return price_df
+    return _normalize_close_frame(price_df.copy())
+
+
+def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
+    if close.empty:
+        return close
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(close.index, errors="coerce"))
+    valid_dates = ~pd.isna(raw_dates)
+    if not valid_dates.all():
+        close = close.loc[valid_dates].copy()
+        raw_dates = raw_dates[valid_dates]
+    if close.empty:
+        return close
+
+    order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+    if not np.array_equal(order, np.arange(len(raw_dates))):
+        close = close.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    close.index = raw_dates.normalize()
+    close.columns = [_normalize_instrument(value) for value in close.columns]
+    close = close.loc[:, close.columns != ""]
+    if close.columns.has_duplicates:
+        close = close.loc[:, ~close.columns.duplicated(keep="last")]
+    if close.index.has_duplicates:
+        close = close.loc[~close.index.duplicated(keep="last")]
+    return close.sort_index()
 
 
 def _looks_like_field_table(columns: pd.Index) -> bool:
@@ -353,6 +378,12 @@ def _match_column(columns: pd.Index, symbol: str) -> str | None:
         if _normalize_symbol(str(column)) == target:
             return str(column)
     return None
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _normalize_symbol(value: str) -> str:
