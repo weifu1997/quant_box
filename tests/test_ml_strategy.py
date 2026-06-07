@@ -299,6 +299,41 @@ class MLStrategyTests(unittest.TestCase):
         self.assertGreater(int(result.diagnostics.iloc[0]["train_rows_available"]), 0)
         self.assertEqual(set(result.scores.index.get_level_values("instrument")), set(instruments))
 
+    def test_build_ml_scores_deduplicates_normalized_factor_instruments(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=18)
+        raw_instruments = ["a", " A ", "B"]
+        index = pd.MultiIndex.from_product([dates, raw_instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {"F1": range(len(index)), "F2": range(len(index), 0, -1)},
+            index=index,
+            dtype=float,
+        )
+        close = pd.DataFrame(
+            {
+                "A": [10.0 + day for day in range(len(dates))],
+                "B": [20.0 + day for day in range(len(dates))],
+            },
+            index=dates,
+        )
+        prices = pd.concat({"close": close}, axis=1)
+        config = {
+            "ml_strategy": {
+                "enabled": True,
+                "model_type": "ridge_numpy",
+                "train_years": 1,
+                "label_horizon_sessions": 1,
+                "min_train_rows": 6,
+                "max_train_rows": 100,
+                "feature_limit": None,
+            }
+        }
+
+        result = build_ml_scores(factors, prices, config, signal_dates=[dates[-1]])
+
+        self.assertFalse(result.scores.empty)
+        self.assertTrue(result.scores.index.is_unique)
+        self.assertEqual(set(result.scores.index.get_level_values("instrument")), {"A", "B"})
+
     def test_build_ml_scores_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=18)
         instruments = ["A", "B", "C"]

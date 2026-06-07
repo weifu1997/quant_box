@@ -279,11 +279,12 @@ def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
     instruments = [_normalize_instrument(value) for value in factors.index.get_level_values(1)]
     normalized_index = pd.MultiIndex.from_arrays([dates, instruments], names=["datetime", "instrument"])
-    if factors.index.equals(normalized_index):
-        return factors
     normalized = factors.copy(deep=False)
     normalized.index = normalized_index
-    return normalized
+    normalized = normalized[normalized.index.get_level_values("instrument") != ""]
+    if normalized.index.has_duplicates:
+        normalized = normalized.groupby(level=["datetime", "instrument"], sort=False).last()
+    return normalized.sort_index()
 
 
 def _feature_columns(numeric: pd.DataFrame, cfg: dict[str, Any]) -> list[str]:
