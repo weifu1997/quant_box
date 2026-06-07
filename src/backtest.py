@@ -532,18 +532,28 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
             raise ValueError("score_panel DataFrame must have a 'score' column or exactly one column.")
     if not isinstance(score_panel.index, pd.MultiIndex):
         raise ValueError("score_panel must use MultiIndex: date/instrument.")
-    normalized_index = pd.MultiIndex.from_arrays(
-        [
-            pd.to_datetime(score_panel.index.get_level_values(0)).normalize(),
-            [_normalize_instrument(value) for value in score_panel.index.get_level_values(1)],
-        ],
-        names=["datetime", "instrument"],
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(score_panel.index.get_level_values(0), errors="coerce"))
+    values = pd.to_numeric(pd.Series(score_panel.to_numpy()), errors="coerce").to_numpy()
+    frame = pd.DataFrame(
+        {
+            "date": raw_dates.normalize(),
+            "raw_date": raw_dates,
+            "instrument": [_normalize_instrument(value) for value in score_panel.index.get_level_values(1)],
+            "score": values,
+            "position": range(len(score_panel)),
+        }
     )
-    result = pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=normalized_index, name=score_panel.name)
-    result = result[result.index.get_level_values("instrument") != ""]
-    if result.index.has_duplicates:
-        result = result.sort_values(ascending=False, kind="mergesort", na_position="last")
-        result = result[~result.index.duplicated(keep="first")]
+    frame = frame[frame["date"].notna() & (frame["instrument"] != "")]
+    if frame.empty:
+        return pd.Series(dtype=float, name=score_panel.name)
+    frame = frame.sort_values(
+        ["date", "instrument", "raw_date", "score", "position"],
+        kind="mergesort",
+        na_position="first",
+    )
+    frame = frame.drop_duplicates(["date", "instrument"], keep="last")
+    normalized_index = pd.MultiIndex.from_arrays([frame["date"], frame["instrument"]], names=["datetime", "instrument"])
+    result = pd.Series(frame["score"].to_numpy(), index=normalized_index, name=score_panel.name)
     return result.sort_index()
 
 

@@ -148,6 +148,40 @@ class BacktestTests(unittest.TestCase):
         buys = result.trades[result.trades["side"] == "BUY"]
         self.assertEqual(buys["instrument"].tolist(), ["A"])
 
+    def test_run_backtest_uses_latest_intraday_score_per_trade_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        scores = pd.Series(
+            [100.0, 1.0, 1.0, 50.0],
+            index=pd.MultiIndex.from_tuples(
+                [
+                    (pd.Timestamp("2024-01-02 09:30"), "A"),
+                    (pd.Timestamp("2024-01-02 09:30"), "B"),
+                    (pd.Timestamp("2024-01-02 15:00"), "A"),
+                    (pd.Timestamp("2024-01-02 15:00"), "B"),
+                ],
+                names=["datetime", "instrument"],
+            ),
+            name="score",
+        )
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0], "B": [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0], "B": [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {"initial_capital": 100000, "top_n": 1, "max_turnover": 1, "commission": 0.0, "stamp_tax": 0.0},
+        )
+
+        buys = result.trades[result.trades["side"] == "BUY"]
+        self.assertEqual(buys["instrument"].tolist(), ["B"])
+
     def test_run_backtest_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         scores = pd.Series(

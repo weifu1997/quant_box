@@ -99,6 +99,40 @@ class FastMonthlyBacktestTests(unittest.TestCase):
 
         self.assertEqual(result.weights["instrument"].tolist(), ["A"])
 
+    def test_fast_period_backtest_uses_latest_intraday_score_per_signal_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
+        prices = pd.DataFrame(
+            {
+                ("close", "A"): [10.0, 10.0, 12.0],
+                ("close", "B"): [10.0, 10.0, 9.0],
+            },
+            index=dates,
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        scores = pd.Series(
+            [100.0, 1.0, 1.0, 50.0],
+            index=pd.MultiIndex.from_tuples(
+                [
+                    (pd.Timestamp("2024-01-31 09:30"), "A"),
+                    (pd.Timestamp("2024-01-31 09:30"), "B"),
+                    (pd.Timestamp("2024-01-31 15:00"), "A"),
+                    (pd.Timestamp("2024-01-31 15:00"), "B"),
+                ],
+                names=["datetime", "instrument"],
+            ),
+            name="score",
+        )
+
+        result = run_fast_period_backtest(
+            scores,
+            prices,
+            "2024-01-01",
+            "2024-02-29",
+            {"initial_capital": 100.0, "top_n": 1, "max_turnover": 1},
+        )
+
+        self.assertEqual(result.weights["instrument"].tolist(), ["B"])
+
     def test_fast_period_backtest_uses_last_intraday_price_per_trade_date(self) -> None:
         dates = pd.to_datetime(["2024-01-31 15:00", "2024-02-01 09:30", "2024-02-01 15:00", "2024-02-29 15:00"])
         prices = pd.DataFrame(

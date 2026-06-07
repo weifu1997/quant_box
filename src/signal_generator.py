@@ -54,12 +54,11 @@ def generate_signal(
         )
     score_date = "latest" if use_latest_date else _effective_signal_date(factors, factor_end_date)
     scores = build_latest_strategy_scores(factors, config, signal_date=score_date, price_df=price_df, price_file=price_file)
-    latest_date = pd.Timestamp(scores.index.get_level_values(0).max()).normalize()
+    latest_date, latest_scores = _latest_daily_scores(scores)
     if use_latest_date:
         signal_date = latest_date.strftime("%Y-%m-%d")
     else:
         signal_date = str(pd.Timestamp(score_date).date())
-    latest_scores = scores.xs(latest_date, level=0, drop_level=True)
     if selection_risk_filter_enabled(config):
         prices = price_df if price_df is not None else _load_price_frame(price_file, config)
         latest_scores = filter_scores_by_selection_risk(latest_scores, prices, latest_date, config)
@@ -94,6 +93,36 @@ def _load_price_frame(price_file: str | Path | None, config: dict) -> pd.DataFra
     if not price_path.exists():
         raise FileNotFoundError(f"Price file not found for selection risk filter: {price_path}")
     return pd.read_parquet(price_path)
+
+
+def _latest_daily_scores(scores: pd.Series) -> tuple[pd.Timestamp, pd.Series]:
+    if scores.empty or not isinstance(scores.index, pd.MultiIndex):
+        raise ValueError("scores must use MultiIndex: datetime/instrument.")
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0), errors="coerce"))
+    values = pd.to_numeric(pd.Series(scores.to_numpy()), errors="coerce").to_numpy()
+    frame = pd.DataFrame(
+        {
+            "date": raw_dates.normalize(),
+            "raw_date": raw_dates,
+            "instrument": [_normalize_instrument(value) for value in scores.index.get_level_values(1)],
+            "score": values,
+            "position": range(len(scores)),
+        }
+    )
+    frame = frame[frame["date"].notna() & (frame["instrument"] != "")]
+    if frame.empty:
+        raise ValueError("No dated score rows are available.")
+    latest_date = pd.Timestamp(frame["date"].max()).normalize()
+    latest = frame[frame["date"] == latest_date].copy()
+    latest = latest.sort_values(
+        ["instrument", "raw_date", "score", "position"],
+        kind="mergesort",
+        na_position="first",
+    )
+    latest = latest.drop_duplicates("instrument", keep="last")
+    result = pd.Series(latest["score"].to_numpy(), index=pd.Index(latest["instrument"], name=scores.index.names[1]), name=scores.name)
+    result.attrs = dict(getattr(scores, "attrs", {}))
+    return latest_date, result
 
 
 def _effective_signal_date(factors: pd.DataFrame, requested_date: str) -> str:
