@@ -6,6 +6,7 @@ from itertools import product
 import logging
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 
 from src.backtest import run_backtest
@@ -184,8 +185,7 @@ def run_walk_forward_optimization(
     calmar_weight: float = 0.25,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
-    price_df = price_df.copy()
-    price_df.index = pd.to_datetime(price_df.index).normalize()
+    price_df = _normalize_window_price_frame(price_df)
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
     rows: list[dict[str, object]] = []
@@ -346,8 +346,7 @@ def run_walk_forward_grid_validation(
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     """Evaluate every parameter combination on rolling out-of-sample windows."""
-    price_df = price_df.copy()
-    price_df.index = pd.to_datetime(price_df.index).normalize()
+    price_df = _normalize_window_price_frame(price_df)
     grid = grid or DEFAULT_GRID
     keys = list(grid)
     start = pd.Timestamp(start_date).normalize()
@@ -476,6 +475,22 @@ def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Time
     start = pd.Timestamp(start).normalize()
     end = pd.Timestamp(end).normalize()
     return score_panel[(dates >= start) & (dates <= end)]
+
+
+def _normalize_window_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
+    prices = price_df.copy()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    prices = prices.loc[valid_dates].copy()
+    raw_dates = raw_dates[valid_dates]
+    if not prices.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        prices = prices.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    prices.index = raw_dates.normalize()
+    if prices.index.has_duplicates:
+        prices = prices.loc[~prices.index.duplicated(keep="last")]
+    return prices.sort_index()
 
 
 def _scoring_config(config: dict | None, params: dict[str, object]) -> dict:

@@ -265,7 +265,12 @@ def _close_price_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
     dates = pd.to_datetime(close.index, errors="coerce")
     valid_dates = ~pd.isna(dates)
     close = close.loc[valid_dates].copy()
-    close.index = pd.DatetimeIndex(dates[valid_dates]).normalize()
+    raw_dates = pd.DatetimeIndex(dates[valid_dates])
+    if not close.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        close = close.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    close.index = raw_dates.normalize()
     close = close[~close.index.duplicated(keep="last")].sort_index()
     return close.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
 

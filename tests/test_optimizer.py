@@ -220,6 +220,66 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(pd.Timestamp(result.iloc[0]["train_end"]).date().isoformat(), "2024-01-01")
         self.assertEqual(pd.Timestamp(result.iloc[0]["test_end"]).date().isoformat(), "2024-02-01")
 
+    def test_grid_validation_keeps_latest_intraday_price_order_before_backtest(self) -> None:
+        dates = pd.to_datetime(["2024-01-01 15:00", "2024-01-02 15:00", "2024-01-02 09:30", "2024-02-01 15:00"])
+        stock = "A"
+        index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"ROC5": [1.0, 2.0, 3.0, 4.0]}, index=index)
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 10.0, 30.0, 20.0]}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0, 1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+        grid = {
+            "factor_group": ["momentum"],
+            "top_n": [1],
+            "max_turnover": [1],
+            "rank_buffer": [0],
+            "rebalance_freq": ["daily"],
+        }
+        captured_prices: list[pd.DataFrame] = []
+
+        class FakeBacktestResult:
+            metrics = {"sharpe": 0.0}
+
+        def fake_build_scores(factor_df: pd.DataFrame, config: dict, price_df: pd.DataFrame | None = None) -> pd.Series:
+            return factor_df["ROC5"].rename("score")
+
+        def fake_run_backtest(
+            score_panel: pd.Series,
+            price_df: pd.DataFrame,
+            start_date: str,
+            end_date: str,
+            config: dict,
+        ) -> FakeBacktestResult:
+            captured_prices.append(price_df.copy())
+            return FakeBacktestResult()
+
+        with patch("src.optimizer.build_strategy_scores", side_effect=fake_build_scores), patch(
+            "src.optimizer.run_backtest",
+            side_effect=fake_run_backtest,
+        ):
+            result = run_walk_forward_grid_validation(
+                factors,
+                prices,
+                base_config=_base_backtest_config(),
+                start_date="2023-01-02",
+                end_date="2024-02-01",
+                grid=grid,
+                train_years=1,
+                test_months=1,
+                step_months=12,
+                use_rolling_ic=False,
+            )
+
+        self.assertFalse(result.empty)
+        test_prices = captured_prices[0]
+        same_day = test_prices.loc[test_prices.index == pd.Timestamp("2024-01-02")]
+        close_values = pd.to_numeric(same_day[("close", stock)], errors="coerce").to_list()
+        self.assertAlmostEqual(float(close_values[-1]), 10.0)
+
 
 def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     dates = pd.date_range("2023-01-02", periods=300, freq="B")

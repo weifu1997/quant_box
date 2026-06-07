@@ -179,6 +179,35 @@ class DataHealthTests(unittest.TestCase):
             self.assertEqual(report.price_latest_target_coverage, 0.5)
             self.assertEqual(report.factor_latest_target_coverage, 0.5)
 
+    def test_build_data_health_report_uses_latest_intraday_price_for_latest_coverage(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "name": ["A"],
+                    "list_status": ["L"],
+                    "list_date": ["20200101"],
+                }
+            ).to_csv(universe_file, index=False)
+            _raw(raw_dir / "000001.SZ.csv", "000001.SZ", "2024-01-03")
+
+            config = _config(raw_dir, universe_file)
+            prices = _price_panel(
+                ["2024-01-03 15:00", "2024-01-03 09:30"],
+                {"000001.SZ": [10.0, None]},
+            )
+            factors = _factors("2024-01-03", ["000001.SZ"])
+
+            report = build_data_health_report(config, price_df=prices, factor_df=factors)
+
+            self.assertTrue(report.is_healthy)
+            self.assertEqual(report.price_latest_target_symbols, 1)
+            self.assertEqual(report.price_latest_target_coverage, 1.0)
+
     def test_build_data_health_report_normalizes_symbol_whitespace_and_case(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
