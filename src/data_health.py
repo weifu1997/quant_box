@@ -12,6 +12,8 @@ from src.config_loader import load_config, resolve_path
 from src.data_fetcher import _raw_latest_date, filter_universe_frame
 from src.trading_calendar import latest_trade_date, resolve_target_date_value
 
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
+
 
 @dataclass
 class DataHealthReport:
@@ -195,6 +197,8 @@ def _frame_symbols(frame: pd.DataFrame | None) -> set[str]:
         return set()
     if isinstance(frame.columns, pd.MultiIndex):
         return _normalize_symbols(frame.columns.get_level_values(-1))
+    if _looks_like_field_table(frame.columns):
+        raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
     return _normalize_symbols(frame.columns)
 
 
@@ -207,6 +211,11 @@ def _factor_symbols(frame: pd.DataFrame | None) -> set[str]:
 def _normalize_symbols(values: Any) -> set[str]:
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _factor_latest_date(frame: pd.DataFrame | None) -> pd.Timestamp | None:

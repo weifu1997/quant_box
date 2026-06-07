@@ -121,6 +121,36 @@ class DataHealthTests(unittest.TestCase):
             self.assertEqual(report.price_target_symbols, 1)
             self.assertEqual(report.factor_target_symbols, 1)
 
+    def test_build_data_health_report_rejects_flat_ohlcv_price_frame(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "name": ["A"],
+                    "list_status": ["L"],
+                    "list_date": ["20200101"],
+                }
+            ).to_csv(universe_file, index=False)
+            _raw(raw_dir / "000001.SZ.csv", "000001.SZ", "2024-01-03")
+
+            config = _config(raw_dir, universe_file)
+            prices = pd.DataFrame(
+                {
+                    "open": [10.0],
+                    "close": [10.2],
+                    "volume": [1000.0],
+                },
+                index=pd.DatetimeIndex(["2024-01-03"]),
+            )
+            factors = _factors("2024-01-03", ["000001.SZ"])
+
+            with self.assertRaisesRegex(ValueError, "close-price panel"):
+                build_data_health_report(config, price_df=prices, factor_df=factors)
+
 
 def _config(raw_dir: Path, universe_file: Path) -> dict:
     return {

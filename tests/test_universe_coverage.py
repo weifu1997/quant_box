@@ -77,6 +77,38 @@ class UniverseCoverageTests(unittest.TestCase):
         self.assertEqual(coverage["price_target_symbols"], 1)
         self.assertEqual(coverage["price_target_coverage"], 1.0)
 
+    def test_summarize_universe_coverage_rejects_flat_ohlcv_price_frame(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = root / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                [
+                    {"ts_code": "000001.SZ", "name": "PINGAN", "list_date": "19910403", "list_status": "L"},
+                ]
+            ).to_csv(universe_file, index=False)
+            prices = pd.DataFrame(
+                {
+                    "open": [10.0],
+                    "close": [10.2],
+                    "volume": [1000.0],
+                }
+            )
+            config = {
+                "data": {
+                    "raw_dir": str(raw_dir),
+                    "constituents_file": str(universe_file),
+                    "universe": "mainboard_a",
+                    "end_date": "2024-01-01",
+                    "exclude_st": True,
+                }
+            }
+
+            with patch("src.universe_coverage.resolve_path", side_effect=lambda value: Path(value)):
+                with self.assertRaisesRegex(ValueError, "close-price panel"):
+                    summarize_universe_coverage(config, price_df=prices)
+
 
 if __name__ == "__main__":
     unittest.main()

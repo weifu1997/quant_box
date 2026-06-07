@@ -13,6 +13,7 @@ from src.trading_calendar import resolve_target_date_value
 
 logger = logging.getLogger(__name__)
 _QLIB_INIT_STATE: tuple[str, str] | None = None
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 def compute_alpha158_factors(
@@ -206,6 +207,8 @@ def _price_cache_state(config: dict, start_date: str, end_date: str) -> tuple[pd
     if isinstance(prices.columns, pd.MultiIndex):
         symbols = _normalize_symbols(prices.columns.get_level_values(-1))
     else:
+        if _looks_like_field_table(prices.columns):
+            raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
         symbols = _normalize_symbols(prices.columns)
     return dates, symbols
 
@@ -276,6 +279,11 @@ def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, en
 def _normalize_symbols(values: object) -> set[str]:
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _should_write_factor_cache(path: Path, start_date: str, end_date: str, config: dict) -> bool:

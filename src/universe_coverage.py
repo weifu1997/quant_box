@@ -9,6 +9,8 @@ from src.config_loader import load_config, resolve_path
 from src.data_fetcher import filter_universe_frame
 from src.trading_calendar import resolve_target_date_value
 
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
+
 
 def summarize_universe_coverage(
     config: dict | None = None,
@@ -73,6 +75,8 @@ def _price_symbols(price_df: pd.DataFrame | None, price_file: str | Path | None)
         return set()
     if isinstance(prices.columns, pd.MultiIndex):
         return _normalize_symbols(prices.columns.get_level_values(-1))
+    if _looks_like_field_table(prices.columns):
+        raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
     return _normalize_symbols(prices.columns)
 
 
@@ -87,3 +91,8 @@ def _ratio(part: int, whole: int) -> float:
 def _normalize_symbols(values: object) -> set[str]:
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
