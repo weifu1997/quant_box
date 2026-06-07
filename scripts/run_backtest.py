@@ -16,6 +16,7 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import factor_cache_columns, load_or_compute_factors
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS, build_strategy_scores
+from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import factor_columns_for_method, resample_signals
 from src.trading_calendar import resolve_target_date_value
 from src.universe_coverage import summarize_universe_coverage
@@ -45,6 +46,8 @@ def main() -> None:
         config.get("strategy", {}),
         config.get("dynamic_ic_selector", {}),
         config.get("ml_strategy", {}),
+        config.get("regime_score_blend", {}),
+        config.get("regime_score_filter", {}),
     )
     if factor_columns is None:
         logger.info("Loading all factor columns.")
@@ -55,6 +58,7 @@ def main() -> None:
     scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
 
     bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
+    bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
     if args.benchmark_file:
         benchmark_path = resolve_path(args.benchmark_file)
         if benchmark_path.suffix.lower() == ".csv":
@@ -92,6 +96,8 @@ def _requested_factor_columns(
     strategy_cfg: dict,
     dynamic_cfg: dict | None = None,
     ml_cfg: dict | None = None,
+    score_blend_cfg: dict | None = None,
+    score_filter_cfg: dict | None = None,
 ) -> list[str] | None:
     if bool((ml_cfg or {}).get("enabled", False)):
         available_columns = factor_cache_columns(factor_file)
@@ -100,10 +106,20 @@ def _requested_factor_columns(
         configured = (ml_cfg or {}).get("feature_columns")
         if configured:
             requested = [str(column) for column in configured]
-            return [column for column in requested if column in available_columns]
+            return _with_regime_component_columns(
+                [column for column in requested if column in available_columns],
+                available_columns,
+                score_blend_cfg,
+                score_filter_cfg,
+            )
         feature_limit = (ml_cfg or {}).get("feature_limit")
         if feature_limit is not None:
-            return available_columns[: max(1, int(feature_limit))]
+            return _with_regime_component_columns(
+                available_columns[: max(1, int(feature_limit))],
+                available_columns,
+                score_blend_cfg,
+                score_filter_cfg,
+            )
         return None
 
     group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
@@ -118,9 +134,39 @@ def _requested_factor_columns(
         for candidate in candidates:
             method = _strip_direction_prefix(str(candidate))
             requested.update(str(column) for column in factor_columns_for_method(available_columns, method))
-        return sorted(requested) if requested else None
+        return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
     requested = [str(column) for column in factor_columns_for_method(available_columns, group)]
-    return sorted(requested) if requested else None
+    return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
+
+
+def _with_regime_component_columns(
+    columns: list[str],
+    available_columns: list[str],
+    score_blend_cfg: dict | None = None,
+    score_filter_cfg: dict | None = None,
+) -> list[str]:
+    if not bool((score_blend_cfg or {}).get("enabled", False)) and not bool((score_filter_cfg or {}).get("enabled", False)):
+        return columns
+    available = {str(column) for column in available_columns}
+    requested = {str(column) for column in columns}
+    for item in (score_blend_cfg or {}).get("defensive_components", []):
+        column = str(item.get("column", ""))
+        if column in available:
+            requested.add(column)
+    for item in _score_filter_components(score_filter_cfg):
+        column = str(item.get("column", ""))
+        if column in available:
+            requested.add(column)
+    return sorted(requested)
+
+
+def _score_filter_components(score_filter_cfg: dict | None) -> list[dict]:
+    cfg = score_filter_cfg or {}
+    components: list[dict] = []
+    components.extend(cfg.get("components") or cfg.get("defensive_components") or [])
+    for rule in cfg.get("rules", []):
+        components.extend(rule.get("components") or [])
+    return components
 
 
 def _strip_direction_prefix(value: str) -> str:

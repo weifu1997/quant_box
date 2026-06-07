@@ -22,17 +22,30 @@ from src.auto_tuning import (
     select_stable_params,
     summarize_parameter_validation,
 )
+from src.adj_factor_metadata import build_adj_factor_metadata, write_adj_factor_metadata
 from src.backtest import BacktestResult, run_backtest
 from src.config_loader import load_config, resolve_path
 from src.data_converter import convert_to_qlib_format
 from src.data_fetcher import update_daily_data_resumable
+from src.data_governance import build_data_governance_report, write_data_governance_report
 from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
-from src.manual_orders import generate_manual_orders, load_account_state, load_current_holdings, save_manual_orders, validate_account_inputs
+from src.manual_orders import (
+    generate_fill_feedback_template,
+    generate_manual_orders,
+    generate_order_confirmation_template,
+    load_account_state,
+    load_current_holdings,
+    save_execution_templates,
+    save_manual_orders,
+    validate_account_inputs,
+)
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_walk_forward_grid_validation
 from src.reporting import archive_run, signal_action_summary, write_daily_signal_report
+from src.research_diagnostics import build_research_diagnostics, write_research_diagnostics
 from src.scoring import build_strategy_scores
+from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.signal_generator import generate_signal, read_previous_holdings, save_signal
 from src.strategy import resample_signals
 from src.trading_calendar import next_business_day, next_trade_date, resolve_target_date
@@ -69,12 +82,17 @@ def _maybe_add_grid_values(grid: dict[str, list], key: str, value: str | None, c
         grid[key] = _csv_optional_values(value, cast)
 
 
+def _grid_has_enabled_value(grid: dict[str, list], key: str) -> bool:
+    return any(value is not None for value in grid.get(key, []))
+
+
 def main() -> None:
     base_config = load_config()
     parser = argparse.ArgumentParser(description="Run data refresh, automatic walk-forward tuning, backtest and latest signal.")
     parser.add_argument("--skip-update", action="store_true", help="Skip Tushare data update.")
     parser.add_argument("--skip-convert", action="store_true", help="Skip raw-to-price conversion.")
     parser.add_argument("--skip-factor", action="store_true", help="Reuse existing factor cache without recomputation.")
+    parser.add_argument("--skip-adj-factor-meta", action="store_true", help="Skip refreshing adj-factor version metadata.")
     parser.add_argument("--skip-optimize", action="store_true", help="Use current config strategy instead of automatic tuning.")
     parser.add_argument("--skip-backtest", action="store_true", help="Generate signal without running the full historical backtest.")
     parser.add_argument("--allow-unhealthy", action="store_true", help="Continue even if data health checks fail.")
@@ -105,6 +123,8 @@ def main() -> None:
     parser.add_argument("--circuit-breaker-cooldown-days", help="Comma-separated breaker cooldown sessions, or none.")
     parser.add_argument("--circuit-breaker-target-exposure", help="Comma-separated breaker target exposures, or none.")
     parser.add_argument("--target-vol", help="Comma-separated target volatility values, or none.")
+    parser.add_argument("--max-industry-weight", help="Comma-separated max single-industry weights, or none.")
+    parser.add_argument("--rebalance-drift-threshold", help="Comma-separated rebalance drift thresholds, or none.")
     parser.add_argument("--full-grid", action="store_true", help="Use the full default grid instead of the fast baseline grid.")
     parser.add_argument("--train-years", type=int, default=3)
     parser.add_argument("--test-months", type=int, default=12)
@@ -189,6 +209,32 @@ def main() -> None:
         artifacts.extend([health_json, health_csv])
         _stage(status, out_dir, "data_health", "complete", "healthy" if data_health.is_healthy else ",".join(data_health.issues))
         data_gate = data_health.is_healthy or args.allow_unhealthy
+        if not args.skip_adj_factor_meta:
+            _stage(status, out_dir, "adj_factor_meta", "running")
+            adj_factor_meta = build_adj_factor_metadata(config)
+            adj_factor_meta_path = write_adj_factor_metadata(adj_factor_meta, config)
+            artifacts.append(adj_factor_meta_path)
+            _stage(
+                status,
+                out_dir,
+                "adj_factor_meta",
+                "complete",
+                f"{adj_factor_meta.files_with_adj_factor}/{adj_factor_meta.raw_file_count}",
+            )
+        else:
+            _stage(status, out_dir, "adj_factor_meta", "skipped")
+        _stage(status, out_dir, "data_governance", "running")
+        data_governance = build_data_governance_report(config)
+        governance_path = write_data_governance_report(data_governance, out_dir)
+        artifacts.append(governance_path)
+        _stage(
+            status,
+            out_dir,
+            "data_governance",
+            "complete",
+            "point_in_time_ready" if data_governance.is_point_in_time_ready else ",".join(data_governance.issues),
+        )
+        governance_gate = data_governance.is_point_in_time_ready
 
         selected_config = config
         selected_params: dict[str, Any] = dict(config.get("strategy", {}))
@@ -212,6 +258,8 @@ def main() -> None:
             _maybe_add_grid_values(grid, "circuit_breaker_cooldown_days", args.circuit_breaker_cooldown_days, int)
             _maybe_add_grid_values(grid, "circuit_breaker_target_exposure", args.circuit_breaker_target_exposure, float)
             _maybe_add_grid_values(grid, "target_vol", args.target_vol, float)
+            _maybe_add_grid_values(grid, "max_industry_weight", args.max_industry_weight, float)
+            _maybe_add_grid_values(grid, "rebalance_drift_threshold", args.rebalance_drift_threshold, float)
             param_columns = list(grid)
             total_combinations = 1
             for values in grid.values():
@@ -219,6 +267,11 @@ def main() -> None:
             logger.info("Automatic validation grid has %s combinations: %s", total_combinations, grid)
             logger.info("Running automatic walk-forward grid validation.")
             base_bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
+            base_bt_config = apply_selection_constraints_to_backtest_config(
+                base_bt_config,
+                config,
+                force=_grid_has_enabled_value(grid, "max_industry_weight"),
+            )
             validation = run_walk_forward_grid_validation(
                 factors,
                 prices,
@@ -261,7 +314,8 @@ def main() -> None:
         parameter_quality = (
             assess_parameter_quality(summary, config.get("quality", {}))
             if not args.skip_optimize
-            else _skipped_quality(config.get("quality", {}))
+            else _validated_strategy_quality(config, config.get("quality", {}))
+            or _skipped_quality(config.get("quality", {}))
         )
         quality_path = out_dir / "auto_parameter_quality.json"
         _write_json(quality_path, parameter_quality.to_dict())
@@ -290,6 +344,7 @@ def main() -> None:
                 prices,
                 selected_config,
             )
+            bt_config = apply_selection_constraints_to_backtest_config(bt_config, selected_config)
             result = run_backtest(
                 scores,
                 prices,
@@ -310,6 +365,28 @@ def main() -> None:
         _write_json(backtest_quality_path, backtest_quality.to_dict())
         artifacts.append(backtest_quality_path)
         backtest_quality_gate = backtest_quality.is_acceptable or args.allow_low_quality
+        research_diagnostics: dict[str, Any] = {"enabled": False, "issues": ["backtest_skipped"] if args.skip_backtest else []}
+        research_files: dict[str, str] = {}
+        if not args.skip_backtest:
+            _stage(status, out_dir, "research_diagnostics", "running")
+            research_diagnostics, research_tables = build_research_diagnostics(
+                result.equity_curve,
+                result.holdings,
+                result.trades,
+                prices,
+                selected_config,
+            )
+            research_files = write_research_diagnostics(research_diagnostics, research_tables, out_dir)
+            artifacts.extend(Path(path) for path in research_files.values())
+            _stage(
+                status,
+                out_dir,
+                "research_diagnostics",
+                "complete",
+                ",".join(map(str, research_diagnostics.get("issues", []))) or "ok",
+            )
+        else:
+            _stage(status, out_dir, "research_diagnostics", "skipped")
 
         _stage(status, out_dir, "generate_signal", "running")
         previous = read_previous_holdings(selected_config["outputs"]["holdings_file"])
@@ -320,6 +397,7 @@ def main() -> None:
             factor_file=factor_file,
             config=selected_config,
             factors=factors,
+            price_df=prices,
         )
         output_date = _signal_output_date(signal_df, signal_date_arg)
         intended = next_trade_date(output_date, price_df=prices) or next_business_day(
@@ -335,6 +413,8 @@ def main() -> None:
         quality_warnings = []
         if not data_health.is_healthy:
             quality_warnings.extend([f"data:{issue}" for issue in data_health.issues])
+        if not data_governance.is_point_in_time_ready:
+            quality_warnings.extend([f"governance:{issue}" for issue in data_governance.issues])
         if not parameter_quality.is_acceptable:
             quality_warnings.extend([f"params:{issue}" for issue in parameter_quality.issues])
         if not backtest_quality.is_acceptable:
@@ -343,6 +423,8 @@ def main() -> None:
             quality_warnings.extend([f"account:{issue}" for issue in account_issues])
         if not data_gate:
             block_reasons.extend([f"data:{issue}" for issue in data_health.issues])
+        if not governance_gate:
+            block_reasons.extend([f"governance:{issue}" for issue in data_governance.issues])
         if not parameter_quality_gate:
             block_reasons.extend([f"params:{issue}" for issue in parameter_quality.issues])
         if not backtest_quality_gate:
@@ -372,6 +454,16 @@ def main() -> None:
         )
         orders_path = save_manual_orders(orders, output_date, out_dir, executable=is_executable)
         artifacts.append(orders_path)
+        confirmation = generate_order_confirmation_template(orders, output_date, intended_text, block_reasons=block_reasons)
+        fill_feedback = generate_fill_feedback_template(orders, output_date, intended_text)
+        execution_files = save_execution_templates(
+            confirmation,
+            fill_feedback,
+            output_date,
+            selected_config,
+            executable=is_executable,
+        )
+        artifacts.extend(Path(path) for path in execution_files.values())
         _stage(status, out_dir, "generate_signal", "complete", "executable" if is_executable else "blocked")
 
         selected_params_path = out_dir / "auto_selected_params.json"
@@ -384,7 +476,9 @@ def main() -> None:
             "parameter_quality": parameter_quality.to_dict(),
             "backtest_quality": backtest_quality.to_dict(),
             "data_health": data_health.to_dict(),
+            "data_governance": data_governance.to_dict(),
             "backtest_metrics": result.metrics,
+            "research_diagnostics": research_diagnostics,
             "account": account.to_dict(),
             "signal_summary": signal_action_summary(signal_df),
             "signal_date": str(output_date),
@@ -403,10 +497,13 @@ def main() -> None:
                 "signal": str(signal_path),
                 "holdings": str(holdings_path),
                 "manual_orders": str(orders_path),
+                **execution_files,
                 "data_health": str(health_json),
+                "data_governance": str(governance_path),
                 "parameter_quality": str(quality_path),
                 "backtest_metrics": str(metrics_path),
                 "backtest_quality": str(backtest_quality_path),
+                **research_files,
             },
         }
         report_path = out_dir / "auto_signal_report.json"
@@ -500,6 +597,156 @@ def _promote_candidate(date_arg: str, config: dict, out_dir: Path) -> tuple[Path
         raise ValueError(f"Candidate holdings file must contain instrument or ticker column: {holdings_path}")
     holdings = holdings_df[col].dropna().astype(str).tolist()
     return save_signal(signal_df, holdings, signal_date, config=config)
+
+
+def _validated_strategy_quality(config: dict[str, Any], quality_config: dict) -> ParameterQualityReport | None:
+    evidence_cfg = config.get("validated_strategy", {})
+    if not isinstance(evidence_cfg, dict) or not bool(evidence_cfg.get("enabled", False)):
+        return None
+
+    summary_file = evidence_cfg.get("summary_file")
+    candidate = str(evidence_cfg.get("candidate", "")).strip()
+    if not summary_file:
+        return _formal_candidate_quality_report(quality_config, ["validated_strategy_summary_file_missing"])
+
+    summary_path = resolve_path(summary_file)
+    if not summary_path.exists():
+        return _formal_candidate_quality_report(
+            quality_config,
+            [f"validated_strategy_summary_file_not_found:{summary_path}"],
+        )
+
+    frame = pd.read_csv(summary_path)
+    if frame.empty:
+        return _formal_candidate_quality_report(quality_config, ["validated_strategy_summary_empty"])
+    if "candidate" not in frame.columns:
+        return _formal_candidate_quality_report(quality_config, ["validated_strategy_candidate_column_missing"])
+    if candidate:
+        rows = frame[frame["candidate"].astype(str) == candidate]
+        if rows.empty:
+            return _formal_candidate_quality_report(quality_config, [f"validated_strategy_candidate_not_found:{candidate}"])
+    elif len(frame) == 1:
+        rows = frame
+    else:
+        return _formal_candidate_quality_report(quality_config, ["validated_strategy_candidate_missing"])
+
+    row = rows.iloc[-1]
+    annual_return = _quality_number(row.get("annual_return"), 0.0)
+    max_drawdown = _quality_number(row.get("max_drawdown"), 0.0)
+    sharpe = _quality_number(row.get("sharpe"), 0.0)
+    annual_turnover = _quality_number(row.get("annual_turnover"), 0.0)
+    annual_trade_cost_ratio = _quality_number(row.get("annual_trade_cost_ratio"), 0.0)
+    windows = 1
+    positive_return_rate = 1.0 if annual_return > 0 else 0.0
+    annual_return_mean = annual_return
+    annual_return_min = annual_return
+    max_drawdown_worst = max_drawdown
+
+    years_path_value = row.get("years_path")
+    if pd.notna(years_path_value) and str(years_path_value).strip():
+        years_path = resolve_path(str(years_path_value))
+        if years_path.exists():
+            yearly = pd.read_csv(years_path)
+            if {"annual_return", "max_drawdown"}.issubset(yearly.columns) and not yearly.empty:
+                yearly_returns = pd.to_numeric(yearly["annual_return"], errors="coerce").dropna()
+                yearly_drawdowns = pd.to_numeric(yearly["max_drawdown"], errors="coerce").dropna()
+                if not yearly_returns.empty:
+                    windows = int(len(yearly_returns))
+                    positive_return_rate = float((yearly_returns > 0).mean())
+                    annual_return_mean = float(yearly_returns.mean())
+                    annual_return_min = float(yearly_returns.min())
+                if not yearly_drawdowns.empty:
+                    max_drawdown_worst = float(yearly_drawdowns.min())
+
+    min_windows = int(quality_config.get("min_validation_windows", 3))
+    min_positive = float(quality_config.get("min_positive_return_rate", 0.5))
+    min_return = float(quality_config.get("min_optimizer_annual_return", quality_config.get("target_annual_return", 0.20)))
+    min_sharpe = float(quality_config.get("min_sharpe_mean", 0.0))
+    max_drawdown_limit = float(quality_config.get("max_drawdown_limit", -0.20))
+    max_turnover = float(quality_config.get("max_annual_turnover", 20.0))
+    max_cost = float(quality_config.get("max_annual_trade_cost_ratio", 0.2))
+
+    issues: list[str] = []
+    if bool(evidence_cfg.get("require_is_acceptable", True)) and not _truthy(row.get("is_acceptable")):
+        issues.append("validated_strategy_not_formally_acceptable")
+    if windows < min_windows:
+        issues.append(f"validation_windows_below_threshold:{windows}<{min_windows}")
+    if positive_return_rate < min_positive:
+        issues.append(f"positive_return_rate_below_threshold:{positive_return_rate:.4f}<{min_positive:.4f}")
+    if annual_return < min_return:
+        issues.append(f"validated_strategy_annual_return_below_threshold:{annual_return:.4f}<{min_return:.4f}")
+    if annual_return_mean < min_return:
+        issues.append(f"annual_return_mean_below_threshold:{annual_return_mean:.4f}<{min_return:.4f}")
+    if sharpe < min_sharpe:
+        issues.append(f"sharpe_mean_below_threshold:{sharpe:.4f}<{min_sharpe:.4f}")
+    if max_drawdown < max_drawdown_limit:
+        issues.append(f"validated_strategy_max_drawdown_worse_than_limit:{max_drawdown:.4f}<{max_drawdown_limit:.4f}")
+    if max_drawdown_worst < max_drawdown_limit:
+        issues.append(f"max_drawdown_worse_than_limit:{max_drawdown_worst:.4f}<{max_drawdown_limit:.4f}")
+    if annual_turnover > max_turnover:
+        issues.append(f"annual_turnover_above_threshold:{annual_turnover:.4f}>{max_turnover:.4f}")
+    if annual_trade_cost_ratio > max_cost:
+        issues.append(f"annual_trade_cost_ratio_above_threshold:{annual_trade_cost_ratio:.4f}>{max_cost:.4f}")
+
+    return ParameterQualityReport(
+        is_acceptable=not issues,
+        issues=issues,
+        windows=windows,
+        positive_return_rate=positive_return_rate,
+        annual_return_mean=annual_return_mean,
+        annual_return_min=annual_return_min,
+        sharpe_mean=sharpe,
+        max_drawdown_worst=max_drawdown_worst,
+        annual_turnover_mean=annual_turnover,
+        annual_trade_cost_ratio_mean=annual_trade_cost_ratio,
+        min_validation_windows=min_windows,
+        min_positive_return_rate=min_positive,
+        min_optimizer_annual_return=min_return,
+        min_sharpe_mean=min_sharpe,
+        max_drawdown_limit=max_drawdown_limit,
+        max_annual_turnover=max_turnover,
+        max_annual_trade_cost_ratio=max_cost,
+    )
+
+
+def _formal_candidate_quality_report(quality_config: dict, issues: list[str]) -> ParameterQualityReport:
+    min_windows = int(quality_config.get("min_validation_windows", 3))
+    min_positive = float(quality_config.get("min_positive_return_rate", 0.5))
+    min_return = float(quality_config.get("min_optimizer_annual_return", quality_config.get("target_annual_return", 0.20)))
+    min_sharpe = float(quality_config.get("min_sharpe_mean", 0.0))
+    max_drawdown = float(quality_config.get("max_drawdown_limit", -0.20))
+    max_turnover = float(quality_config.get("max_annual_turnover", 20.0))
+    max_cost = float(quality_config.get("max_annual_trade_cost_ratio", 0.2))
+    return ParameterQualityReport(
+        is_acceptable=False,
+        issues=issues,
+        windows=0,
+        positive_return_rate=0.0,
+        annual_return_mean=0.0,
+        annual_return_min=0.0,
+        sharpe_mean=0.0,
+        max_drawdown_worst=0.0,
+        annual_turnover_mean=0.0,
+        annual_trade_cost_ratio_mean=0.0,
+        min_validation_windows=min_windows,
+        min_positive_return_rate=min_positive,
+        min_optimizer_annual_return=min_return,
+        min_sharpe_mean=min_sharpe,
+        max_drawdown_limit=max_drawdown,
+        max_annual_turnover=max_turnover,
+        max_annual_trade_cost_ratio=max_cost,
+    )
+
+
+def _quality_number(value: Any, default: float) -> float:
+    parsed = pd.to_numeric(value, errors="coerce")
+    if pd.isna(parsed):
+        return default
+    return float(parsed)
+
+
+def _truthy(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _skipped_quality(quality_config: dict) -> ParameterQualityReport:

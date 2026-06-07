@@ -32,6 +32,7 @@ from src.market_regime import (
 from src.ml_strategy import build_ml_scores
 from src.neutralization import load_daily_basic, load_industry_map, neutralize_score_panel
 from src.score_blending import apply_regime_score_blend
+from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.trading_calendar import resolve_target_date_value
 
 
@@ -184,6 +185,7 @@ def main() -> None:
     bt_config["score_weighted"] = bool(ml_cfg.get("score_weighted", False))
     bt_config["exposure_schedule"] = exposure
     bt_config["exposure_rebalance_threshold"] = float(config.get("defensive_timing", {}).get("exposure_rebalance_threshold", 0.05))
+    bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
 
     result = run_backtest(ml_result.scores, prices, args.start_date, end_date, bt_config)
     yearly = _yearly_stats(result.equity_curve, bt_config)

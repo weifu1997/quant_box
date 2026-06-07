@@ -40,6 +40,41 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(len(selected), len(set(selected)))
         self.assertEqual(len(selected), 3)
 
+    def test_select_stocks_caps_group_concentration_without_previous_holdings(self) -> None:
+        scores = pd.Series([10, 9, 8, 7, 6], index=["A", "B", "C", "D", "E"])
+        groups = {"A": "bank", "B": "bank", "C": "bank", "D": "tech", "E": "health"}
+
+        selected = select_stocks(scores, top_n=4, group_map=groups, max_group_weight=0.5)
+
+        self.assertEqual(selected, ["A", "B", "D", "E"])
+        self.assertLessEqual(sum(1 for code in selected if groups[code] == "bank"), 2)
+
+    def test_select_stocks_applies_group_cap_with_previous_holdings_and_turnover_limit(self) -> None:
+        scores = pd.Series([10, 9, 8, 7, 6, 5], index=["A", "B", "C", "D", "E", "F"])
+        groups = {"A": "bank", "B": "bank", "C": "bank", "D": "tech", "E": "health", "F": "energy"}
+        previous = ["A", "B", "C", "D"]
+
+        selected = select_stocks(
+            scores,
+            top_n=4,
+            previous_holdings=previous,
+            max_turnover=1,
+            group_map=groups,
+            max_group_weight=0.5,
+        )
+
+        self.assertEqual(len(selected), 4)
+        self.assertLessEqual(len(set(selected) - set(previous)), 1)
+        self.assertLessEqual(sum(1 for code in selected if groups[code] == "bank"), 2)
+
+    def test_select_stocks_fills_when_group_cap_cannot_be_satisfied(self) -> None:
+        scores = pd.Series([10, 9, 8], index=["A", "B", "C"])
+        groups = {"A": "bank", "B": "bank", "C": "bank"}
+
+        selected = select_stocks(scores, top_n=3, group_map=groups, max_group_weight=0.34)
+
+        self.assertEqual(selected, ["A", "B", "C"])
+
     def test_generate_holdings_by_day_returns_empty_frame_when_no_scores_are_selectable(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A", "B"]],

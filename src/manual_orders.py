@@ -185,6 +185,216 @@ def save_manual_orders(orders: pd.DataFrame, signal_date: str, out_dir: str | Pa
     return path
 
 
+def generate_order_confirmation_template(
+    orders: pd.DataFrame,
+    signal_date: str,
+    intended_trade_date: str | None,
+    block_reasons: list[str] | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "signal_date",
+        "intended_trade_date",
+        "instrument",
+        "action",
+        "is_order_actionable",
+        "reference_price",
+        "suggested_limit_price",
+        "target_shares",
+        "order_shares",
+        "capacity_ratio",
+        "confirmation_status",
+        "confirmed_order_shares",
+        "confirmed_limit_price",
+        "confirmed_by",
+        "confirmed_at",
+        "confirmation_note",
+    ]
+    if orders.empty:
+        return pd.DataFrame(columns=columns)
+    frame = orders.copy()
+    actionable = frame.get("is_order_actionable", pd.Series(False, index=frame.index)).astype(bool)
+    shares = pd.to_numeric(frame.get("order_shares", pd.Series(0.0, index=frame.index)), errors="coerce").fillna(0.0)
+    frame["confirmation_status"] = [
+        "PENDING" if is_actionable and abs(float(order_shares)) > 0 else "BLOCKED" if block_reasons else "NO_ORDER"
+        for is_actionable, order_shares in zip(actionable, shares)
+    ]
+    frame["confirmed_order_shares"] = shares.where(actionable, pd.NA)
+    frame["confirmed_limit_price"] = frame.get("suggested_limit_price", pd.Series(pd.NA, index=frame.index))
+    frame["confirmed_by"] = ""
+    frame["confirmed_at"] = ""
+    frame["confirmation_note"] = ";".join(block_reasons or [])
+    return _select_or_blank(frame, columns)
+
+
+def generate_fill_feedback_template(
+    orders: pd.DataFrame,
+    signal_date: str,
+    intended_trade_date: str | None,
+) -> pd.DataFrame:
+    columns = [
+        "signal_date",
+        "intended_trade_date",
+        "instrument",
+        "side",
+        "planned_order_shares",
+        "fill_status",
+        "actual_trade_date",
+        "executed_shares",
+        "executed_price",
+        "commission_cost",
+        "tax_cost",
+        "transfer_fee_cost",
+        "slippage_note",
+        "broker_order_id",
+        "fill_note",
+    ]
+    if orders.empty:
+        return pd.DataFrame(columns=columns)
+    frame = orders.copy()
+    shares = pd.to_numeric(frame.get("order_shares", pd.Series(0.0, index=frame.index)), errors="coerce").fillna(0.0)
+    actionable = frame.get("is_order_actionable", pd.Series(False, index=frame.index)).astype(bool)
+    frame["side"] = shares.map(lambda value: "BUY" if value > 0 else "SELL" if value < 0 else "NONE")
+    frame["planned_order_shares"] = shares
+    frame["fill_status"] = [
+        "PENDING" if is_actionable and abs(float(order_shares)) > 0 else "SKIPPED"
+        for is_actionable, order_shares in zip(actionable, shares)
+    ]
+    frame["actual_trade_date"] = intended_trade_date or ""
+    frame["executed_shares"] = pd.NA
+    frame["executed_price"] = pd.NA
+    frame["commission_cost"] = 0.0
+    frame["tax_cost"] = 0.0
+    frame["transfer_fee_cost"] = 0.0
+    frame["slippage_note"] = ""
+    frame["broker_order_id"] = ""
+    frame["fill_note"] = ""
+    return _select_or_blank(frame, columns)
+
+
+def save_execution_templates(
+    confirmation: pd.DataFrame,
+    fill_feedback: pd.DataFrame,
+    signal_date: str,
+    config: dict | None = None,
+    executable: bool = True,
+) -> dict[str, str]:
+    cfg = config or load_config()
+    manual_cfg = cfg.get("manual_orders", {})
+    output_root = resolve_path(cfg.get("outputs", {}).get("dir", "outputs"))
+    confirmation_value = manual_cfg.get("confirmation_dir")
+    fill_value = manual_cfg.get("fill_feedback_dir")
+    confirmation_dir = resolve_path(confirmation_value) if confirmation_value else output_root / "order_confirmations"
+    fill_dir = resolve_path(fill_value) if fill_value else output_root / "fill_feedback"
+    confirmation_dir.mkdir(parents=True, exist_ok=True)
+    fill_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "" if executable else "_candidate"
+    confirmation_path = confirmation_dir / f"order_confirmation{suffix}_{signal_date}.csv"
+    fill_path = fill_dir / f"fill_feedback{suffix}_{signal_date}.csv"
+    confirmation.to_csv(confirmation_path, index=False, encoding="utf-8-sig")
+    fill_feedback.to_csv(fill_path, index=False, encoding="utf-8-sig")
+    return {"order_confirmation": str(confirmation_path), "fill_feedback": str(fill_path)}
+
+
+def apply_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFrame) -> pd.DataFrame:
+    current_map = _current_share_map(current_holdings)
+    if fill_feedback.empty:
+        return pd.DataFrame(
+            {"instrument": list(current_map), "shares": [current_map[instrument] for instrument in current_map]}
+        ).sort_values("instrument").reset_index(drop=True)
+    fills = fill_feedback.copy()
+    issues = validate_fill_feedback(current_holdings, fills)
+    if issues:
+        raise ValueError("Invalid fill feedback: " + ",".join(issues[:10]))
+    status = fills.get("fill_status", pd.Series("FILLED", index=fills.index)).fillna("").astype(str).str.upper()
+    valid_status = status.isin({"FILLED", "PARTIAL"})
+    for _, row in fills[valid_status].iterrows():
+        instrument = _normalize_instrument(row.get("instrument", ""))
+        if not instrument:
+            continue
+        executed = pd.to_numeric(row.get("executed_shares"), errors="coerce")
+        if pd.isna(executed):
+            continue
+        delta = _executed_share_delta(executed, row.get("side", ""))
+        current = current_map.get(instrument, 0.0) or 0.0
+        current_map[instrument] = float(current) + delta
+    rows = [
+        {"instrument": instrument, "shares": shares}
+        for instrument, shares in current_map.items()
+        if shares is not None and float(shares) > 0
+    ]
+    return pd.DataFrame(rows, columns=["instrument", "shares"]).sort_values("instrument").reset_index(drop=True)
+
+
+def validate_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFrame) -> list[str]:
+    if fill_feedback.empty:
+        return []
+    issues: list[str] = []
+    required_columns = ["instrument", "executed_shares"]
+    missing_columns = [column for column in required_columns if column not in fill_feedback.columns]
+    if missing_columns:
+        return ["fill_feedback_missing_columns:" + ",".join(missing_columns)]
+
+    fills = fill_feedback.copy()
+    current_map = {instrument: float(shares or 0.0) for instrument, shares in _current_share_map(current_holdings).items()}
+    has_status_column = "fill_status" in fills.columns
+    status = (
+        fills["fill_status"].fillna("").astype(str).str.strip().str.upper()
+        if has_status_column
+        else pd.Series("FILLED", index=fills.index)
+    )
+    allowed_statuses = {"FILLED", "PARTIAL", "CANCELLED", "SKIPPED", "PENDING"}
+    applied_statuses = {"FILLED", "PARTIAL"}
+    for idx, row in fills.iterrows():
+        instrument = _normalize_instrument(row.get("instrument", ""))
+        status_text = str(status.loc[idx]).strip().upper()
+        row_ref = instrument or f"row_{idx}"
+        if not status_text:
+            issues.append(f"fill_status_missing:{row_ref}")
+            continue
+        if status_text not in allowed_statuses:
+            issues.append(f"invalid_fill_status:{row_ref}:{status_text}")
+            continue
+        if status_text == "PENDING":
+            issues.append(f"pending_fill_status:{row_ref}")
+            continue
+        if status_text not in applied_statuses:
+            continue
+        if not _valid_instrument(instrument):
+            issues.append(f"invalid_fill_instrument:{row_ref}")
+            continue
+        side = str(row.get("side", "")).strip().upper()
+        if side not in {"BUY", "SELL"}:
+            issues.append(f"invalid_fill_side:{instrument}:{side or '<blank>'}")
+            continue
+        executed = pd.to_numeric(row.get("executed_shares"), errors="coerce")
+        if pd.isna(executed):
+            issues.append(f"executed_shares_missing:{instrument}")
+            continue
+        executed_value = float(executed)
+        if executed_value <= 0:
+            issues.append(f"executed_shares_not_positive:{instrument}")
+            continue
+        planned = pd.to_numeric(row.get("planned_order_shares"), errors="coerce")
+        if not pd.isna(planned) and abs(executed_value) - abs(float(planned)) > 1e-6:
+            issues.append(f"executed_shares_exceeds_planned:{instrument}")
+            continue
+        delta = -executed_value if side == "SELL" else executed_value
+        next_shares = current_map.get(instrument, 0.0) + delta
+        if next_shares < -1e-6:
+            issues.append(f"fill_would_make_negative_position:{instrument}")
+            continue
+        current_map[instrument] = max(next_shares, 0.0)
+    return issues
+
+
+def save_updated_holdings(holdings: pd.DataFrame, config: dict | None = None) -> Path:
+    cfg = config or load_config()
+    holdings_path = resolve_path(cfg.get("account", {}).get("current_holdings_file", "config/current_holdings.csv"))
+    holdings_path.parent.mkdir(parents=True, exist_ok=True)
+    holdings.to_csv(holdings_path, index=False, encoding="utf-8-sig")
+    return holdings_path
+
+
 def _optional_float(value: object) -> float | None:
     if value is None:
         return None
@@ -549,3 +759,21 @@ def _normalize_instruments(values: list[str]) -> list[str]:
         result.append(instrument)
         seen.add(instrument)
     return result
+
+
+def _executed_share_delta(executed_shares: object, side: object) -> float:
+    value = float(executed_shares)
+    side_text = str(side).strip().upper()
+    if side_text == "SELL" and value > 0:
+        return -value
+    if side_text == "BUY" and value < 0:
+        return abs(value)
+    return value
+
+
+def _select_or_blank(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    result = frame.copy()
+    for column in columns:
+        if column not in result.columns:
+            result[column] = ""
+    return result[columns].copy()

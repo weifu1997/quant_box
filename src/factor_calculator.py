@@ -151,10 +151,14 @@ def _factor_cache_matches_request(
     factor_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
     requested_start = pd.Timestamp(start_date).normalize()
     requested_end = pd.Timestamp(end_date).normalize()
-    if factor_dates.min() > requested_start:
-        return False
     latest_factor_date = factor_dates.max()
     price_dates, price_symbols = _price_cache_state(config, start_date, end_date)
+    if not price_dates.empty:
+        first_required_date = pd.Timestamp(price_dates.min()).normalize()
+    else:
+        first_required_date = requested_start
+    if factor_dates.min() > first_required_date:
+        return False
     if not price_dates.empty and latest_factor_date < price_dates.max():
         return False
 

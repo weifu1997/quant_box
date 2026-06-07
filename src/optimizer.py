@@ -26,6 +26,8 @@ RISK_GRID_KEYS = (
     "circuit_breaker_cooldown_days",
     "circuit_breaker_target_exposure",
     "target_vol",
+    "max_industry_weight",
+    "rebalance_drift_threshold",
 )
 
 DEFAULT_GRID = {
@@ -42,6 +44,7 @@ BASELINE_GRID = {
     "max_turnover": [1],
     "rank_buffer": [30],
     "rebalance_freq": ["monthly"],
+    "rebalance_drift_threshold": [0.0, 0.02, 0.05],
 }
 
 

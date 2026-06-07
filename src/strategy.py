@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -182,13 +182,15 @@ def select_stocks(
     previous_holdings: Iterable[str] | None = None,
     max_turnover: int = 1,
     rank_buffer: int = 0,
+    group_map: Mapping[str, object] | pd.Series | None = None,
+    max_group_weight: float | None = None,
 ) -> list[str]:
     scores = score_series.dropna().sort_values(ascending=False)
     ranked = [str(code) for code in scores.index.tolist()]
     if top_n <= 0 or not ranked:
         return []
     if previous_holdings is None:
-        return ranked[:top_n]
+        return _apply_group_cap(ranked, top_n, group_map, max_group_weight)
 
     previous = [str(code) for code in previous_holdings]
     previous_set = set(previous)
@@ -204,7 +206,168 @@ def select_stocks(
         holdings = _dedupe_preserve(holdings)
 
     holdings = _enforce_turnover_cap(holdings, previous, previous_set, rank_map, allowed_new)
+    holdings = _enforce_group_cap(
+        holdings,
+        ranked,
+        previous,
+        previous_set,
+        rank_map,
+        allowed_new,
+        top_n,
+        group_map,
+        max_group_weight,
+    )
     return sorted(holdings[:top_n], key=lambda code: rank_map.get(code, float("inf")))
+
+
+def _apply_group_cap(
+    ranked: list[str],
+    top_n: int,
+    group_map: Mapping[str, object] | pd.Series | None,
+    max_group_weight: float | None,
+) -> list[str]:
+    group_limit = _group_limit(top_n, max_group_weight)
+    groups = _normalize_group_map(group_map)
+    if group_limit is None or groups is None:
+        return ranked[:top_n]
+    selected: list[str] = []
+    group_counts: dict[str, int] = {}
+    for code in ranked:
+        if len(selected) >= top_n:
+            break
+        if not _group_slot_available(code, group_counts, group_limit, groups):
+            continue
+        selected.append(code)
+        _bump_group(code, group_counts, groups)
+    if len(selected) < top_n:
+        selected.extend([code for code in ranked if code not in selected][: top_n - len(selected)])
+    return _dedupe_preserve(selected)[:top_n]
+
+
+def _enforce_group_cap(
+    holdings: list[str],
+    ranked: list[str],
+    previous: list[str],
+    previous_set: set[str],
+    rank_map: dict[str, int],
+    allowed_new: int,
+    top_n: int,
+    group_map: Mapping[str, object] | pd.Series | None,
+    max_group_weight: float | None,
+) -> list[str]:
+    group_limit = _group_limit(top_n, max_group_weight)
+    groups = _normalize_group_map(group_map)
+    if group_limit is None or groups is None or not holdings:
+        return holdings
+    if _group_cap_satisfied(holdings, group_limit, groups):
+        return holdings
+
+    selected: list[str] = []
+    group_counts: dict[str, int] = {}
+    new_count = 0
+    previous_ranked = [code for code in previous if code in rank_map]
+    previous_ranked = sorted(_dedupe_preserve(previous_ranked), key=lambda code: rank_map.get(code, float("inf")))
+    effective_allowed_new = max(allowed_new, top_n - len(previous_ranked))
+
+    for code in previous_ranked:
+        if len(selected) >= top_n:
+            break
+        if not _group_slot_available(code, group_counts, group_limit, groups):
+            continue
+        selected.append(code)
+        _bump_group(code, group_counts, groups)
+
+    for code in ranked:
+        if len(selected) >= top_n:
+            break
+        if code in selected:
+            continue
+        is_new = code not in previous_set
+        if is_new and new_count >= effective_allowed_new:
+            continue
+        if not _group_slot_available(code, group_counts, group_limit, groups):
+            continue
+        selected.append(code)
+        _bump_group(code, group_counts, groups)
+        if is_new:
+            new_count += 1
+
+    if len(selected) < top_n:
+        for code in ranked:
+            if len(selected) >= top_n:
+                break
+            if code in selected:
+                continue
+            is_new = code not in previous_set
+            if is_new and new_count >= effective_allowed_new:
+                continue
+            selected.append(code)
+            if is_new:
+                new_count += 1
+    return _dedupe_preserve(selected)
+
+
+def _group_limit(top_n: int, max_group_weight: float | None) -> int | None:
+    if max_group_weight is None:
+        return None
+    try:
+        weight = float(max_group_weight)
+    except (TypeError, ValueError):
+        return None
+    if top_n <= 0 or not np.isfinite(weight) or weight <= 0 or weight >= 1:
+        return None
+    return max(1, int(np.floor(top_n * weight + 1e-12)))
+
+
+def _normalize_group_map(group_map: Mapping[str, object] | pd.Series | None) -> dict[str, str] | None:
+    if group_map is None:
+        return None
+    items = group_map.items() if isinstance(group_map, Mapping) else pd.Series(group_map).items()
+    groups: dict[str, str] = {}
+    for code, group in items:
+        if pd.isna(code) or pd.isna(group):
+            continue
+        normalized_code = str(code).strip().upper()
+        normalized_group = str(group).strip()
+        if not normalized_code or not normalized_group:
+            continue
+        groups[normalized_code] = normalized_group
+    return groups or None
+
+
+def _group_for(code: str, groups: dict[str, str]) -> str | None:
+    return groups.get(str(code).strip().upper())
+
+
+def _group_slot_available(
+    code: str,
+    group_counts: dict[str, int],
+    group_limit: int,
+    groups: dict[str, str],
+) -> bool:
+    group = _group_for(code, groups)
+    if group is None:
+        return True
+    return group_counts.get(group, 0) < group_limit
+
+
+def _bump_group(code: str, group_counts: dict[str, int], groups: dict[str, str]) -> None:
+    group = _group_for(code, groups)
+    if group is None:
+        return
+    group_counts[group] = group_counts.get(group, 0) + 1
+
+
+def _group_cap_satisfied(holdings: Iterable[str], group_limit: int, groups: dict[str, str]) -> bool:
+    counts: dict[str, int] = {}
+    for code in holdings:
+        group = _group_for(code, groups)
+        if group is None:
+            continue
+        counts[group] = counts.get(group, 0) + 1
+        if counts[group] > group_limit:
+            return False
+    return True
 
 
 def _pick_keeps(

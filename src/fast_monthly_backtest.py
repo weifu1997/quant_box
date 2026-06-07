@@ -45,7 +45,13 @@ def run_fast_period_backtest(
     Use the formal backtest for final validation.
     """
 
-    prepared = prepare_fast_period_data(score_panel, price_df, start_date, end_date)
+    prepared = prepare_fast_period_data(
+        score_panel,
+        price_df,
+        start_date,
+        end_date,
+        trade_price_field=str(config.get("trade_price_field", "close")),
+    )
     return run_fast_prepared_backtest(prepared, config)
 
 
@@ -54,12 +60,13 @@ def prepare_fast_period_data(
     price_df: pd.DataFrame,
     start_date: str,
     end_date: str,
+    trade_price_field: str = "close",
 ) -> FastBacktestData:
     scores = _ensure_score_panel(score_panel)
-    close = _close_frame(price_df)
+    trade_prices = _price_frame(price_df, trade_price_field)
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
-    price_dates = pd.DatetimeIndex(close.index[(close.index >= start) & (close.index <= end)]).unique().sort_values()
+    price_dates = pd.DatetimeIndex(trade_prices.index[(trade_prices.index >= start) & (trade_prices.index <= end)]).unique().sort_values()
     if price_dates.empty:
         return FastBacktestData(periods=[], price_dates=price_dates, initial_date=None)
 
@@ -79,7 +86,7 @@ def prepare_fast_period_data(
             continue
         daily_scores = scores.xs(signal_date, level=0, drop_level=True).dropna()
         daily_scores.index = daily_scores.index.astype(str)
-        period_returns = _period_returns(close, trade_date, next_trade_date, close.columns)
+        period_returns = _period_returns(trade_prices, trade_date, next_trade_date, trade_prices.columns)
         daily_scores = daily_scores[daily_scores.index.isin(period_returns.index)]
         periods.append(
             FastPeriod(
@@ -110,16 +117,21 @@ def run_fast_prepared_backtest(prepared: FastBacktestData, config: dict[str, Any
     top_n = int(config.get("top_n", 15))
     max_turnover = int(config.get("max_turnover", top_n))
     rank_buffer = int(config.get("rank_buffer", 0))
+    industry_map = config.get("industry_map")
+    max_industry_weight = config.get("max_industry_weight")
     max_weight = config.get("max_weight_per_stock")
     max_weight = float(max_weight) if max_weight is not None else None
+    drift_threshold = max(float(config.get("rebalance_drift_threshold", 0.0) or 0.0), 0.0)
     score_weighted = bool(config.get("score_weighted", False))
     cost_rate = _round_trip_cost_rate(config)
 
     capital = float(config.get("initial_capital", 1_000_000))
     equity_rows: list[tuple[pd.Timestamp, float]] = [(pd.Timestamp(prepared.periods[0].trade_date), capital)]
     weight_rows: list[dict[str, object]] = []
-    previous_weights = pd.Series(dtype=float)
-    previous_holdings: list[str] = []
+    current_weights = pd.Series(dtype=float)
+    current_holdings: list[str] = []
+    previous_scale: float | None = None
+    total_weight_turnover = 0.0
 
     for period in prepared.periods:
         signal_date = period.signal_date
@@ -129,30 +141,40 @@ def run_fast_prepared_backtest(prepared: FastBacktestData, config: dict[str, Any
         holdings = select_stocks(
             daily_scores,
             top_n=top_n,
-            previous_holdings=previous_holdings,
+            previous_holdings=current_holdings,
             max_turnover=max_turnover,
             rank_buffer=rank_buffer,
+            group_map=industry_map,
+            max_group_weight=max_industry_weight,
         )
         scale = _scale_for_date(exposure, trade_date)
         target_weights = _target_weights(daily_scores, holdings, score_weighted, max_weight) * scale
-        all_names = previous_weights.index.union(target_weights.index)
-        turnover = float((target_weights.reindex(all_names, fill_value=0.0) - previous_weights.reindex(all_names, fill_value=0.0)).abs().sum())
+        if drift_threshold > 0 and previous_scale is not None and abs(scale - previous_scale) <= 1e-12:
+            target_weights = _apply_weight_drift_threshold(target_weights, current_weights, drift_threshold)
+        all_names = current_weights.index.union(target_weights.index)
+        turnover = float((target_weights.reindex(all_names, fill_value=0.0) - current_weights.reindex(all_names, fill_value=0.0)).abs().sum())
+        total_weight_turnover += turnover
         capital *= max(0.0, 1.0 - turnover * cost_rate)
 
-        period_returns = period.returns.reindex(target_weights.index).dropna()
-        usable_weights = target_weights.reindex(period_returns.index).dropna()
-        if not usable_weights.empty and usable_weights.sum() > 0:
-            period_return = float((period_returns.reindex(usable_weights.index).fillna(0.0) * usable_weights).sum())
+        period_returns = period.returns.reindex(target_weights.index).fillna(0.0)
+        if not target_weights.empty and target_weights.sum() > 0:
+            period_return = float((period_returns.reindex(target_weights.index).fillna(0.0) * target_weights).sum())
             capital *= 1.0 + period_return
+        else:
+            period_return = 0.0
         equity_rows.append((pd.Timestamp(next_trade_date), capital))
         for stock, weight in target_weights.items():
             weight_rows.append({"date": trade_date, "signal_date": signal_date, "instrument": stock, "weight": float(weight)})
-        previous_weights = target_weights
-        previous_holdings = list(target_weights.index)
+        current_weights = _drift_weights_after_returns(target_weights, period_returns, period_return)
+        current_holdings = list(current_weights.index)
+        previous_scale = scale
 
     equity = pd.Series(dict(equity_rows), name="equity").sort_index()
     weights = pd.DataFrame(weight_rows)
-    return FastBacktestResult(equity, weights, _metrics(equity, config))
+    metrics = _metrics(equity, config)
+    metrics["total_weight_turnover"] = float(total_weight_turnover)
+    metrics["annual_weight_turnover"] = _annual_weight_turnover(total_weight_turnover, equity)
+    return FastBacktestResult(equity, weights, metrics)
 
 
 def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
@@ -175,27 +197,32 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
     return pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=index, name="score").sort_index()
 
 
-def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
+def _price_frame(price_df: pd.DataFrame, field: str = "close") -> pd.DataFrame:
     if price_df.empty:
         return pd.DataFrame()
+    field = str(field or "close").lower()
     if isinstance(price_df.columns, pd.MultiIndex):
         fields = price_df.columns.get_level_values(0).astype(str).str.lower()
-        close = price_df.loc[:, fields == "close"].copy()
-        close.columns = close.columns.get_level_values(-1).astype(str)
+        selected = price_df.loc[:, fields == field].copy()
+        if selected.empty and field != "close":
+            selected = price_df.loc[:, fields == "close"].copy()
+        selected.columns = selected.columns.get_level_values(-1).astype(str)
+    elif field in price_df.columns:
+        selected = price_df[[field]].copy()
     elif "close" in price_df.columns:
-        close = price_df[["close"]].copy()
+        selected = price_df[["close"]].copy()
     else:
-        close = price_df.copy()
-        close.columns = close.columns.astype(str)
-    close.index = pd.to_datetime(close.index).normalize()
-    close = close.sort_index()
-    if all(pd.api.types.is_numeric_dtype(dtype) for dtype in close.dtypes):
-        return close
-    return close.apply(pd.to_numeric, errors="coerce")
+        selected = price_df.copy()
+        selected.columns = selected.columns.astype(str)
+    selected.index = pd.to_datetime(selected.index).normalize()
+    selected = selected.sort_index()
+    if all(pd.api.types.is_numeric_dtype(dtype) for dtype in selected.dtypes):
+        return selected
+    return selected.apply(pd.to_numeric, errors="coerce")
 
 
 def _next_price_date(price_dates: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp | None:
-    pos = price_dates.searchsorted(pd.Timestamp(date).normalize())
+    pos = price_dates.searchsorted(pd.Timestamp(date).normalize(), side="right")
     if pos >= len(price_dates):
         return None
     return pd.Timestamp(price_dates[pos])
@@ -226,6 +253,31 @@ def _target_weights(scores: pd.Series, holdings: list[str], score_weighted: bool
     if max_weight is not None:
         weights = weights.clip(upper=max_weight)
     return weights
+
+
+def _apply_weight_drift_threshold(target_weights: pd.Series, previous_weights: pd.Series, threshold: float) -> pd.Series:
+    if target_weights.empty or previous_weights.empty or threshold <= 0:
+        return target_weights
+    adjusted = target_weights.copy()
+    for instrument, target_weight in target_weights.items():
+        if instrument not in previous_weights.index:
+            continue
+        previous_weight = float(previous_weights.loc[instrument])
+        if abs(float(target_weight) - previous_weight) <= threshold:
+            adjusted.loc[instrument] = previous_weight
+    return adjusted
+
+
+def _drift_weights_after_returns(weights: pd.Series, returns: pd.Series, portfolio_return: float) -> pd.Series:
+    if weights.empty:
+        return pd.Series(dtype=float)
+    denominator = 1.0 + float(portfolio_return)
+    if denominator <= 0 or not np.isfinite(denominator):
+        return pd.Series(dtype=float)
+    aligned_returns = pd.to_numeric(returns.reindex(weights.index), errors="coerce").fillna(0.0)
+    drifted = weights.astype(float) * (1.0 + aligned_returns) / denominator
+    drifted = drifted.replace([np.inf, -np.inf], np.nan).dropna()
+    return drifted[drifted > 1e-12]
 
 
 def _score_weights(scores: pd.Series, holdings: list[str]) -> pd.Series:
@@ -275,3 +327,10 @@ def _metrics(equity_curve: pd.Series, config: dict[str, Any]) -> dict[str, float
         "max_drawdown": float(drawdown.min()),
         "sharpe": sharpe,
     }
+
+
+def _annual_weight_turnover(total_weight_turnover: float, equity_curve: pd.Series) -> float:
+    if equity_curve.empty or len(equity_curve) <= 1:
+        return 0.0
+    years = max((equity_curve.index[-1] - equity_curve.index[0]).days / 365.25, 1 / 252)
+    return float(total_weight_turnover / years)

@@ -10,7 +10,7 @@ from src.config_loader import resolve_path
 from src.factor_ic import calculate_factor_ic, calculate_rolling_ic, make_ic_weights, make_rolling_ic_weights, summarize_ic
 from src.market_regime import detect_market_regime
 from src.ml_strategy import build_ml_scores, ml_strategy_enabled
-from src.score_blending import apply_regime_score_blend
+from src.score_blending import apply_regime_score_blend, apply_regime_score_filter
 from src.strategy import composite_factor, factor_columns_for_method
 
 
@@ -60,7 +60,7 @@ def build_strategy_scores(
 
     if factor_group != "ic_weighted":
         scores = composite_factor(factors, method=factor_group, min_obs=min_obs)
-        if prices is None and _regime_score_blend_enabled(config):
+        if prices is None and _regime_score_adjustment_enabled(config):
             prices = _load_ic_price_frame(price_path)
         if prices is not None:
             scores = _apply_regime_score_blend(scores, factors, prices, config)
@@ -117,7 +117,7 @@ def build_latest_strategy_scores(
 
     if factor_group != "ic_weighted":
         scores = composite_factor(latest_factors, method=factor_group, min_obs=min_obs)
-        if prices is None and _regime_score_blend_enabled(config):
+        if prices is None and _regime_score_adjustment_enabled(config):
             prices = _load_ic_price_frame(price_path)
         if prices is not None:
             scores = _apply_regime_score_blend(scores, factors, prices, config)
@@ -139,14 +139,28 @@ def _regime_score_blend_enabled(config: dict) -> bool:
     return bool(config.get("regime_score_blend", {}).get("enabled", False))
 
 
+def _regime_score_filter_enabled(config: dict) -> bool:
+    return bool(config.get("regime_score_filter", {}).get("enabled", False))
+
+
+def _regime_score_adjustment_enabled(config: dict) -> bool:
+    return _regime_score_blend_enabled(config) or _regime_score_filter_enabled(config)
+
+
 def _apply_regime_score_blend(scores: pd.Series, factors: pd.DataFrame, prices: pd.DataFrame, config: dict) -> pd.Series:
-    if not _regime_score_blend_enabled(config):
+    if not _regime_score_adjustment_enabled(config):
         return scores
     regimes = detect_market_regime(prices, config)
-    blended, summary = apply_regime_score_blend(scores, factors, regimes, config.get("regime_score_blend", {}))
-    blended.attrs = dict(getattr(scores, "attrs", {}))
-    blended.attrs["regime_score_blend"] = summary
-    return blended
+    result = scores
+    if _regime_score_blend_enabled(config):
+        result, summary = apply_regime_score_blend(result, factors, regimes, config.get("regime_score_blend", {}))
+        result.attrs = dict(getattr(scores, "attrs", {}))
+        result.attrs["regime_score_blend"] = summary
+    if _regime_score_filter_enabled(config):
+        result, summary = apply_regime_score_filter(result, factors, regimes, config.get("regime_score_filter", {}))
+        result.attrs = dict(getattr(result, "attrs", {}))
+        result.attrs["regime_score_filter"] = summary
+    return result
 
 
 def _load_ic_price_frame(path_value: str | Path) -> pd.DataFrame:

@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.market_regime import REGIME_BEAR, REGIME_BULL, REGIME_SIDEWAYS, regime_for_date
+from src.market_regime import REGIME_BEAR, REGIME_BULL, REGIME_SIDEWAYS, normalize_regime, regime_for_date
 
 
 def apply_regime_score_blend(
@@ -68,6 +68,113 @@ def apply_regime_score_blend(
         "sideways_defensive_weight": weights_by_regime[REGIME_SIDEWAYS],
         "bull_defensive_weight": weights_by_regime[REGIME_BULL],
     }
+
+
+def apply_regime_score_filter(
+    scores: pd.Series,
+    factors: pd.DataFrame,
+    regimes: pd.Series,
+    config: dict[str, Any] | None = None,
+) -> tuple[pd.Series, dict[str, Any]]:
+    cfg = config or {}
+    if scores.empty or factors.empty or regimes.empty or not bool(cfg.get("enabled", False)):
+        return scores, {"enabled": bool(cfg.get("enabled", False)), "dates_filtered": 0}
+    if not isinstance(scores.index, pd.MultiIndex) or not isinstance(factors.index, pd.MultiIndex):
+        raise ValueError("scores and factors must use MultiIndex: datetime/instrument.")
+
+    rules = _filter_rules(cfg)
+    if not rules:
+        return scores, {"enabled": True, "dates_filtered": 0, "rules": 0}
+
+    normalized_factors = _normalize_factor_index(factors)
+    parts: list[pd.Series] = []
+    dates_filtered = 0
+    rows_before = 0
+    rows_after = 0
+    for date, daily_scores in scores.groupby(level=0, sort=True):
+        date_key = pd.Timestamp(date).normalize()
+        daily = daily_scores.droplevel(0).astype(float)
+        rule = _rule_for_regime(rules, regime_for_date(regimes, date_key))
+        if rule is None:
+            parts.append(daily_scores)
+            continue
+        try:
+            daily_factors = normalized_factors.xs(date_key, level=0)
+        except KeyError:
+            parts.append(daily_scores)
+            continue
+        filter_score = _defensive_score(daily_factors, rule["components"])
+        if filter_score.empty:
+            parts.append(daily_scores)
+            continue
+
+        threshold = _filter_threshold(filter_score, rule)
+        mask = filter_score.reindex(daily.index) >= threshold
+        filtered = daily.where(mask.fillna(False))
+        filtered.index = pd.MultiIndex.from_product([[date_key], filtered.index.astype(str)], names=scores.index.names)
+        parts.append(filtered.rename(scores.name or "score"))
+        dates_filtered += 1
+        rows_before += int(daily.notna().sum())
+        rows_after += int(filtered.notna().sum())
+
+    result = pd.concat(parts).sort_index().rename(scores.name or "score") if parts else scores.copy()
+    result.attrs = dict(scores.attrs)
+    return result, {
+        "enabled": True,
+        "dates_filtered": dates_filtered,
+        "rows_before": rows_before,
+        "rows_after": rows_after,
+        "rows_removed": max(rows_before - rows_after, 0),
+        "rules": len(rules),
+    }
+
+
+def _filter_rules(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    default_components = cfg.get("components") or cfg.get("defensive_components") or [
+        {"column": "ROC20", "direction": 1.0},
+        {"column": "STD20", "direction": -1.0},
+    ]
+    rules: list[dict[str, Any]] = []
+    for item in cfg.get("rules", []):
+        regime = normalize_regime(str(item.get("regime", REGIME_BEAR)))
+        rules.append(
+            {
+                "regime": regime,
+                "components": item.get("components") or default_components,
+                "min_score": float(item.get("min_score", cfg.get("min_score", 0.0))),
+                "keep_top_fraction": item.get("keep_top_fraction", cfg.get("keep_top_fraction")),
+            }
+        )
+    if not rules and "bear_min_score" in cfg:
+        rules.append(
+            {
+                "regime": REGIME_BEAR,
+                "components": default_components,
+                "min_score": float(cfg.get("bear_min_score", 0.0)),
+                "keep_top_fraction": cfg.get("bear_keep_top_fraction", cfg.get("keep_top_fraction")),
+            }
+        )
+    return rules
+
+
+def _rule_for_regime(rules: list[dict[str, Any]], regime: str) -> dict[str, Any] | None:
+    normalized = normalize_regime(regime)
+    for rule in rules:
+        if rule["regime"] == normalized:
+            return rule
+    return None
+
+
+def _filter_threshold(filter_score: pd.Series, rule: dict[str, Any]) -> float:
+    keep_top_fraction = rule.get("keep_top_fraction")
+    min_score = float(rule.get("min_score", 0.0))
+    if keep_top_fraction is None:
+        return min_score
+    fraction = max(0.0, min(float(keep_top_fraction), 1.0))
+    if fraction <= 0:
+        return float("inf")
+    quantile_threshold = float(filter_score.dropna().quantile(max(0.0, 1.0 - fraction)))
+    return max(min_score, quantile_threshold)
 
 
 def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:

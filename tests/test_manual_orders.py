@@ -6,7 +6,16 @@ from tempfile import TemporaryDirectory
 
 import pandas as pd
 
-from src.manual_orders import AccountState, generate_manual_orders, load_current_holdings
+from src.manual_orders import (
+    AccountState,
+    apply_fill_feedback,
+    generate_fill_feedback_template,
+    generate_manual_orders,
+    generate_order_confirmation_template,
+    load_current_holdings,
+    save_execution_templates,
+    validate_fill_feedback,
+)
 
 
 class ManualOrdersTests(unittest.TestCase):
@@ -250,6 +259,99 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(sorted(by_code.index.tolist()), ["000001.SZ", "600519.SH"])
         self.assertEqual(float(by_code.loc["000001.SZ", "shares"]), 300.0)
         self.assertEqual(float(by_code.loc["600519.SH", "shares"]), 400.0)
+
+    def test_execution_templates_mark_actionable_orders_for_confirmation_and_fill_feedback(self) -> None:
+        orders = pd.DataFrame(
+            [
+                {
+                    "signal_date": "2024-01-03",
+                    "intended_trade_date": "2024-01-04",
+                    "instrument": "000001.SZ",
+                    "action": "BUY",
+                    "is_order_actionable": True,
+                    "reference_price": 10.0,
+                    "suggested_limit_price": 10.02,
+                    "target_shares": 1000,
+                    "order_shares": 500,
+                    "capacity_ratio": 0.01,
+                },
+                {
+                    "signal_date": "2024-01-03",
+                    "intended_trade_date": "2024-01-04",
+                    "instrument": "600519.SH",
+                    "action": "HOLD",
+                    "is_order_actionable": False,
+                    "reference_price": 100.0,
+                    "suggested_limit_price": 100.0,
+                    "target_shares": 0,
+                    "order_shares": 0,
+                    "capacity_ratio": None,
+                },
+            ]
+        )
+
+        confirmation = generate_order_confirmation_template(orders, "2024-01-03", "2024-01-04")
+        feedback = generate_fill_feedback_template(orders, "2024-01-03", "2024-01-04")
+
+        self.assertEqual(confirmation.loc[0, "confirmation_status"], "PENDING")
+        self.assertEqual(float(confirmation.loc[0, "confirmed_order_shares"]), 500.0)
+        self.assertEqual(confirmation.loc[1, "confirmation_status"], "NO_ORDER")
+        self.assertEqual(feedback.loc[0, "fill_status"], "PENDING")
+        self.assertEqual(feedback.loc[0, "side"], "BUY")
+        self.assertEqual(feedback.loc[1, "fill_status"], "SKIPPED")
+
+    def test_save_execution_templates_uses_configured_outputs_dir_for_defaults(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            confirmation = pd.DataFrame({"instrument": ["000001.SZ"]})
+            feedback = pd.DataFrame({"instrument": ["000001.SZ"]})
+
+            files = save_execution_templates(
+                confirmation,
+                feedback,
+                "2024-01-03",
+                {"outputs": {"dir": str(root)}},
+                executable=False,
+            )
+
+            self.assertTrue((root / "order_confirmations" / "order_confirmation_candidate_2024-01-03.csv").exists())
+            self.assertTrue((root / "fill_feedback" / "fill_feedback_candidate_2024-01-03.csv").exists())
+            self.assertIn("order_confirmation", files)
+            self.assertIn("fill_feedback", files)
+
+    def test_apply_fill_feedback_updates_holdings_with_buy_sell_and_partial_fills(self) -> None:
+        current = pd.DataFrame({"instrument": ["000001.SZ", "600519.SH"], "shares": [1000, 300]})
+        fills = pd.DataFrame(
+            [
+                {"instrument": "000001.SZ", "side": "BUY", "executed_shares": 200, "fill_status": "FILLED"},
+                {"instrument": "600519.SH", "side": "SELL", "executed_shares": 100, "fill_status": "PARTIAL"},
+                {"instrument": "000002.SZ", "side": "BUY", "executed_shares": 500, "fill_status": "CANCELLED"},
+            ]
+        )
+
+        updated = apply_fill_feedback(current, fills).set_index("instrument")
+
+        self.assertEqual(float(updated.loc["000001.SZ", "shares"]), 1200.0)
+        self.assertEqual(float(updated.loc["600519.SH", "shares"]), 200.0)
+        self.assertNotIn("000002.SZ", updated.index)
+
+    def test_validate_fill_feedback_blocks_unfinished_or_invalid_manual_entries(self) -> None:
+        current = pd.DataFrame({"instrument": ["000001.SZ"], "shares": [100]})
+        fills = pd.DataFrame(
+            [
+                {"instrument": "000001.SZ", "side": "SELL", "planned_order_shares": -200, "executed_shares": 200, "fill_status": "FILLED"},
+                {"instrument": "600519.SH", "side": "BUY", "planned_order_shares": 100, "executed_shares": pd.NA, "fill_status": "PARTIAL"},
+                {"instrument": "000002.SZ", "side": "BUY", "planned_order_shares": 100, "executed_shares": 100, "fill_status": "PENDING"},
+            ]
+        )
+
+        issues = validate_fill_feedback(current, fills)
+
+        self.assertIn("fill_would_make_negative_position:000001.SZ", issues)
+        self.assertIn("executed_shares_missing:600519.SH", issues)
+        self.assertIn("pending_fill_status:000002.SZ", issues)
+        with self.assertRaises(ValueError):
+            apply_fill_feedback(current, fills)
 
 
 def _prices(date: str | list[str], close_values: dict[str, float | list[float]]) -> pd.DataFrame:

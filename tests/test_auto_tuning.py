@@ -220,6 +220,8 @@ class AutoTuningTests(unittest.TestCase):
             {
                 "max_weight_per_stock": 0.15,
                 "target_vol": 0.20,
+                "max_industry_weight": 0.35,
+                "rebalance_drift_threshold": 0.02,
                 "circuit_breaker_drawdown": None,
             },
         )
@@ -227,6 +229,8 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(config["strategy"]["circuit_breaker_drawdown"], 0.12)
         self.assertEqual(selected["strategy"]["max_weight_per_stock"], 0.15)
         self.assertEqual(selected["strategy"]["target_vol"], 0.20)
+        self.assertEqual(selected["strategy"]["max_industry_weight"], 0.35)
+        self.assertEqual(selected["strategy"]["rebalance_drift_threshold"], 0.02)
         self.assertIsNone(selected["strategy"]["circuit_breaker_drawdown"])
 
     def test_assess_parameter_quality_blocks_unstable_selected_params(self) -> None:

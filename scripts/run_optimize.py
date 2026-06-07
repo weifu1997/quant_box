@@ -16,6 +16,7 @@ from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_parameter_grid, run_walk_forward_grid_validation, run_walk_forward_optimization
 from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS
+from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import factor_columns_for_method
 from src.trading_calendar import resolve_target_date_value
 
@@ -51,6 +52,10 @@ def _maybe_add_grid_values(grid: dict[str, list], key: str, value: str | None, c
         grid[key] = _csv_optional_values(value, cast)
 
 
+def _grid_has_enabled_value(grid: dict[str, list], key: str) -> bool:
+    return any(value is not None for value in grid.get(key, []))
+
+
 def main() -> None:
     config = load_config()
     parser = argparse.ArgumentParser(description="Run parameter grid search for the ranking strategy.")
@@ -70,6 +75,8 @@ def main() -> None:
     parser.add_argument("--circuit-breaker-cooldown-days", help="Comma-separated breaker cooldown sessions, or none.")
     parser.add_argument("--circuit-breaker-target-exposure", help="Comma-separated breaker target exposures, or none.")
     parser.add_argument("--target-vol", help="Comma-separated target volatility values, or none.")
+    parser.add_argument("--max-industry-weight", help="Comma-separated max single-industry weights, or none.")
+    parser.add_argument("--rebalance-drift-threshold", help="Comma-separated rebalance drift thresholds, or none.")
     parser.add_argument("--full-grid", action="store_true", help="Use the full default grid instead of the fast baseline grid.")
     parser.add_argument("--ic-top-k", type=int, default=30)
     parser.add_argument("--ic-window", type=int, default=config.get("ic", {}).get("window", 252))
@@ -115,11 +122,19 @@ def main() -> None:
     _maybe_add_grid_values(grid, "circuit_breaker_cooldown_days", args.circuit_breaker_cooldown_days, int)
     _maybe_add_grid_values(grid, "circuit_breaker_target_exposure", args.circuit_breaker_target_exposure, float)
     _maybe_add_grid_values(grid, "target_vol", args.target_vol, float)
+    _maybe_add_grid_values(grid, "max_industry_weight", args.max_industry_weight, float)
+    _maybe_add_grid_values(grid, "rebalance_drift_threshold", args.rebalance_drift_threshold, float)
     total_combinations = 1
     for values in grid.values():
         total_combinations *= len(values)
     logger.info("Optimization grid has %s combinations: %s", total_combinations, grid)
-    factor_columns = _requested_factor_columns(args.factor_file, grid["factor_group"], config.get("dynamic_ic_selector", {}))
+    factor_columns = _requested_factor_columns(
+        args.factor_file,
+        grid["factor_group"],
+        config.get("dynamic_ic_selector", {}),
+        config.get("regime_score_blend", {}),
+        config.get("regime_score_filter", {}),
+    )
     if factor_columns is None:
         logger.info("Loading all factor columns.")
     else:
@@ -141,6 +156,11 @@ def main() -> None:
         ic_summary.to_csv(ic_summary_path, encoding="utf-8-sig")
 
     base_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
+    base_config = apply_selection_constraints_to_backtest_config(
+        base_config,
+        config,
+        force=_grid_has_enabled_value(grid, "max_industry_weight"),
+    )
     if args.walk_forward and args.selection_walk_forward:
         results = run_walk_forward_optimization(
             factors,
@@ -228,7 +248,13 @@ def main() -> None:
     logger.info("Top results:\n%s", results.head(10).to_string(index=False))
 
 
-def _requested_factor_columns(factor_file: str, factor_groups: list[str], dynamic_cfg: dict | None = None) -> list[str] | None:
+def _requested_factor_columns(
+    factor_file: str,
+    factor_groups: list[str],
+    dynamic_cfg: dict | None = None,
+    score_blend_cfg: dict | None = None,
+    score_filter_cfg: dict | None = None,
+) -> list[str] | None:
     groups = {group.strip().lower() for group in factor_groups}
     if not groups or groups.intersection({"all", "ic_weighted"}):
         return None
@@ -243,7 +269,37 @@ def _requested_factor_columns(factor_file: str, factor_groups: list[str], dynami
                 requested.update(str(column) for column in factor_columns_for_method(available_columns, _strip_direction_prefix(str(candidate))))
         else:
             requested.update(str(column) for column in factor_columns_for_method(available_columns, group))
-    return sorted(requested) if requested else None
+    return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
+
+
+def _with_regime_component_columns(
+    columns: list[str],
+    available_columns: list[str],
+    score_blend_cfg: dict | None = None,
+    score_filter_cfg: dict | None = None,
+) -> list[str]:
+    if not bool((score_blend_cfg or {}).get("enabled", False)) and not bool((score_filter_cfg or {}).get("enabled", False)):
+        return columns
+    available = {str(column) for column in available_columns}
+    requested = {str(column) for column in columns}
+    for item in (score_blend_cfg or {}).get("defensive_components", []):
+        column = str(item.get("column", ""))
+        if column in available:
+            requested.add(column)
+    for item in _score_filter_components(score_filter_cfg):
+        column = str(item.get("column", ""))
+        if column in available:
+            requested.add(column)
+    return sorted(requested)
+
+
+def _score_filter_components(score_filter_cfg: dict | None) -> list[dict]:
+    cfg = score_filter_cfg or {}
+    components: list[dict] = []
+    components.extend(cfg.get("components") or cfg.get("defensive_components") or [])
+    for rule in cfg.get("rules", []):
+        components.extend(rule.get("components") or [])
+    return components
 
 
 def _strip_direction_prefix(value: str) -> str:

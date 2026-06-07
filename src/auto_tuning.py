@@ -16,6 +16,8 @@ RISK_PARAM_COLUMNS = [
     "circuit_breaker_cooldown_days",
     "circuit_breaker_target_exposure",
     "target_vol",
+    "max_industry_weight",
+    "rebalance_drift_threshold",
 ]
 PARAM_COLUMNS = STRATEGY_PARAM_COLUMNS
 OPTIMIZABLE_PARAM_COLUMNS = [*STRATEGY_PARAM_COLUMNS, *RISK_PARAM_COLUMNS]

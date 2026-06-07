@@ -18,6 +18,7 @@ from src.fast_monthly_backtest import _close_frame as _fast_close_frame
 from src.fast_monthly_backtest import prepare_fast_period_data
 from src.fast_monthly_backtest import run_fast_prepared_backtest
 from src.market_regime import defensive_exposure_schedule, detect_market_regime
+from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.trading_calendar import resolve_target_date_value
 from scripts.run_ml_strategy import _yearly_quality_gate, _yearly_stats
 
@@ -144,6 +145,7 @@ def main() -> None:
         if target_vol is not None:
             bt_config["target_vol"] = target_vol
             bt_config["max_leverage"] = 1.0
+        bt_config = apply_selection_constraints_to_backtest_config(bt_config, run_config)
 
         experiment_scores = scores if score_direction >= 0 else (scores * -1.0).rename("score")
         if args.engine == "fast":

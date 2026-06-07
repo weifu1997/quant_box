@@ -20,6 +20,7 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.scoring import build_strategy_scores
+from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
 
@@ -37,12 +38,30 @@ def main() -> None:
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
     parser.add_argument("--price-file", default=config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
+    parser.add_argument("--liquidity-sides", default=str(config.get("liquidity_filter", {}).get("side", "high")))
     parser.add_argument("--liquidity-quantiles", default="0.20,0.30")
     parser.add_argument("--top-n", default=str(config.get("strategy", {}).get("top_n", 15)))
     parser.add_argument("--rank-buffer", default=str(config.get("strategy", {}).get("rank_buffer", 30)))
+    parser.add_argument("--max-industry-weight", default=str(config.get("strategy", {}).get("max_industry_weight", "none")))
+    parser.add_argument("--stop-loss-pct", default=str(config.get("strategy", {}).get("stop_loss_pct", "none")))
+    parser.add_argument("--take-profit-pct", default=str(config.get("strategy", {}).get("take_profit_pct", "none")))
     parser.add_argument("--circuit-breaker-drawdown", default="0.06,0.08,0.10")
     parser.add_argument("--cooldown-days", default="5,10")
     parser.add_argument("--circuit-breaker-target-exposure", default="0.0,0.30")
+    parser.add_argument("--rebalance-drift-threshold", default="0.0,0.02,0.05")
+    parser.add_argument("--bull-exposure", default=str(config.get("defensive_timing", {}).get("bull_exposure", 1.0)))
+    parser.add_argument("--sideways-exposure", default=str(config.get("defensive_timing", {}).get("sideways_exposure", 0.60)))
+    parser.add_argument("--bear-exposure", default=str(config.get("defensive_timing", {}).get("bear_exposure", 0.30)))
+    parser.add_argument("--bear-drawdown-threshold", default=str(config.get("market_regime", {}).get("bear_drawdown_threshold", "none")))
+    parser.add_argument("--bull-defensive-weight", default=str(config.get("regime_score_blend", {}).get("bull_defensive_weight", 0.0)))
+    parser.add_argument("--sideways-defensive-weight", default=str(config.get("regime_score_blend", {}).get("sideways_defensive_weight", 0.5)))
+    parser.add_argument("--bear-defensive-weight", default=str(config.get("regime_score_blend", {}).get("bear_defensive_weight", 1.0)))
+    parser.add_argument(
+        "--defensive-timing",
+        choices=["config", "enabled", "disabled"],
+        default="config",
+        help="Whether exact backtests should use the configured defensive exposure schedule.",
+    )
     parser.add_argument("--target-annual-return", type=float, default=quality.get("target_annual_return", 0.20))
     parser.add_argument("--drawdown-limit", type=float, default=quality.get("max_backtest_drawdown_limit", -0.20))
     parser.add_argument("--max-seconds", type=float, default=900.0)
@@ -53,7 +72,14 @@ def main() -> None:
     start_time = time.monotonic()
     end_date = resolve_target_date_value(args.end_date, config=config)
     prices = pd.read_parquet(resolve_path(args.price_file))
-    factor_columns = _requested_factor_columns(args.factor_file, config.get("strategy", {}), config.get("dynamic_ic_selector", {}))
+    factor_columns = _requested_factor_columns(
+        args.factor_file,
+        config.get("strategy", {}),
+        config.get("dynamic_ic_selector", {}),
+        config.get("ml_strategy", {}),
+        config.get("regime_score_blend", {}),
+        config.get("regime_score_filter", {}),
+    )
     factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file, columns=factor_columns)
 
     output_path = resolve_path(args.output)
@@ -63,19 +89,70 @@ def main() -> None:
 
     combos = list(
         product(
+            _csv_values(args.liquidity_sides, str),
             _csv_values(args.liquidity_quantiles, float),
             _csv_values(args.top_n, int),
             _csv_values(args.rank_buffer, int),
-            _csv_values(args.circuit_breaker_drawdown, float),
+            _csv_optional_values(args.max_industry_weight, float),
+            _csv_optional_values(args.stop_loss_pct, float),
+            _csv_optional_values(args.take_profit_pct, float),
+            _csv_optional_values(args.circuit_breaker_drawdown, float),
             _csv_values(args.cooldown_days, int),
             _csv_values(args.circuit_breaker_target_exposure, float),
+            _csv_values(args.rebalance_drift_threshold, float),
+            _csv_values(args.bull_exposure, float),
+            _csv_values(args.sideways_exposure, float),
+            _csv_values(args.bear_exposure, float),
+            _csv_optional_values(args.bear_drawdown_threshold, float),
+            _csv_values(args.bull_defensive_weight, float),
+            _csv_values(args.sideways_defensive_weight, float),
+            _csv_values(args.bear_defensive_weight, float),
         )
     )
     logger.info("Risk refinement grid has %s exact backtest candidates.", len(combos))
 
-    score_cache: dict[float, pd.Series] = {}
-    for idx, (liquidity_quantile, top_n, rank_buffer, circuit_drawdown, cooldown_days, target_exposure) in enumerate(combos, start=1):
-        key = _combo_key(liquidity_quantile, top_n, rank_buffer, circuit_drawdown, cooldown_days, target_exposure)
+    score_cache: dict[tuple[str, float, float | None, float, float, float], pd.Series] = {}
+    for idx, (
+        liquidity_side,
+        liquidity_quantile,
+        top_n,
+        rank_buffer,
+        max_industry_weight,
+        stop_loss,
+        take_profit,
+        circuit_drawdown,
+        cooldown_days,
+        target_exposure,
+        rebalance_drift_threshold,
+        bull_exposure,
+        sideways_exposure,
+        bear_exposure,
+        bear_drawdown_threshold,
+        bull_defensive_weight,
+        sideways_defensive_weight,
+        bear_defensive_weight,
+    ) in enumerate(combos, start=1):
+        key = _combo_key(
+            liquidity_side,
+            liquidity_quantile,
+            top_n,
+            rank_buffer,
+            max_industry_weight,
+            stop_loss,
+            take_profit,
+            circuit_drawdown,
+            cooldown_days,
+            target_exposure,
+            rebalance_drift_threshold,
+            args.defensive_timing,
+            bull_exposure,
+            sideways_exposure,
+            bear_exposure,
+            bear_drawdown_threshold,
+            bull_defensive_weight,
+            sideways_defensive_weight,
+            bear_defensive_weight,
+        )
         if key in completed:
             logger.info("Skipping completed row %s/%s: %s.", idx, len(combos), key)
             continue
@@ -84,35 +161,74 @@ def main() -> None:
             break
 
         logger.info("Running row %s/%s: %s.", idx, len(combos), key)
-        scores = score_cache.get(liquidity_quantile)
+        score_key = (
+            str(liquidity_side).strip().lower(),
+            float(liquidity_quantile),
+            _optional_key(bear_drawdown_threshold),
+            round(float(bull_defensive_weight), 6),
+            round(float(sideways_defensive_weight), 6),
+            round(float(bear_defensive_weight), 6),
+        )
+        scores = score_cache.get(score_key)
         if scores is None:
             scoring_config = deepcopy(config)
             scoring_config.setdefault("liquidity_filter", {})
+            scoring_config["liquidity_filter"]["side"] = score_key[0]
             scoring_config["liquidity_filter"]["quantile"] = liquidity_quantile
+            scoring_config.setdefault("market_regime", {})["bear_drawdown_threshold"] = bear_drawdown_threshold
+            scoring_config.setdefault("regime_score_blend", {})["bull_defensive_weight"] = bull_defensive_weight
+            scoring_config.setdefault("regime_score_blend", {})["sideways_defensive_weight"] = sideways_defensive_weight
+            scoring_config.setdefault("regime_score_blend", {})["bear_defensive_weight"] = bear_defensive_weight
             scores = build_strategy_scores(factors, scoring_config, price_df=prices)
             scores = resample_signals(scores, scoring_config["strategy"].get("rebalance_freq", "daily"))
-            score_cache[liquidity_quantile] = scores
+            score_cache[score_key] = scores
 
-        bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
+        timing_config = _with_timing_overrides(
+            config,
+            args.defensive_timing,
+            bull_exposure,
+            sideways_exposure,
+            bear_exposure,
+            bear_drawdown_threshold,
+        )
+        bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, timing_config)
         bt_config.update(
             {
                 "top_n": top_n,
                 "rank_buffer": rank_buffer,
+                "max_industry_weight": max_industry_weight,
+                "stop_loss_pct": stop_loss,
+                "take_profit_pct": take_profit,
                 "circuit_breaker_drawdown": circuit_drawdown,
                 "circuit_breaker_cooldown_days": cooldown_days,
                 "circuit_breaker_target_exposure": target_exposure,
+                "rebalance_drift_threshold": rebalance_drift_threshold,
             }
         )
+        bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
 
         row_start = time.monotonic()
         result = run_backtest(scores, prices, args.start_date, end_date, bt_config)
         row = {
+            "liquidity_side": score_key[0],
             "liquidity_quantile": liquidity_quantile,
             "top_n": top_n,
             "rank_buffer": rank_buffer,
+            "max_industry_weight": max_industry_weight,
+            "stop_loss_pct": stop_loss,
+            "take_profit_pct": take_profit,
             "circuit_breaker_drawdown": circuit_drawdown,
             "circuit_breaker_cooldown_days": cooldown_days,
             "circuit_breaker_target_exposure": target_exposure,
+            "rebalance_drift_threshold": rebalance_drift_threshold,
+            "bull_exposure": bull_exposure,
+            "sideways_exposure": sideways_exposure,
+            "bear_exposure": bear_exposure,
+            "bear_drawdown_threshold": bear_drawdown_threshold,
+            "bull_defensive_weight": bull_defensive_weight,
+            "sideways_defensive_weight": sideways_defensive_weight,
+            "bear_defensive_weight": bear_defensive_weight,
+            "defensive_timing": args.defensive_timing,
             "seconds": time.monotonic() - row_start,
             **result.metrics,
         }
@@ -139,46 +255,180 @@ def _csv_values(value: str, cast: Callable[[str], Any]) -> list[Any]:
     return [cast(item.strip()) for item in str(value).split(",") if item.strip()]
 
 
+def _csv_optional_values(value: str, cast: Callable[[str], Any]) -> list[Any]:
+    values: list[Any] = []
+    for item in str(value).split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if item.lower() in {"none", "null", "off"}:
+            values.append(None)
+        else:
+            values.append(cast(item))
+    return values
+
+
+def _with_timing_overrides(
+    config: dict[str, Any],
+    mode: str,
+    bull_exposure: float,
+    sideways_exposure: float,
+    bear_exposure: float,
+    bear_drawdown_threshold: float | None,
+) -> dict[str, Any]:
+    result = deepcopy(config)
+    result.setdefault("defensive_timing", {})
+    if mode != "config":
+        result["defensive_timing"]["enabled"] = mode == "enabled"
+    result["defensive_timing"]["bull_exposure"] = bull_exposure
+    result["defensive_timing"]["sideways_exposure"] = sideways_exposure
+    result["defensive_timing"]["bear_exposure"] = bear_exposure
+    result.setdefault("market_regime", {})["bear_drawdown_threshold"] = bear_drawdown_threshold
+    return result
+
+
 def _combo_key(
+    liquidity_side: str,
     liquidity_quantile: float,
     top_n: int,
     rank_buffer: int,
-    circuit_drawdown: float,
+    max_industry_weight: float | None,
+    stop_loss: float | None,
+    take_profit: float | None,
+    circuit_drawdown: float | None,
     cooldown_days: int,
     target_exposure: float,
-) -> tuple[float, int, int, float, int, float]:
+    rebalance_drift_threshold: float,
+    defensive_timing: str,
+    bull_exposure: float,
+    sideways_exposure: float,
+    bear_exposure: float,
+    bear_drawdown_threshold: float | None,
+    bull_defensive_weight: float,
+    sideways_defensive_weight: float,
+    bear_defensive_weight: float,
+) -> tuple[
+    str,
+    float,
+    int,
+    int,
+    float | None,
+    float | None,
+    float | None,
+    float | None,
+    int,
+    float,
+    float,
+    str,
+    float,
+    float,
+    float,
+    float | None,
+    float,
+    float,
+    float,
+]:
     return (
+        str(liquidity_side).strip().lower(),
         round(float(liquidity_quantile), 6),
         int(top_n),
         int(rank_buffer),
-        round(float(circuit_drawdown), 6),
+        _optional_key(max_industry_weight),
+        _optional_key(stop_loss),
+        _optional_key(take_profit),
+        _optional_key(circuit_drawdown),
         int(cooldown_days),
         round(float(target_exposure), 6),
+        round(float(rebalance_drift_threshold), 6),
+        str(defensive_timing).strip().lower(),
+        round(float(bull_exposure), 6),
+        round(float(sideways_exposure), 6),
+        round(float(bear_exposure), 6),
+        _optional_key(bear_drawdown_threshold),
+        round(float(bull_defensive_weight), 6),
+        round(float(sideways_defensive_weight), 6),
+        round(float(bear_defensive_weight), 6),
     )
 
 
-def _completed_keys(output_path: Path) -> set[tuple[float, int, int, float, int, float]]:
+def _optional_key(value: object) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return round(float(value), 6)
+
+
+def _completed_keys(
+    output_path: Path,
+) -> set[
+    tuple[
+        str,
+        float,
+        int,
+        int,
+        float | None,
+        float | None,
+        float | None,
+        float | None,
+        int,
+        float,
+        float,
+        str,
+        float,
+        float,
+        float,
+        float | None,
+        float,
+        float,
+        float,
+    ]
+]:
     frame = _read_existing(output_path)
     if frame.empty:
         return set()
     required = [
+        "liquidity_side",
         "liquidity_quantile",
         "top_n",
         "rank_buffer",
+        "max_industry_weight",
+        "stop_loss_pct",
+        "take_profit_pct",
         "circuit_breaker_drawdown",
         "circuit_breaker_cooldown_days",
         "circuit_breaker_target_exposure",
+        "rebalance_drift_threshold",
+        "defensive_timing",
+        "bull_exposure",
+        "sideways_exposure",
+        "bear_exposure",
+        "bear_drawdown_threshold",
+        "bull_defensive_weight",
+        "sideways_defensive_weight",
+        "bear_defensive_weight",
     ]
     if any(column not in frame.columns for column in required):
         return set()
     return {
         _combo_key(
+            row["liquidity_side"],
             row["liquidity_quantile"],
             row["top_n"],
             row["rank_buffer"],
+            row["max_industry_weight"],
+            row["stop_loss_pct"],
+            row["take_profit_pct"],
             row["circuit_breaker_drawdown"],
             row["circuit_breaker_cooldown_days"],
             row["circuit_breaker_target_exposure"],
+            row["rebalance_drift_threshold"],
+            row["defensive_timing"],
+            row["bull_exposure"],
+            row["sideways_exposure"],
+            row["bear_exposure"],
+            row["bear_drawdown_threshold"],
+            row["bull_defensive_weight"],
+            row["sideways_defensive_weight"],
+            row["bear_defensive_weight"],
         )
         for _, row in frame.iterrows()
     }

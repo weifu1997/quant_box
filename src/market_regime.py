@@ -51,11 +51,18 @@ def _detect_regime(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[str
     momentum = benchmark.pct_change(momentum_window)
     annual_volatility = benchmark.pct_change().rolling(vol_window, min_periods=min(min_periods, vol_window)).std(ddof=0) * np.sqrt(252)
     high_volatility = _high_volatility_mask(annual_volatility, cfg)
+    drawdown_bear = _drawdown_bear_mask(benchmark, cfg, min_periods)
 
-    bull = (benchmark >= moving_average) & (momentum >= float(cfg.get("bull_momentum_min", 0.0))) & ~high_volatility
+    bull = (
+        (benchmark >= moving_average)
+        & (momentum >= float(cfg.get("bull_momentum_min", 0.0)))
+        & ~high_volatility
+        & ~drawdown_bear
+    )
     bear = (benchmark < moving_average) & (
         (momentum <= float(cfg.get("bear_momentum_max", 0.0))) | high_volatility
     )
+    bear = bear | drawdown_bear
 
     regime = pd.Series(REGIME_SIDEWAYS, index=benchmark.index, name=name, dtype="object")
     regime.loc[bull.fillna(False)] = REGIME_BULL
@@ -218,6 +225,22 @@ def _high_volatility_mask(volatility: pd.Series, cfg: dict[str, Any]) -> pd.Seri
     quantile = float(cfg.get("high_volatility_quantile", 0.75))
     threshold = volatility.rolling(quantile_window, min_periods=max(1, int(cfg.get("min_periods", 20)))).quantile(quantile)
     return volatility >= threshold
+
+
+def _drawdown_bear_mask(benchmark: pd.Series, cfg: dict[str, Any], min_periods: int) -> pd.Series:
+    threshold = cfg.get("bear_drawdown_threshold")
+    if threshold is None:
+        return pd.Series(False, index=benchmark.index)
+    threshold_value = abs(float(threshold))
+    if threshold_value <= 0:
+        return pd.Series(False, index=benchmark.index)
+    window = int(cfg.get("drawdown_window", 252) or 0)
+    if window > 0:
+        peak = benchmark.rolling(window, min_periods=min(max(1, min_periods), window)).max()
+    else:
+        peak = benchmark.cummax()
+    drawdown = benchmark / peak - 1.0
+    return (drawdown <= -threshold_value).fillna(False)
 
 
 def _benchmark_close(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[str, Any] | None = None) -> pd.Series:

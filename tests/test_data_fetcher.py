@@ -10,16 +10,24 @@ import pandas as pd
 from src.data_fetcher import (
     DAILY_BASIC_FIELDS,
     DAILY_FIELDS,
+    INDEX_WEIGHT_FIELDS,
     fetch_daily_basic,
+    fetch_index_constituents,
     fetch_daily_stock,
     fetch_daily_stocks,
+    fetch_st_calendar,
+    fetch_hs300_stocks,
     fetch_stock_universe,
     filter_universe_frame,
     normalize_daily_basic_frame,
+    normalize_index_constituents_frame,
+    normalize_st_calendar_frame,
     _raw_latest_date,
     update_daily_basic_data,
     update_daily_data,
     update_daily_data_resumable,
+    update_index_constituents_data,
+    update_st_calendar_data,
 )
 
 
@@ -106,10 +114,77 @@ class DailyBasicClient(FakeTushareClient):
         return super().call(api_name, params=params, fields=fields)
 
 
+class FlakyDailyBasicClient(DailyBasicClient):
+    def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        params = params or {}
+        if api_name == "daily_basic" and params.get("trade_date") == "20240103":
+            self.calls.append((api_name, params.copy(), fields))
+            raise RuntimeError("daily_basic limited")
+        return super().call(api_name, params=params, fields=fields)
+
+
+class PointInTimeClient(FakeTushareClient):
+    def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        params = params or {}
+        self.calls.append((api_name, params.copy(), fields))
+        if api_name == "index_weight":
+            trade_date = params.get("end_date") or params.get("trade_date") or "20240103"
+            return pd.DataFrame(
+                [
+                    {
+                        "index_code": params.get("index_code", "000300.SH"),
+                        "con_code": "000001.SZ",
+                        "trade_date": trade_date,
+                        "weight": 1.23,
+                    }
+                ]
+            )
+        if api_name == "namechange":
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "name": "*ST TEST",
+                        "start_date": "20240102",
+                        "end_date": "",
+                        "ann_date": "20240101",
+                        "change_reason": "特别处理",
+                    },
+                    {
+                        "ts_code": "000002.SZ",
+                        "name": "NORMAL",
+                        "start_date": "20240102",
+                        "end_date": "",
+                        "ann_date": "20240101",
+                        "change_reason": "更名",
+                    },
+                ]
+            )
+        return super().call(api_name, params=params, fields=fields)
+
+
 class FailingTushareClient(FakeTushareClient):
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
         self.calls.append((api_name, (params or {}).copy(), fields))
         raise RuntimeError("limited")
+
+
+class FlakyIndexClient(PointInTimeClient):
+    def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        params = params or {}
+        if api_name == "index_weight" and params.get("start_date") == "20240201":
+            self.calls.append((api_name, params.copy(), fields))
+            raise RuntimeError("window limited")
+        return super().call(api_name, params=params, fields=fields)
+
+
+class FallbackIndexClient(PointInTimeClient):
+    def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        params = params or {}
+        if api_name == "index_weight" and params.get("index_code") == "000300.SH":
+            self.calls.append((api_name, params.copy(), fields))
+            return pd.DataFrame(columns=INDEX_WEIGHT_FIELDS)
+        return super().call(api_name, params=params, fields=fields)
 
 
 class DataFetcherTests(unittest.TestCase):
@@ -154,6 +229,27 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(client.calls[0][1]["trade_date"], "20240102")
         self.assertEqual(client.calls[0][2], DAILY_BASIC_FIELDS)
         self.assertEqual(frame["trade_date"].iloc[0], pd.Timestamp("2024-01-02"))
+
+    def test_fetch_index_constituents_requests_tushare_index_weight_fields(self) -> None:
+        client = PointInTimeClient()
+
+        frame = fetch_index_constituents("000300.SH", "2024-01-01", "2024-01-03", client=client, retries=1)
+
+        self.assertEqual(client.calls[0][0], "index_weight")
+        self.assertEqual(client.calls[0][1]["index_code"], "000300.SH")
+        self.assertEqual(client.calls[0][1]["start_date"], "20240101")
+        self.assertEqual(client.calls[0][1]["end_date"], "20240103")
+        self.assertEqual(client.calls[0][2], INDEX_WEIGHT_FIELDS)
+        self.assertEqual(frame["trade_date"].iloc[0], pd.Timestamp("2024-01-03"))
+
+    def test_fetch_st_calendar_keeps_only_st_namechange_rows(self) -> None:
+        client = PointInTimeClient()
+
+        frame = fetch_st_calendar(client=client, retries=1)
+
+        self.assertEqual(client.calls[0][0], "namechange")
+        self.assertEqual(frame["ts_code"].tolist(), ["000001.SZ"])
+        self.assertEqual(frame["st_start_date"].iloc[0], pd.Timestamp("2024-01-02"))
 
     def test_update_daily_basic_data_writes_incremental_parquet_cache(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -218,6 +314,205 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(len(cached), 1)
             self.assertEqual([call[1]["trade_date"] for call in client.calls], ["20210104"])
 
+    def test_update_daily_basic_data_skips_failed_dates_by_default(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "daily_basic.parquet"
+            price_file = root / "prices.parquet"
+            prices = pd.DataFrame(
+                {"close": [1.0, 2.0, 3.0]},
+                index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]),
+            )
+            prices.to_parquet(price_file)
+            config = {
+                "data": {
+                    "start_date": "2024-01-02",
+                    "end_date": "2024-01-04",
+                    "daily_basic_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                },
+                "ic": {"price_file": str(price_file)},
+            }
+            client = FlakyDailyBasicClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                path = update_daily_basic_data(client=client)
+
+            cached = pd.read_parquet(path)
+            self.assertEqual(cached["trade_date"].dt.strftime("%Y%m%d").tolist(), ["20240102", "20240104"])
+
+    def test_update_daily_basic_data_can_fail_on_date_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "daily_basic.parquet"
+            price_file = root / "prices.parquet"
+            prices = pd.DataFrame(
+                {"close": [1.0, 2.0, 3.0]},
+                index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]),
+            )
+            prices.to_parquet(price_file)
+            config = {
+                "data": {
+                    "start_date": "2024-01-02",
+                    "end_date": "2024-01-04",
+                    "daily_basic_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                },
+                "ic": {"price_file": str(price_file)},
+            }
+            client = FlakyDailyBasicClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                with self.assertRaises(ValueError):
+                    update_daily_basic_data(client=client, skip_failed=False)
+
+    def test_update_index_constituents_data_writes_point_in_time_csv(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "hs300_constituents.csv"
+            config = {
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-01-03",
+                    "hs300_constituents_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                }
+            }
+            client = PointInTimeClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                path = update_index_constituents_data(client=client, max_windows=1)
+
+            cached = pd.read_csv(path)
+            self.assertEqual(cached["con_code"].tolist(), ["000001.SZ"])
+            self.assertEqual(client.calls[0][0], "index_weight")
+
+    def test_update_index_constituents_data_defaults_to_month_sized_windows(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "hs300_constituents.csv"
+            config = {
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-03-10",
+                    "hs300_constituents_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                }
+            }
+            client = PointInTimeClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                update_index_constituents_data(client=client, max_windows=2)
+
+            calls = [call for call in client.calls if call[0] == "index_weight"]
+            self.assertEqual([call[1]["start_date"] for call in calls], ["20240101", "20240201"])
+            self.assertEqual([call[1]["end_date"] for call in calls], ["20240131", "20240302"])
+
+    def test_update_index_constituents_data_uses_fallback_code_when_primary_is_empty(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "hs300_constituents.csv"
+            config = {
+                "data": {
+                    "start_date": "2015-01-01",
+                    "end_date": "2015-01-31",
+                    "hs300_constituents_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                },
+                "data_governance": {"index_fallback_codes": ["399300.SZ"]},
+            }
+            client = FallbackIndexClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                path = update_index_constituents_data(client=client, max_windows=1)
+
+            cached = pd.read_csv(path)
+            self.assertEqual(cached["index_code"].tolist(), ["399300.SZ"])
+            self.assertEqual([call[1]["index_code"] for call in client.calls if call[0] == "index_weight"], ["000300.SH", "399300.SZ"])
+
+    def test_update_index_constituents_data_skips_failed_windows_by_default(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "hs300_constituents.csv"
+            config = {
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-03-10",
+                    "hs300_constituents_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                }
+            }
+            client = FlakyIndexClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                path = update_index_constituents_data(client=client, max_windows=3)
+
+            cached = pd.read_csv(path)
+            self.assertEqual(cached["trade_date"].tolist(), ["2024-01-31", "2024-03-10"])
+
+    def test_update_index_constituents_data_can_fail_on_window_error(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "hs300_constituents.csv"
+            config = {
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-03-10",
+                    "hs300_constituents_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                }
+            }
+            client = FlakyIndexClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                with self.assertRaises(ValueError):
+                    update_index_constituents_data(client=client, max_windows=3, skip_failed=False)
+
+    def test_update_st_calendar_data_writes_st_rows(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_file = root / "st_calendar.csv"
+            config = {
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-01-03",
+                    "st_calendar_file": str(out_file),
+                    "retries": 1,
+                    "retry_max_wait": 0,
+                }
+            }
+            client = PointInTimeClient()
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ):
+                path = update_st_calendar_data(client=client)
+
+            cached = pd.read_csv(path)
+            self.assertEqual(cached["ts_code"].tolist(), ["000001.SZ"])
+            self.assertIn("st_start_date", cached.columns)
+
     def test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait(self) -> None:
         client = FailingTushareClient()
 
@@ -258,6 +553,22 @@ class DataFetcherTests(unittest.TestCase):
                 codes = fetch_stock_universe()
 
             self.assertEqual(codes, ["000300.SZ", "600000.SH"])
+
+    def test_fetch_hs300_stocks_filters_local_constituents_as_of_date(self) -> None:
+        with TemporaryDirectory() as tmp:
+            hs300_file = Path(tmp) / "hs300_constituents.csv"
+            pd.DataFrame(
+                [
+                    {"index_code": "000300.SH", "con_code": "000001.SZ", "trade_date": "20240103", "weight": 1.0},
+                    {"index_code": "000300.SH", "con_code": "600519.SH", "trade_date": "20240201", "weight": 1.0},
+                ]
+            ).to_csv(hs300_file, index=False)
+
+            january = fetch_hs300_stocks(date="2024-01-31", local_file=hs300_file)
+            february = fetch_hs300_stocks(date="2024-02-01", local_file=hs300_file)
+
+            self.assertEqual(january, ["000001.SZ"])
+            self.assertEqual(february, ["600519.SH"])
 
     def test_filter_universe_frame_excludes_delisted_before_as_of_date(self) -> None:
         universe = pd.DataFrame(

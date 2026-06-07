@@ -34,7 +34,9 @@ def _render_report(report: dict[str, Any]) -> str:
     data_health = report.get("data_health", {})
     param_quality = report.get("parameter_quality", {})
     backtest_quality = report.get("backtest_quality", {})
+    data_governance = report.get("data_governance", {})
     metrics = report.get("backtest_metrics", {})
+    research = report.get("research_diagnostics", {})
     account = report.get("account", {})
     signal_summary = report.get("signal_summary", {})
     block_reasons = report.get("block_reasons", [])
@@ -71,6 +73,25 @@ def _render_report(report: dict[str, Any]) -> str:
             f"- Factor latest: {data_health.get('factor_latest_date', '')}",
             f"- Issues: {', '.join(data_health.get('issues', [])) or 'none'}",
             "",
+            "## Data Governance",
+            "",
+            f"- Point-in-time ready: {data_governance.get('is_point_in_time_ready', False)}",
+            f"- ST filter mode: {data_governance.get('st_filter_mode', '')}",
+            f"- Universe rows: {data_governance.get('universe_rows', 0)}",
+            f"- Delisted rows observed: {data_governance.get('delisted_rows', 0)}",
+            f"- Index constituents available: {data_governance.get('index_constituents_available', False)}",
+            f"- Index snapshot month coverage: {data_governance.get('index_constituents_observed_months', 0)}/{data_governance.get('index_constituents_expected_months', 0)}",
+            f"- Daily basic date coverage: {data_governance.get('daily_basic_covered_dates', 0)}/{data_governance.get('daily_basic_expected_dates', 0)}",
+            f"- Raw adj-factor sample: {data_governance.get('raw_adj_factor_files_with_column', 0)}/{data_governance.get('raw_adj_factor_sampled_files', 0)}",
+            f"- Factor cache metadata: {data_governance.get('factor_cache_meta_available', False)}",
+            f"- Adj-factor version metadata: {data_governance.get('adj_factor_meta_available', False)}",
+            f"- Adj-factor coverage: {data_governance.get('adj_factor_meta_files_with_adj_factor', 0)}/{data_governance.get('adj_factor_meta_raw_file_count', 0)}",
+            f"- Adj-factor missing symbols: {_symbol_preview(data_governance.get('adj_factor_meta_missing_symbols', []))}",
+            f"- Adj-factor end date: {data_governance.get('adj_factor_meta_end_date', '')}",
+            f"- Issues: {', '.join(data_governance.get('issues', [])) or 'none'}",
+            f"- Warnings: {', '.join(data_governance.get('warnings', [])) or 'none'}",
+            *_repair_action_lines(data_governance.get("repair_actions", [])),
+            "",
             "## Parameter Quality",
             "",
             f"- Acceptable: {param_quality.get('is_acceptable', False)}",
@@ -100,6 +121,15 @@ def _render_report(report: dict[str, Any]) -> str:
             "",
             *_mapping_lines(metrics, max_items=12),
             "",
+            "## Research Diagnostics",
+            "",
+            f"- Enabled: {research.get('enabled', False)}",
+            *_mapping_lines(research.get("benchmark", {}), max_items=8),
+            *_mapping_lines(_cost_summary(research), max_items=6),
+            *_mapping_lines(_turnover_summary(research), max_items=6),
+            *_mapping_lines(_exposure_summary(research), max_items=6),
+            f"- Issues: {', '.join(research.get('issues', [])) or 'none'}",
+            "",
             "## Account",
             "",
             f"- Total asset: {_num(account.get('total_asset'))}",
@@ -111,6 +141,12 @@ def _render_report(report: dict[str, Any]) -> str:
             f"- BUY: {signal_summary.get('BUY', 0)}",
             f"- HOLD: {signal_summary.get('HOLD', 0)}",
             f"- SELL: {signal_summary.get('SELL', 0)}",
+            "",
+            "## Execution Loop",
+            "",
+            f"- Manual orders: {report.get('files', {}).get('manual_orders', '')}",
+            f"- Order confirmation: {report.get('files', {}).get('order_confirmation', '')}",
+            f"- Fill feedback: {report.get('files', {}).get('fill_feedback', '')}",
             "",
             "## Output Files",
             "",
@@ -133,6 +169,68 @@ def _mapping_lines(values: dict[str, Any], max_items: int | None = None) -> list
     if max_items is not None:
         items = items[:max_items]
     return [f"- {key}: {value}" for key, value in items]
+
+
+def _repair_action_lines(actions: Any, max_items: int = 5) -> list[str]:
+    if not isinstance(actions, list) or not actions:
+        return ["- Repair actions: none"]
+    lines = []
+    for action in actions[:max_items]:
+        if not isinstance(action, dict):
+            continue
+        component = action.get("component", "")
+        reason = action.get("reason", "")
+        commands = action.get("commands", [])
+        command_text = " | ".join(str(command) for command in commands) if isinstance(commands, list) else str(commands)
+        lines.append(f"- Repair action: {component} ({reason}) -> {command_text}")
+    return lines or ["- Repair actions: none"]
+
+
+def _symbol_preview(symbols: Any, max_items: int = 8) -> str:
+    if not isinstance(symbols, list) or not symbols:
+        return "none"
+    values = [str(symbol) for symbol in symbols]
+    suffix = "" if len(values) <= max_items else f" (+{len(values) - max_items} more)"
+    return ", ".join(values[:max_items]) + suffix
+
+
+def _cost_summary(research: dict[str, Any]) -> dict[str, Any]:
+    costs = research.get("cost_attribution", {})
+    if not isinstance(costs, dict):
+        return {}
+    keys = ["trade_count", "total_trade_cost", "cost_drag_on_initial_equity", "capacity_warning_count"]
+    return {f"cost_{key}": costs.get(key) for key in keys if key in costs}
+
+
+def _exposure_summary(research: dict[str, Any]) -> dict[str, Any]:
+    exposure = research.get("exposure", {})
+    if not isinstance(exposure, dict):
+        return {}
+    keys = ["latest_date", "latest_position_count", "latest_top_position_weight", "latest_max_industry_weight"]
+    return {f"exposure_{key}": exposure.get(key) for key in keys if key in exposure}
+
+
+def _turnover_summary(research: dict[str, Any]) -> dict[str, Any]:
+    turnover = research.get("turnover_attribution", {})
+    if not isinstance(turnover, dict):
+        return {}
+    keys = [
+        "annual_turnover_estimate",
+        "annual_turnover_without_rebalance_trims_estimate",
+        "normal_rebalance_sell_count",
+        "rebalance_trim_sell_count",
+        "rebalance_exit_sell_count",
+        "rebalance_trim_share_of_normal_sells",
+        "rebalance_trim_notional",
+        "rebalance_trim_trade_cost",
+        "rebalance_trim_trade_cost_drag_on_initial_equity",
+        "rebalance_trim_cost_share_of_total_trade_cost",
+        "risk_exit_sell_count",
+        "risk_exit_share_of_executable_sells",
+        "risk_exit_trade_cost",
+        "blocked_sell_count",
+    ]
+    return {f"turnover_{key}": turnover.get(key) for key in keys if key in turnover}
 
 
 def _pct(value: Any) -> str:

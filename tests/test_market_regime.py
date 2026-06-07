@@ -80,6 +80,28 @@ class MarketRegimeTests(unittest.TestCase):
 
         self.assertEqual(exposure.to_list(), [1.0, 0.8, 0.4])
 
+    def test_detect_market_regime_can_mark_benchmark_drawdown_as_bear(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=6)
+        close = pd.DataFrame({"A": [10.0, 11.0, 12.0, 11.5, 10.7, 10.6]}, index=dates)
+        prices = pd.concat({"close": close}, axis=1)
+        config = {
+            "market_regime": {
+                "enabled": True,
+                "ma_window": 10,
+                "momentum_window": 5,
+                "volatility_window": 5,
+                "min_periods": 1,
+                "high_volatility_threshold": 10.0,
+                "bear_drawdown_threshold": 0.10,
+                "drawdown_window": 6,
+                "lag_days": 0,
+            }
+        }
+
+        regimes = detect_market_regime(prices, config)
+
+        self.assertEqual(regimes.iloc[-1], REGIME_BEAR)
+
     def test_apply_defensive_timing_adds_backtest_exposure_schedule(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=6)
         close = pd.DataFrame({"A": [10.0, 9.8, 9.5, 9.1, 8.9, 8.6]}, index=dates)

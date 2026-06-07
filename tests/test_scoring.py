@@ -225,6 +225,34 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(daily.loc["B"], daily.loc["A"])
         self.assertEqual(scores.attrs["regime_score_blend"]["dates_blended"], 1)
 
+    def test_build_strategy_scores_applies_regime_score_filter(self) -> None:
+        date = pd.Timestamp("2024-01-02")
+        index = pd.MultiIndex.from_product([[date], ["A", "B", "C"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": [3.0, 2.0, 1.0], "ROC20": [-0.5, 0.1, 0.5]}, index=index)
+        prices = pd.concat({"close": pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0]}, index=[date])}, axis=1)
+        config = {
+            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
+            "regime_score_filter": {
+                "enabled": True,
+                "rules": [
+                    {
+                        "regime": "bear",
+                        "components": [{"column": "ROC20", "direction": 1.0}],
+                        "min_score": 0.0,
+                    }
+                ],
+            },
+        }
+
+        with patch("src.scoring.detect_market_regime", return_value=pd.Series(["bear"], index=[date])):
+            scores = build_strategy_scores(factors, config, price_df=prices)
+
+        daily = scores.xs(date, level=0)
+        self.assertTrue(pd.isna(daily.loc["A"]))
+        self.assertFalse(pd.isna(daily.loc["B"]))
+        self.assertFalse(pd.isna(daily.loc["C"]))
+        self.assertEqual(scores.attrs["regime_score_filter"]["rows_removed"], 1)
+
     def test_build_latest_strategy_scores_applies_regime_score_blend(self) -> None:
         date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])

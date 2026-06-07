@@ -110,6 +110,7 @@ setx TUSHARE_TOKEN "你的token"
 | `11_旧版全流程_补数据到信号.bat` | 兼容旧入口：调用 `run_all.bat`，自动刷新、校验、回测并生成候选信号 |
 | `12_全量重刷股票数据.bat` | 维护工具：从配置起始日或上市日全量重刷 raw 股票数据，慢于 `04`，仅在历史数据疑似损坏时使用 |
 | `13_一键补齐历史数据_无人值守.bat` | 无人值守工具：分批补齐 2012 年以来 raw 日线，转换数据，补齐 daily_basic，并可重算 Alpha158 因子 |
+| `scripts/run_update_point_in_time_data.py` | 命令行工具：补齐 daily_basic、HS300 指数成分权重和 ST 历史日历，并重写点时数据治理报告 |
 | `run_all.bat` | 命令行自动全流程入口：刷新缺失和过期股票、转换、重算因子、data health、回测、候选信号；不含 walk-forward 参数优化 |
 
 最常用的三个入口：
@@ -170,6 +171,12 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 
 默认会读取最近一次更新写入的 freshness 统计，速度更快；如需现场重新扫描 raw CSV，追加 `--scan-raw`。
 如果 `latest_symbols` 略低但 `fresh_or_confirmed_symbols` 等于 `target_symbols`，表示少数停牌或无新行情股票已经查询确认，不会阻塞补齐。
+
+补齐点时治理依赖，包括 `daily_basic`、HS300 成分权重和 ST 历史日历：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_update_point_in_time_data.py --max-dates 20 --max-index-windows 1
+```
 
 ## 数据处理与回测流程
 
@@ -254,6 +261,41 @@ instrument,shares
 - `reference_price_source`：价格来自信号日还是预定交易日
 - `suggested_limit_price`、`stop_loss_price`、`adv_10d`、`capacity_ratio`、`is_limit_up`、`is_limit_down`、`is_st`：人工执行辅助字段
 
+## 研究诊断与人工执行闭环
+
+自动流程不会放宽质量门槛。只要数据、参数、回测或账户持仓任一门槛不过，系统仍只输出候选信号，并在 `daily_signal_report.md` 和 `auto_signal_report.json` 里列出阻塞原因。
+
+每日流程现在同时输出：
+
+- 研究诊断：`auto_research_diagnostics.json`、基准净值、个股/行业归因、行业/市值暴露，用来判断策略到底赚亏在哪里
+- 数据治理：`data_governance_report.json`，检查上市/退市字段、ST 历史日历、指数成分日期/权重、复权因子和因子缓存元数据
+- 人工确认：`outputs/order_confirmations/order_confirmation*_YYYY-MM-DD.csv`
+- 成交回填：`outputs/fill_feedback/fill_feedback*_YYYY-MM-DD.csv`
+
+建议日常顺序：
+
+```text
+1. 打开 outputs/daily_signal_report.md，看质量门槛、研究诊断和数据治理风险
+2. 如果 is_executable=false，不按候选信号交易，先修 block_reasons
+3. 如果允许人工执行，检查 manual_orders_*.csv 和 order_confirmation_*.csv
+4. 手工下单后，在 fill_feedback_*.csv 填入 FILLED/PARTIAL/CANCELLED/SKIPPED、executed_shares、executed_price 等字段；不要保留 PENDING 行
+5. 用成交回填更新 config/current_holdings.csv
+```
+
+成交回填命令：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_apply_fills.py outputs\fill_feedback\fill_feedback_YYYY-MM-DD.csv
+```
+
+先演练不更新持仓：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_apply_fills.py outputs\fill_feedback\fill_feedback_YYYY-MM-DD.csv --dry-run
+```
+
+回填命令会先校验文件：未处理的 PENDING、缺成交股数、成交股数超过计划、卖出超过当前持仓等情况会直接失败，不会静默覆盖 `config/current_holdings.csv`。
+
 ## 输出文件
 
 常见输出：
@@ -265,6 +307,7 @@ data/prices/close.parquet              收盘价面板
 data/prices/ohlcv.parquet              OHLCV 价格面板
 data/factors/alpha158.parquet          Alpha158 因子缓存
 data/factors/alpha158.parquet.meta.json 因子缓存元数据
+data/factors/adj_factor_meta.json      复权因子版本元数据
 data/factors/rolling_ic_weights.pkl    rolling IC 权重缓存
 outputs/backtest_equity.csv            回测净值
 outputs/backtest_holdings.csv          回测持仓
@@ -280,9 +323,27 @@ outputs/auto_selected_params.json      自动选中的策略参数
 outputs/auto_parameter_quality.json    自动选参质量门槛判断
 outputs/auto_backtest_metrics.json     自动选参后的回测指标
 outputs/auto_signal_report.json        自动信号报告
+outputs/data_governance_report.json    点时数据治理检查
+outputs/auto_research_diagnostics.json 研究诊断汇总
+outputs/auto_research_benchmark_curve.csv 基准对比净值
+outputs/auto_research_drawdown_periods.csv 回撤分段诊断
+outputs/auto_research_regime_returns.csv 市场状态收益拆解
+outputs/auto_research_regime_trade_costs.csv 市场状态交易成本拆解
+outputs/auto_research_regime_trade_costs_by_reason.csv 市场状态交易原因成本拆解
+outputs/auto_research_regime_industry_attribution.csv 市场状态-行业收益归因
+outputs/auto_research_regime_instrument_attribution.csv 市场状态-个股收益归因
+outputs/auto_research_instrument_attribution.csv 个股收益归因
+outputs/auto_research_industry_attribution.csv 行业收益归因
+outputs/auto_research_industry_exposure.csv 行业暴露
+outputs/auto_research_market_cap_exposure.csv 市值暴露
 outputs/daily_signal_report.md         每日信号 Markdown 报告
 outputs/manual_orders_YYYY-MM-DD.csv   人工执行交易单
 outputs/manual_orders_candidate_YYYY-MM-DD.csv 门槛未通过时的候选交易单
+outputs/order_confirmations/order_confirmation_YYYY-MM-DD.csv 人工确认模板
+outputs/order_confirmations/order_confirmation_candidate_YYYY-MM-DD.csv 候选人工确认模板
+outputs/fill_feedback/fill_feedback_YYYY-MM-DD.csv 成交回填模板
+outputs/fill_feedback/fill_feedback_candidate_YYYY-MM-DD.csv 候选成交回填模板
+outputs/fill_apply_audit_YYYY-MM-DD.json 成交回填应用审计
 outputs/candidate_signal_YYYY-MM-DD.csv 门槛未通过时的候选信号
 outputs/signal_YYYY-MM-DD.csv          每日信号
 outputs/latest_holdings.csv            最新持仓

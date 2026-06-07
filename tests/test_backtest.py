@@ -580,6 +580,88 @@ class BacktestTests(unittest.TestCase):
         final_holding = result.holdings[result.holdings["date"] == dates[-1]].iloc[0]
         self.assertEqual(int(final_holding["shares"]), 3000)
 
+    def test_annual_drawdown_guard_resets_next_year(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2025-01-02", "2025-01-03"])
+        index = pd.MultiIndex.from_product([[dates[0], dates[3]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10, 10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 8.0, 8.0, 8.0]}, index=dates),
+                "open": pd.DataFrame({"A": [10.0, 10.0, 8.0, 8.0, 8.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2025-01-03",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "annual_drawdown_guard": {"enabled": True, "drawdown": 0.10, "target_exposure": 0.0},
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "limit_down_threshold": 1.0,
+            },
+        )
+
+        guard_sell = result.trades[result.trades["reason"] == "annual_drawdown_guard"].iloc[0]
+        self.assertEqual(pd.Timestamp(guard_sell["date"]), dates[2])
+        later_buys = result.trades[
+            (result.trades["side"] == "BUY")
+            & (pd.to_datetime(result.trades["date"]) > pd.Timestamp(guard_sell["date"]))
+        ]
+        self.assertFalse(later_buys.empty)
+
+    def test_annual_drawdown_guard_release_allows_same_year_reentry(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08"])
+        index = pd.MultiIndex.from_product([[dates[0], dates[3]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10, 10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 8.0, 9.5, 9.5]}, index=dates),
+                "open": pd.DataFrame({"A": [10.0, 10.0, 8.0, 9.5, 9.5]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-08",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "annual_drawdown_guard": {
+                    "enabled": True,
+                    "drawdown": 0.18,
+                    "release_drawdown": 0.15,
+                    "target_exposure": 0.50,
+                },
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "limit_down_threshold": 1.0,
+            },
+        )
+
+        guard_sell = result.trades[result.trades["reason"] == "annual_drawdown_guard"].iloc[0]
+        later_buys = result.trades[
+            (result.trades["side"] == "BUY")
+            & (pd.to_datetime(result.trades["date"]) > pd.Timestamp(guard_sell["date"]))
+        ]
+        self.assertFalse(later_buys.empty)
+
     def test_exposure_schedule_change_rebalances_with_latest_signal(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
@@ -608,12 +690,169 @@ class BacktestTests(unittest.TestCase):
                 "slippage": 0.0,
                 "exposure_schedule": exposure,
                 "exposure_rebalance_threshold": 0.1,
+                "rebalance_drift_threshold": 1.0,
             },
         )
 
         sells = result.trades[result.trades["side"] == "SELL"]
         self.assertFalse(sells.empty)
         self.assertEqual(pd.Timestamp(sells.iloc[0]["date"]), dates[-1])
+
+    def test_exposure_schedule_signal_only_does_not_rebalance_between_signals(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+        exposure = pd.Series([1.0, 1.0, 0.5], index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "exposure_schedule": exposure,
+                "exposure_rebalance_threshold": 0.1,
+                "exposure_schedule_rebalance_on_signal_only": True,
+                "rebalance_drift_threshold": 1.0,
+            },
+        )
+
+        self.assertTrue(result.trades[result.trades["side"] == "SELL"].empty)
+
+    def test_rebalance_drift_threshold_skips_small_weight_trades(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([dates[:2], ["A", "B"]], names=["datetime", "instrument"])
+        scores = pd.Series([2.0, 1.0, 2.0, 1.0], index=index, name="score")
+        prices = pd.DataFrame({"A": [10.0, 10.0, 11.0], "B": [10.0, 10.0, 10.0]}, index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 2,
+                "max_turnover": 2,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "rebalance_drift_threshold": 0.03,
+            },
+        )
+
+        self.assertEqual(result.trades["side"].tolist(), ["BUY", "BUY"])
+
+    def test_equity_overlay_rebalances_from_last_signal_after_drawdown(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([1.0], index=index, name="score")
+        prices = pd.DataFrame({"A": [10.0, 10.0, 8.0, 8.0]}, index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-05",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "equity_overlay": {
+                    "enabled": True,
+                    "ma_window": 2,
+                    "momentum_window": 1,
+                    "drawdown_window": 2,
+                    "drawdown_cut": 0.05,
+                    "sideways_exposure": 0.5,
+                    "bear_exposure": 0.5,
+                    "rebalance_threshold": 0.0,
+                },
+            },
+        )
+
+        sells = result.trades[result.trades["side"] == "SELL"]
+        self.assertFalse(sells.empty)
+        self.assertEqual(pd.Timestamp(sells.iloc[0]["signal_date"]), dates[0])
+        self.assertEqual(pd.Timestamp(sells.iloc[0]["date"]), dates[-1])
+
+    def test_equity_overlay_signal_only_does_not_rebalance_between_signals(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([1.0], index=index, name="score")
+        prices = pd.DataFrame({"A": [10.0, 10.0, 8.0, 8.0]}, index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-05",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "equity_overlay": {
+                    "enabled": True,
+                    "ma_window": 2,
+                    "momentum_window": 1,
+                    "drawdown_window": 2,
+                    "drawdown_cut": 0.05,
+                    "sideways_exposure": 0.5,
+                    "bear_exposure": 0.5,
+                    "rebalance_threshold": 0.0,
+                    "rebalance_on_signal_only": True,
+                },
+            },
+        )
+
+        self.assertTrue(result.trades[result.trades["side"] == "SELL"].empty)
+
+    def test_rebalance_drift_threshold_does_not_keep_dropped_holding(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([dates[:2], ["A", "B", "C"]], names=["datetime", "instrument"])
+        scores = pd.Series([3.0, 2.0, 1.0, 1.0, 3.0, 2.0], index=index, name="score")
+        prices = pd.DataFrame({"A": [10.0, 10.0, 10.0], "B": [10.0, 10.0, 10.0], "C": [10.0, 10.0, 10.0]}, index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 2,
+                "max_turnover": 2,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "rebalance_drift_threshold": 1.0,
+            },
+        )
+
+        sells = result.trades[result.trades["side"] == "SELL"]
+        buys = result.trades[result.trades["side"] == "BUY"]
+        self.assertIn("A", sells["instrument"].tolist())
+        self.assertIn("C", buys["instrument"].tolist())
 
     def test_score_weighted_backtest_allocates_more_to_higher_scores(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
@@ -639,6 +878,73 @@ class BacktestTests(unittest.TestCase):
 
         buys = result.trades[result.trades["side"] == "BUY"].set_index("instrument")
         self.assertGreater(int(buys.loc["A", "shares"]), int(buys.loc["B", "shares"]))
+
+    def test_backtest_applies_max_industry_weight_to_selection(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A", "B", "C", "D"]], names=["datetime", "instrument"])
+        scores = pd.Series([10.0, 9.0, 8.0, 7.0], index=index, name="score")
+        prices = pd.DataFrame({code: [10.0, 10.0] for code in ["A", "B", "C", "D"]}, index=dates)
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {
+                "initial_capital": 100000,
+                "top_n": 3,
+                "max_turnover": 3,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "industry_map": pd.Series({"A": "bank", "B": "bank", "C": "tech", "D": "health"}),
+                "max_industry_weight": 0.5,
+            },
+        )
+
+        bought = result.trades[result.trades["side"] == "BUY"]["instrument"].tolist()
+        self.assertEqual(bought, ["A", "C", "D"])
+
+    def test_backtest_applies_selection_risk_filter_on_signal_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[1]], ["A", "B"]], names=["datetime", "instrument"])
+        scores = pd.Series([2.0, 1.0], index=index, name="score")
+        prices = pd.concat(
+            {
+                "open": pd.DataFrame({"A": [10.0, 9.0, 9.2], "B": [10.0, 10.1, 10.2]}, index=dates),
+                "close": pd.DataFrame({"A": [10.0, 9.0, 9.2], "B": [10.0, 10.1, 10.2]}, index=dates),
+                "low": pd.DataFrame({"A": [10.0, 9.0, 9.1], "B": [10.0, 10.0, 10.1]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0], "B": [1000.0, 1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "limit_down_threshold": 0.099,
+                "selection_risk_filter": {
+                    "enabled": True,
+                    "lookback_sessions": 2,
+                    "required_price_fields": ["open", "close"],
+                    "max_missing_price_sessions": 0,
+                    "max_limit_down_days": 0,
+                    "require_positive_volume": True,
+                },
+            },
+        )
+
+        bought = result.trades[result.trades["side"] == "BUY"]["instrument"].tolist()
+        self.assertEqual(bought, ["B"])
 
 
 if __name__ == "__main__":

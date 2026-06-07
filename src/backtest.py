@@ -8,6 +8,7 @@ import weakref
 import numpy as np
 import pandas as pd
 
+from src.selection_risk import filter_scores_by_selection_risk
 from src.strategy import select_stocks
 
 
@@ -62,8 +63,11 @@ def run_backtest(
     top_n = int(config.get("top_n", 7))
     max_turnover = int(config.get("max_turnover", 1))
     rank_buffer = int(config.get("rank_buffer", 0))
+    industry_map = config.get("industry_map")
+    max_industry_weight = config.get("max_industry_weight")
     max_weight = config.get("max_weight_per_stock")
     max_weight = float(max_weight) if max_weight is not None else None
+    rebalance_drift_threshold = float(config.get("rebalance_drift_threshold", 0.0) or 0.0)
 
     holdings: dict[str, int] = {}
     entry_prices: dict[str, float] = {}
@@ -76,6 +80,8 @@ def run_backtest(
     previous_date: pd.Timestamp | None = None
     last_signal_date: pd.Timestamp | None = None
     peak_equity = capital
+    year_peak_equity = capital
+    annual_guard_year: int | None = None
     circuit_breaker_until: pd.Timestamp | None = None
     circuit_breaker_cooldown_days = config.get("circuit_breaker_cooldown_days")
     for date_pos, trade_date in enumerate(price_dates):
@@ -121,6 +127,13 @@ def run_backtest(
             config,
         )
         total_before_signal = _portfolio_value(capital, holdings, close_values, last_prices)
+        trade_year = pd.Timestamp(trade_date).year
+        if previous_date is None or pd.Timestamp(previous_date).year != trade_year:
+            year_peak_equity = total_before_signal
+            annual_guard_year = None
+        else:
+            year_peak_equity = max(year_peak_equity, total_before_signal)
+
         if circuit_breaker_until is not None and pd.Timestamp(trade_date) <= circuit_breaker_until:
             risk_off = True
         else:
@@ -173,15 +186,64 @@ def run_backtest(
                     reason="circuit_breaker",
                 )
 
+        if _annual_drawdown_guard_released(total_before_signal, year_peak_equity, trade_year, annual_guard_year, config):
+            annual_guard_year = None
+        annual_guard_active = _annual_drawdown_guard_active(total_before_signal, year_peak_equity, trade_year, annual_guard_year, config)
+        if annual_guard_active:
+            annual_guard_year = trade_year
+            target_exposure = _annual_drawdown_guard_target_exposure(config)
+            if target_exposure <= 0:
+                capital = _liquidate_portfolio(
+                    holdings,
+                    entry_prices,
+                    capital,
+                    close_values,
+                    last_prices,
+                    tradability,
+                    trade_rows,
+                    trade_date,
+                    commission,
+                    stamp_tax,
+                    transfer_fee,
+                    min_commission,
+                    slippage,
+                    prices,
+                    config,
+                    reason="annual_drawdown_guard",
+                )
+            else:
+                capital = _reduce_portfolio_exposure(
+                    holdings,
+                    entry_prices,
+                    capital,
+                    close_values,
+                    last_prices,
+                    tradability,
+                    trade_rows,
+                    trade_date,
+                    commission,
+                    stamp_tax,
+                    transfer_fee,
+                    min_commission,
+                    slippage,
+                    prices,
+                    config,
+                    target_exposure,
+                    reason="annual_drawdown_guard",
+                )
+            risk_off = True
+
         signal_date = trade_schedule.get(pd.Timestamp(trade_date))
         if signal_date is not None:
             last_signal_date = signal_date
         exposure_rebalance = _scheduled_exposure_rebalance_needed(exposure_schedule, trade_date, previous_date, config)
+        exposure_rebalance = exposure_rebalance or _equity_overlay_rebalance_needed(equity_rows, config)
         rebalance_signal_date = signal_date if signal_date is not None else last_signal_date if exposure_rebalance else None
         if rebalance_signal_date is not None and not risk_off:
             daily_scores = score_panel.xs(rebalance_signal_date, level=0, drop_level=True)
             daily_scores.index = daily_scores.index.astype(str)
             daily_scores = daily_scores[daily_scores.index.isin(tradability["priced"])]
+            daily_scores = filter_scores_by_selection_risk(daily_scores, prices, rebalance_signal_date, config)
 
             target_holdings = select_stocks(
                 daily_scores,
@@ -189,6 +251,8 @@ def run_backtest(
                 previous_holdings=holdings.keys(),
                 max_turnover=max_turnover,
                 rank_buffer=rank_buffer,
+                group_map=industry_map,
+                max_group_weight=max_industry_weight,
             )
             total_before_trade = _portfolio_value(capital, holdings, close_values, last_prices)
             exposure_scale = _exposure_scale(equity_rows, config) * _scheduled_exposure_scale(exposure_schedule, trade_date)
@@ -199,6 +263,17 @@ def run_backtest(
                 price = _price_for(stock, trade_price_values, last_prices)
                 target_value = target_values.get(stock, 0.0)
                 desired_shares[stock] = _round_lot(target_value / price if price > 0 else 0, stock, config)
+            drift_threshold = 0.0 if exposure_rebalance else rebalance_drift_threshold
+            desired_shares = _apply_rebalance_drift_threshold(
+                desired_shares,
+                holdings,
+                target_holdings,
+                target_values,
+                trade_price_values,
+                last_prices,
+                total_before_trade,
+                drift_threshold,
+            )
 
             for stock in list(holdings):
                 current = holdings.get(stock, 0)
@@ -645,6 +720,35 @@ def _target_values(
         weights = weights.clip(upper=max_weight)
     scale = max(float(exposure_scale), 0.0)
     return {stock: float(total) * float(weight) * scale for stock, weight in weights.items()}
+
+
+def _apply_rebalance_drift_threshold(
+    desired_shares: dict[str, int],
+    current_holdings: Mapping[str, int],
+    target_holdings: list[str],
+    target_values: Mapping[str, float],
+    trade_prices: pd.Series | Mapping[str, float],
+    last_prices: dict[str, float],
+    total: float,
+    threshold: float,
+) -> dict[str, int]:
+    if threshold <= 0 or total <= 0 or not desired_shares:
+        return desired_shares
+
+    allowed_drift = float(total) * max(float(threshold), 0.0)
+    adjusted = dict(desired_shares)
+    for stock in target_holdings:
+        current_shares = int(current_holdings.get(stock, 0))
+        if current_shares <= 0:
+            continue
+        price = _price_for(stock, trade_prices, last_prices)
+        if price <= 0:
+            continue
+        current_value = current_shares * price
+        target_value = float(target_values.get(stock, 0.0))
+        if abs(current_value - target_value) <= allowed_drift:
+            adjusted[stock] = current_shares
+    return adjusted
 
 
 def _score_weights(scores: pd.Series, target_holdings: list[str]) -> pd.Series:
@@ -1114,6 +1218,52 @@ def _drawdown_breached(total: float, peak_equity: float, config: dict) -> bool:
     return drawdown <= -abs(float(threshold))
 
 
+def _annual_drawdown_guard_active(
+    total: float,
+    year_peak_equity: float,
+    trade_year: int,
+    active_year: int | None,
+    config: dict,
+) -> bool:
+    cfg = config.get("annual_drawdown_guard", {})
+    if not isinstance(cfg, Mapping) or not bool(cfg.get("enabled", False)):
+        return False
+    if active_year == trade_year:
+        return True
+    threshold = cfg.get("drawdown")
+    if threshold is None or year_peak_equity <= 0:
+        return False
+    drawdown = total / year_peak_equity - 1
+    return drawdown <= -abs(float(threshold))
+
+
+def _annual_drawdown_guard_released(
+    total: float,
+    year_peak_equity: float,
+    trade_year: int,
+    active_year: int | None,
+    config: dict,
+) -> bool:
+    if active_year != trade_year or year_peak_equity <= 0:
+        return False
+    cfg = config.get("annual_drawdown_guard", {})
+    if not isinstance(cfg, Mapping) or not bool(cfg.get("enabled", False)):
+        return False
+    release = cfg.get("release_drawdown")
+    if release is None:
+        return False
+    drawdown = total / year_peak_equity - 1
+    return drawdown >= -abs(float(release))
+
+
+def _annual_drawdown_guard_target_exposure(config: dict) -> float:
+    cfg = config.get("annual_drawdown_guard", {})
+    if not isinstance(cfg, Mapping):
+        return 0.0
+    value = cfg.get("target_exposure", 0.0)
+    return max(0.0, min(float(value), 1.0))
+
+
 def _cooldown_until(price_dates: pd.Index, current_pos: int, cooldown_days: int) -> pd.Timestamp:
     if len(price_dates) == 0:
         return pd.NaT
@@ -1123,17 +1273,77 @@ def _cooldown_until(price_dates: pd.Index, current_pos: int, cooldown_days: int)
 
 def _exposure_scale(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> float:
     target_vol = config.get("target_vol")
+    overlay_scale = _equity_overlay_exposure(equity_rows, config)
     if target_vol is None:
-        return 1.0
+        return overlay_scale
     window = int(config.get("vol_window", 60))
     max_leverage = float(config.get("max_leverage", 1.0))
     if len(equity_rows) <= window:
-        return min(1.0, max_leverage)
+        return min(overlay_scale, max_leverage)
     equity = pd.Series(dict(equity_rows)).sort_index()
     realized_vol = equity.pct_change().dropna().tail(window).std(ddof=1) * np.sqrt(252)
     if not realized_vol or pd.isna(realized_vol):
-        return min(1.0, max_leverage)
-    return max(0.0, min(float(target_vol) / float(realized_vol), max_leverage))
+        return min(overlay_scale, max_leverage)
+    vol_scale = max(0.0, min(float(target_vol) / float(realized_vol), max_leverage))
+    return max(0.0, min(overlay_scale * vol_scale, max_leverage))
+
+
+def _equity_overlay_rebalance_needed(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> bool:
+    if not _equity_overlay_enabled(config) or len(equity_rows) < 2:
+        return False
+    cfg = config.get("equity_overlay", {})
+    if bool(cfg.get("rebalance_on_signal_only", False)):
+        return False
+    threshold = float(cfg.get("rebalance_threshold", 0.05))
+    current = _equity_overlay_exposure(equity_rows, config)
+    previous = _equity_overlay_exposure(equity_rows[:-1], config)
+    return abs(current - previous) >= max(threshold, 0.0)
+
+
+def _equity_overlay_exposure(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> float:
+    if not _equity_overlay_enabled(config) or len(equity_rows) < 2:
+        return 1.0
+    cfg = config.get("equity_overlay", {})
+    equity = pd.Series(dict(equity_rows)).sort_index().astype(float)
+    equity = equity[equity > 0]
+    if len(equity) < 2:
+        return 1.0
+
+    current = float(equity.iloc[-1])
+    min_periods = max(1, int(cfg.get("min_periods", 5)))
+    ma_window = max(1, int(cfg.get("ma_window", 90)))
+    momentum_window = max(1, int(cfg.get("momentum_window", 5)))
+    drawdown_window = max(1, int(cfg.get("drawdown_window", 60)))
+    drawdown_cut = abs(float(cfg.get("drawdown_cut", 0.20)))
+
+    side_risk = False
+    if len(equity) >= min(min_periods, ma_window):
+        moving_average = float(equity.tail(ma_window).mean())
+        side_risk = side_risk or current < moving_average
+    if len(equity) > momentum_window:
+        reference = float(equity.iloc[-momentum_window - 1])
+        if reference > 0:
+            side_risk = side_risk or current / reference - 1.0 < 0.0
+
+    bear_risk = False
+    if len(equity) >= min(min_periods, drawdown_window):
+        recent_peak = float(equity.tail(drawdown_window).max())
+        if recent_peak > 0:
+            bear_risk = current / recent_peak - 1.0 <= -drawdown_cut
+
+    if bear_risk:
+        exposure = float(cfg.get("bear_exposure", 0.0))
+    elif side_risk:
+        exposure = float(cfg.get("sideways_exposure", 0.2))
+    else:
+        exposure = float(cfg.get("bull_exposure", 1.0))
+    max_exposure = float(cfg.get("max_exposure", 1.0))
+    return max(0.0, min(exposure, max_exposure))
+
+
+def _equity_overlay_enabled(config: dict) -> bool:
+    overlay = config.get("equity_overlay", {})
+    return isinstance(overlay, dict) and bool(overlay.get("enabled", False))
 
 
 def _normalize_exposure_schedule(schedule: object, price_dates: pd.Index) -> pd.Series | None:
@@ -1179,6 +1389,8 @@ def _scheduled_exposure_rebalance_needed(
     config: dict,
 ) -> bool:
     if exposure_schedule is None or previous_date is None:
+        return False
+    if bool(config.get("exposure_schedule_rebalance_on_signal_only", False)):
         return False
     threshold = float(config.get("exposure_rebalance_threshold", 0.05))
     current = _scheduled_exposure_scale(exposure_schedule, trade_date)

@@ -63,6 +63,9 @@ STOCK_BASIC_FIELDS = [
     "list_date",
     "delist_date",
 ]
+INDEX_WEIGHT_FIELDS = ["index_code", "con_code", "trade_date", "weight"]
+NAMECHANGE_FIELDS = ["ts_code", "name", "start_date", "end_date", "ann_date", "change_reason"]
+ST_CALENDAR_FIELDS = ["ts_code", "st_start_date", "st_end_date", "name", "ann_date", "change_reason"]
 MAINBOARD_PREFIXES = ("000", "001", "002", "003", "600", "601", "603", "605")
 
 
@@ -71,6 +74,18 @@ def _format_tushare_date(value: str | datetime | pd.Timestamp | None) -> str | N
         return None
     ts = pd.Timestamp(value)
     return ts.strftime("%Y%m%d")
+
+
+def _parse_tushare_dates(series: pd.Series) -> pd.Series:
+    text = series.astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    compact = text.str.replace("-", "", regex=False).str.replace("/", "", regex=False)
+    yyyymmdd = compact.str.fullmatch(r"\d{8}")
+    parsed = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    if yyyymmdd.any():
+        parsed.loc[yyyymmdd] = pd.to_datetime(compact.loc[yyyymmdd], format="%Y%m%d", errors="coerce")
+    if (~yyyymmdd).any():
+        parsed.loc[~yyyymmdd] = pd.to_datetime(series.loc[~yyyymmdd], errors="coerce")
+    return parsed
 
 
 def _parse_tushare_frame(data: dict) -> pd.DataFrame:
@@ -287,6 +302,184 @@ def fetch_daily_basic(
     raise ValueError(f"daily_basic response is invalid for {params['trade_date']} after {retries} attempts: {last_error}") from last_error
 
 
+def fetch_index_constituents(
+    index_code: str = "000300.SH",
+    start_date: str | datetime | None = None,
+    end_date: str | datetime | None = None,
+    client: TushareHttpClient | None = None,
+    fields: Iterable[str] | str | None = None,
+    retries: int = 5,
+    retry_max_wait: float | None = None,
+) -> pd.DataFrame:
+    client = client or TushareHttpClient.from_config()
+    params = {"index_code": index_code}
+    if start_date is not None:
+        params["start_date"] = _format_tushare_date(start_date)
+    if end_date is not None:
+        params["end_date"] = _format_tushare_date(end_date)
+    requested_fields = fields or INDEX_WEIGHT_FIELDS
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            frame = client.call("index_weight", params=params, fields=requested_fields)
+            return normalize_index_constituents_frame(frame, default_index_code=index_code)
+        except (RuntimeError, ValueError) as exc:
+            last_error = exc
+            if attempt < retries:
+                wait_seconds = _retry_wait_seconds(attempt, retry_max_wait)
+                logger.warning("Retrying index_weight %s after error: %s", index_code, exc)
+                time.sleep(wait_seconds)
+    raise ValueError(f"index_weight response is invalid for {index_code} after {retries} attempts: {last_error}") from last_error
+
+
+def update_index_constituents_data(
+    index_code: str = "000300.SH",
+    start_date: str | datetime | None = None,
+    end_date: str | datetime | None = None,
+    out_file: str | Path | None = None,
+    client: TushareHttpClient | None = None,
+    sleep_seconds: float = 0.0,
+    retries: int | None = None,
+    retry_max_wait: float | None = None,
+    window_days: int = 31,
+    max_windows: int | None = None,
+    skip_failed: bool = True,
+    fallback_index_codes: Iterable[str] | None = None,
+) -> Path:
+    config = load_config()
+    data_cfg = config.get("data", {})
+    gov_cfg = config.get("data_governance", {})
+    start = pd.Timestamp(start_date or data_cfg.get("history_start_date") or data_cfg["start_date"]).normalize()
+    end = pd.Timestamp(resolve_target_date_value(end_date or data_cfg["end_date"], config=config)).normalize()
+    path = resolve_path(out_file or data_cfg.get("hs300_constituents_file", "data/raw/hs300_constituents.csv"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    client = client or TushareHttpClient.from_config(config)
+    retries = int(retries if retries is not None else data_cfg.get("retries", 5))
+    retry_max_wait = retry_max_wait if retry_max_wait is not None else data_cfg.get("retry_max_wait", 30)
+    retry_max_wait = float(retry_max_wait) if retry_max_wait is not None else None
+    frames: list[pd.DataFrame] = []
+    windows = list(_date_windows(start, end, window_days))
+    if max_windows is not None:
+        windows = windows[: max(0, int(max_windows))]
+    fallback_values = fallback_index_codes if fallback_index_codes is not None else gov_cfg.get("index_fallback_codes", [])
+    candidate_codes = _index_candidate_codes(index_code, fallback_values)
+    for pos, (window_start, window_end) in enumerate(windows, start=1):
+        frame, error = _fetch_index_window_with_fallback(
+            candidate_codes,
+            window_start,
+            window_end,
+            client=client,
+            retries=retries,
+            retry_max_wait=retry_max_wait,
+        )
+        if error is not None:
+            if not skip_failed:
+                raise error
+            logger.error("Skipping index_weight window %s..%s after fetch failure: %s", window_start, window_end, error)
+            continue
+        if not frame.empty:
+            frames.append(frame)
+        if sleep_seconds > 0 and pos < len(windows):
+            time.sleep(float(sleep_seconds))
+
+    existing = pd.read_csv(path) if path.exists() else pd.DataFrame()
+    if frames:
+        new_data = pd.concat(frames, ignore_index=True)
+        combined = pd.concat([existing, new_data], ignore_index=True) if not existing.empty else new_data
+    else:
+        combined = existing
+    combined = normalize_index_constituents_frame(combined, default_index_code=index_code)
+    combined = combined.drop_duplicates(["index_code", "con_code", "trade_date"], keep="last").sort_values(
+        ["trade_date", "index_code", "con_code"]
+    )
+    combined.to_csv(path, index=False, encoding="utf-8-sig")
+    return path
+
+
+def fetch_st_calendar(
+    client: TushareHttpClient | None = None,
+    fields: Iterable[str] | str | None = None,
+    retries: int = 5,
+    retry_max_wait: float | None = None,
+) -> pd.DataFrame:
+    client = client or TushareHttpClient.from_config()
+    requested_fields = fields or NAMECHANGE_FIELDS
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            frame = client.call("namechange", params={}, fields=requested_fields)
+            return normalize_st_calendar_frame(frame)
+        except (RuntimeError, ValueError) as exc:
+            last_error = exc
+            if attempt < retries:
+                wait_seconds = _retry_wait_seconds(attempt, retry_max_wait)
+                logger.warning("Retrying namechange after error: %s", exc)
+                time.sleep(wait_seconds)
+    raise ValueError(f"namechange response is invalid after {retries} attempts: {last_error}") from last_error
+
+
+def update_st_calendar_data(
+    out_file: str | Path | None = None,
+    client: TushareHttpClient | None = None,
+    retries: int | None = None,
+    retry_max_wait: float | None = None,
+) -> Path:
+    config = load_config()
+    data_cfg = config.get("data", {})
+    gov_cfg = config.get("data_governance", {})
+    path = resolve_path(out_file or gov_cfg.get("st_calendar_file") or data_cfg.get("st_calendar_file") or "data/raw/st_calendar.csv")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    retries = int(retries if retries is not None else data_cfg.get("retries", 5))
+    retry_max_wait = retry_max_wait if retry_max_wait is not None else data_cfg.get("retry_max_wait", 30)
+    retry_max_wait = float(retry_max_wait) if retry_max_wait is not None else None
+    frame = fetch_st_calendar(client=client, retries=retries, retry_max_wait=retry_max_wait)
+    frame.to_csv(path, index=False, encoding="utf-8-sig")
+    return path
+
+
+def _index_candidate_codes(index_code: str, fallback_index_codes: Iterable[str] | str | None) -> list[str]:
+    values: list[str] = [str(index_code).strip().upper()]
+    if isinstance(fallback_index_codes, str):
+        fallback_values = [item.strip() for item in fallback_index_codes.split(",")]
+    else:
+        fallback_values = list(fallback_index_codes or [])
+    for value in fallback_values:
+        code = str(value).strip().upper()
+        if code and code not in values:
+            values.append(code)
+    return values
+
+
+def _fetch_index_window_with_fallback(
+    index_codes: list[str],
+    window_start: str,
+    window_end: str,
+    client: TushareHttpClient,
+    retries: int,
+    retry_max_wait: float | None,
+) -> tuple[pd.DataFrame, Exception | None]:
+    last_error: Exception | None = None
+    for pos, code in enumerate(index_codes):
+        try:
+            frame = fetch_index_constituents(
+                index_code=code,
+                start_date=window_start,
+                end_date=window_end,
+                client=client,
+                retries=retries,
+                retry_max_wait=retry_max_wait,
+            )
+        except (RuntimeError, ValueError) as exc:
+            last_error = exc
+            continue
+        if not frame.empty:
+            if pos > 0:
+                logger.info("Filled index_weight window %s..%s with fallback index_code %s.", window_start, window_end, code)
+            return frame, None
+    return pd.DataFrame(columns=INDEX_WEIGHT_FIELDS), last_error
+
+
 def update_daily_basic_data(
     start_date: str | datetime | None = None,
     end_date: str | datetime | None = None,
@@ -297,6 +490,7 @@ def update_daily_basic_data(
     retries: int | None = None,
     retry_max_wait: float | None = None,
     max_dates: int | None = None,
+    skip_failed: bool = True,
 ) -> Path:
     config = load_config()
     data_cfg = config.get("data", {})
@@ -321,7 +515,13 @@ def update_daily_basic_data(
     retry_max_wait = float(retry_max_wait) if retry_max_wait is not None else None
     frames: list[pd.DataFrame] = []
     for pos, date in enumerate(pending_dates, start=1):
-        frame = fetch_daily_basic(date, client=client, retries=retries, retry_max_wait=retry_max_wait)
+        try:
+            frame = fetch_daily_basic(date, client=client, retries=retries, retry_max_wait=retry_max_wait)
+        except (RuntimeError, ValueError) as exc:
+            if not skip_failed:
+                raise
+            logger.error("Skipping daily_basic date %s after fetch failure: %s", date.date(), exc)
+            continue
         if not frame.empty:
             frames.append(frame)
         if sleep_seconds > 0 and pos < len(pending_dates):
@@ -521,7 +721,7 @@ def _normalize_adj_factor_frame(adj_factor: pd.DataFrame, default_ts_code: str |
         missing = sorted(required - set(adj.columns))
         raise ValueError(f"Adj factor data is missing columns: {missing}")
     adj = adj[ADJ_FACTOR_FIELDS]
-    adj["trade_date"] = pd.to_datetime(adj["trade_date"].astype(str), errors="coerce")
+    adj["trade_date"] = _parse_tushare_dates(adj["trade_date"])
     adj["adj_factor"] = pd.to_numeric(adj["adj_factor"], errors="coerce")
     adj = adj.dropna(subset=["trade_date", "adj_factor"])
     return adj.drop_duplicates(["ts_code", "trade_date"], keep="last").reset_index(drop=True)
@@ -561,17 +761,19 @@ def fetch_hs300_stocks(
         code_col = "ts_code" if "ts_code" in df.columns else "con_code"
         if code_col not in df.columns:
             raise ValueError(f"{local_path} must contain ts_code or con_code column.")
+        if date is not None and "trade_date" in df.columns:
+            frame = normalize_index_constituents_frame(df)
+            as_of = pd.Timestamp(date).normalize()
+            frame = frame[frame["trade_date"] <= as_of]
+            if not frame.empty:
+                latest = frame["trade_date"].max()
+                frame = frame[frame["trade_date"] == latest]
+            df = frame
+            code_col = "con_code"
         return sorted(df[code_col].dropna().astype(str).unique().tolist())
 
     client = client or TushareHttpClient.from_config(config)
-    params = {"index_code": "000300.SH"}
-    if date is not None:
-        params["trade_date"] = _format_tushare_date(date)
-    df = client.call(
-        "index_weight",
-        params=params,
-        fields=["index_code", "con_code", "trade_date", "weight"],
-    )
+    df = fetch_index_constituents("000300.SH", start_date=date, end_date=date, client=client)
     if df.empty:
         raise RuntimeError("No HS300 constituents returned. Add data/raw/hs300_constituents.csv or check proxy params.")
     return sorted(df["con_code"].dropna().astype(str).unique().tolist())
@@ -737,7 +939,7 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
         raise ValueError(f"Daily data is missing columns: {missing}")
 
     renamed = renamed[DAILY_FIELDS]
-    renamed["trade_date"] = pd.to_datetime(renamed["trade_date"].astype(str), errors="coerce")
+    renamed["trade_date"] = _parse_tushare_dates(renamed["trade_date"])
     for col in ["open", "high", "low", "close", "vol", "amount"]:
         renamed[col] = pd.to_numeric(renamed[col], errors="coerce")
     if "adj_factor" in df.columns:
@@ -755,13 +957,66 @@ def normalize_daily_basic_frame(df: pd.DataFrame) -> pd.DataFrame:
             renamed[column] = pd.NA
     renamed = renamed[DAILY_BASIC_FIELDS]
     renamed["ts_code"] = renamed["ts_code"].astype(str).str.upper()
-    renamed["trade_date"] = pd.to_datetime(renamed["trade_date"], errors="coerce")
+    renamed["trade_date"] = _parse_tushare_dates(renamed["trade_date"])
     for column in DAILY_BASIC_FIELDS:
         if column not in {"ts_code", "trade_date"}:
             renamed[column] = pd.to_numeric(renamed[column], errors="coerce")
     renamed = renamed.dropna(subset=["ts_code", "trade_date"])
     renamed = renamed[renamed["ts_code"].str.strip() != ""]
     return renamed.sort_values(["trade_date", "ts_code"]).reset_index(drop=True)
+
+
+def normalize_index_constituents_frame(df: pd.DataFrame, default_index_code: str | None = None) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=INDEX_WEIGHT_FIELDS)
+    renamed = df.rename(columns={"ts_code": "con_code", "code": "con_code", "date": "trade_date"}).copy()
+    if "index_code" not in renamed.columns and default_index_code:
+        renamed["index_code"] = default_index_code
+    missing = [column for column in INDEX_WEIGHT_FIELDS if column not in renamed.columns]
+    if missing:
+        raise ValueError(f"Index constituent data is missing columns: {missing}")
+    renamed = renamed[INDEX_WEIGHT_FIELDS]
+    renamed["index_code"] = renamed["index_code"].astype(str).str.upper()
+    renamed["con_code"] = renamed["con_code"].astype(str).str.upper()
+    renamed["trade_date"] = _parse_tushare_dates(renamed["trade_date"]).dt.normalize()
+    renamed["weight"] = pd.to_numeric(renamed["weight"], errors="coerce")
+    renamed = renamed.dropna(subset=["index_code", "con_code", "trade_date"])
+    renamed = renamed[(renamed["index_code"].str.strip() != "") & (renamed["con_code"].str.strip() != "")]
+    return renamed.sort_values(["trade_date", "index_code", "con_code"]).reset_index(drop=True)
+
+
+def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=ST_CALENDAR_FIELDS)
+    renamed = df.rename(
+        columns={
+            "code": "ts_code",
+            "start": "start_date",
+            "end": "end_date",
+            "date": "start_date",
+            "reason": "change_reason",
+        }
+    ).copy()
+    if "ts_code" not in renamed.columns:
+        raise ValueError("ST calendar source is missing ts_code column.")
+    for column in ["name", "start_date", "end_date", "ann_date", "change_reason"]:
+        if column not in renamed.columns:
+            renamed[column] = pd.NA
+    renamed["ts_code"] = renamed["ts_code"].astype(str).str.upper()
+    renamed["name"] = renamed["name"].astype(str)
+    renamed["change_reason"] = renamed["change_reason"].astype(str)
+    is_st = renamed["name"].str.contains(r"\*?ST", case=False, regex=True) | renamed["change_reason"].str.contains(
+        r"\bST\b|\*ST|特别处理", case=False, regex=True
+    )
+    renamed = renamed[is_st].copy()
+    if renamed.empty:
+        return pd.DataFrame(columns=ST_CALENDAR_FIELDS)
+    renamed["st_start_date"] = _parse_tushare_dates(renamed["start_date"].where(renamed["start_date"].notna(), renamed["ann_date"]))
+    renamed["st_end_date"] = _parse_tushare_dates(renamed["end_date"])
+    renamed["ann_date"] = _parse_tushare_dates(renamed["ann_date"])
+    renamed = renamed.dropna(subset=["ts_code", "st_start_date"])
+    result = renamed[ST_CALENDAR_FIELDS].copy()
+    return result.sort_values(["ts_code", "st_start_date"]).reset_index(drop=True)
 
 
 def update_daily_data(

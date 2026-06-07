@@ -39,10 +39,13 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(strategy["rank_buffer"], 30)
         self.assertEqual(strategy["stop_loss_pct"], 0.08)
         self.assertIsNone(strategy["take_profit_pct"])
+        self.assertIsNone(strategy["max_industry_weight"])
+        self.assertEqual(strategy["rebalance_drift_threshold"], 0.0)
 
     def test_default_data_config_includes_daily_basic_cache(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["data"]["history_start_date"], "2012-01-01")
         self.assertEqual(DEFAULT_CONFIG["data"]["daily_basic_file"], "data/factors/daily_basic.parquet")
+        self.assertEqual(DEFAULT_CONFIG["data"]["st_calendar_file"], "data/raw/st_calendar.csv")
 
     def test_default_scoring_uses_high_liquidity_bucket_and_stable_dynamic_ic(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "high")
@@ -52,6 +55,14 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertIn("factor:VMA60", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
         self.assertIn("factor:VSUMN30", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
         self.assertNotIn("factor:RSV5", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
+
+    def test_default_selection_risk_filter_is_configured_but_disabled(self) -> None:
+        risk_filter = DEFAULT_CONFIG["selection_risk_filter"]
+
+        self.assertFalse(risk_filter["enabled"])
+        self.assertEqual(risk_filter["lookback_sessions"], 5)
+        self.assertEqual(risk_filter["required_price_fields"], ["open", "close"])
+        self.assertEqual(risk_filter["max_limit_down_days"], 0)
 
     def test_default_backtest_uses_conservative_execution_assumptions(self) -> None:
         backtest = DEFAULT_CONFIG["backtest"]
@@ -68,6 +79,23 @@ class ConfigLoaderTests(unittest.TestCase):
 
         self.assertEqual(manual_orders["limit_price_buffer"], 0.002)
         self.assertEqual(manual_orders["cash_redistribution_overweight_tolerance"], 0.10)
+        self.assertEqual(manual_orders["confirmation_dir"], "outputs/order_confirmations")
+        self.assertEqual(manual_orders["fill_feedback_dir"], "outputs/fill_feedback")
+
+    def test_default_research_and_data_governance_outputs_are_configured(self) -> None:
+        research = DEFAULT_CONFIG["research"]
+        governance = DEFAULT_CONFIG["data_governance"]
+
+        self.assertEqual(research["benchmark"]["method"], "equal_weight_universe")
+        self.assertEqual(research["exposure"]["industry_file"], "data/raw/mainboard_a_stocks.csv")
+        self.assertEqual(research["exposure"]["market_cap_field"], "circ_mv")
+        self.assertEqual(governance["st_calendar_file"], "data/raw/st_calendar.csv")
+        self.assertEqual(governance["index_constituents_file"], "data/raw/hs300_constituents.csv")
+        self.assertEqual(governance["index_fallback_codes"], ["399300.SZ"])
+        self.assertIn("trade_date", governance["required_index_columns"])
+        self.assertEqual(governance["min_daily_basic_date_coverage"], 1.0)
+        self.assertEqual(governance["min_index_constituents_month_coverage"], 1.0)
+        self.assertEqual(governance["adj_factor_meta_file"], "data/factors/adj_factor_meta.json")
 
     def test_default_quality_includes_full_backtest_return_and_drawdown_gates(self) -> None:
         quality = DEFAULT_CONFIG["quality"]
@@ -107,6 +135,8 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertFalse(ml["fundamental_factors_enabled"])
         self.assertEqual(ml["fundamental_lag_days"], 90)
         self.assertEqual(DEFAULT_CONFIG["reporting_regime"]["lag_days"], 0)
+        self.assertIsNone(DEFAULT_CONFIG["market_regime"]["bear_drawdown_threshold"])
+        self.assertEqual(DEFAULT_CONFIG["market_regime"]["drawdown_window"], 252)
         self.assertTrue(DEFAULT_CONFIG["defensive_timing"]["enabled"])
         self.assertEqual(DEFAULT_CONFIG["defensive_timing"]["sideways_exposure"], 0.60)
         self.assertEqual(DEFAULT_CONFIG["defensive_timing"]["bear_exposure"], 0.30)
@@ -120,6 +150,8 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertIn("low_amount_20", DEFAULT_CONFIG["feature_extensions"]["price_features"])
         self.assertTrue(DEFAULT_CONFIG["regime_score_blend"]["enabled"])
         self.assertEqual(DEFAULT_CONFIG["regime_score_blend"]["bear_defensive_weight"], 1.0)
+        self.assertFalse(DEFAULT_CONFIG["regime_score_filter"]["enabled"])
+        self.assertEqual(DEFAULT_CONFIG["regime_score_filter"]["rules"], [])
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertLess(_grid_size(BASELINE_GRID), _grid_size(DEFAULT_GRID))
         self.assertEqual(BASELINE_GRID["factor_group"], ["momentum", "factor:LOW0"])
         self.assertEqual(BASELINE_GRID["top_n"], [7, 10, 20])
+        self.assertEqual(BASELINE_GRID["rebalance_drift_threshold"], [0.0, 0.02, 0.05])
 
     def test_run_walk_forward_optimization_returns_out_of_sample_window(self) -> None:
         factors, prices = _walk_forward_data()

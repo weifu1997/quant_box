@@ -8,6 +8,8 @@ import pandas as pd
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.scoring import build_latest_strategy_scores
+from src.selection_constraints import load_industry_group_map
+from src.selection_risk import filter_scores_by_selection_risk, selection_risk_filter_enabled
 from src.strategy import select_stocks
 from src.trading_calendar import resolve_target_date_value
 
@@ -32,6 +34,8 @@ def generate_signal(
     factor_file: str | Path | None = None,
     config: dict | None = None,
     factors: pd.DataFrame | None = None,
+    price_df: pd.DataFrame | None = None,
+    price_file: str | Path | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     config = config or load_config()
     data_cfg = config["data"]
@@ -49,20 +53,27 @@ def generate_signal(
             cache_file=factor_file or config["factors"]["cache_file"],
         )
     score_date = "latest" if use_latest_date else _effective_signal_date(factors, factor_end_date)
-    scores = build_latest_strategy_scores(factors, config, signal_date=score_date)
+    scores = build_latest_strategy_scores(factors, config, signal_date=score_date, price_df=price_df, price_file=price_file)
     latest_date = pd.Timestamp(scores.index.get_level_values(0).max()).normalize()
     if use_latest_date:
         signal_date = latest_date.strftime("%Y-%m-%d")
     else:
         signal_date = str(pd.Timestamp(score_date).date())
     latest_scores = scores.xs(latest_date, level=0, drop_level=True)
+    if selection_risk_filter_enabled(config):
+        prices = price_df if price_df is not None else _load_price_frame(price_file, config)
+        latest_scores = filter_scores_by_selection_risk(latest_scores, prices, latest_date, config)
     previous_holdings = previous_holdings if previous_holdings is not None else read_previous_holdings()
+    max_industry_weight = strategy_cfg.get("max_industry_weight")
+    industry_map = load_industry_group_map(config) if max_industry_weight is not None else None
     holdings = select_stocks(
         latest_scores,
         top_n=int(strategy_cfg.get("top_n", 7)),
         previous_holdings=previous_holdings or None,
         max_turnover=int(strategy_cfg.get("max_turnover", 1)),
         rank_buffer=int(strategy_cfg.get("rank_buffer", 0)),
+        group_map=industry_map,
+        max_group_weight=max_industry_weight,
     )
 
     old_set = set(previous_holdings or [])
@@ -73,6 +84,13 @@ def generate_signal(
     for code in sorted(old_set - new_set):
         rows.append({"date": signal_date, "instrument": code, "action": "SELL"})
     return pd.DataFrame(rows), holdings
+
+
+def _load_price_frame(price_file: str | Path | None, config: dict) -> pd.DataFrame:
+    price_path = resolve_path(price_file or config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
+    if not price_path.exists():
+        raise FileNotFoundError(f"Price file not found for selection risk filter: {price_path}")
+    return pd.read_parquet(price_path)
 
 
 def _effective_signal_date(factors: pd.DataFrame, requested_date: str) -> str:
