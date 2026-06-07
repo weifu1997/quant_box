@@ -70,6 +70,31 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertFalse(result.weights.empty)
         self.assertEqual(result.weights["instrument"].tolist(), ["000001.SZ"])
 
+    def test_fast_period_backtest_uses_last_intraday_price_per_trade_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-31 15:00", "2024-02-01 09:30", "2024-02-01 15:00", "2024-02-29 15:00"])
+        prices = pd.DataFrame(
+            {
+                ("close", "A"): [10.0, 10.0, 20.0, 40.0],
+            },
+            index=dates,
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(pd.Timestamp("2024-01-31"), "A")], names=["datetime", "instrument"]),
+            name="score",
+        )
+
+        result = run_fast_period_backtest(
+            scores,
+            prices,
+            "2024-01-01",
+            "2024-02-29",
+            {"initial_capital": 100.0, "top_n": 1, "max_turnover": 1},
+        )
+
+        self.assertAlmostEqual(result.equity_curve.iloc[-1], 200.0)
+
     def test_fast_period_backtest_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
