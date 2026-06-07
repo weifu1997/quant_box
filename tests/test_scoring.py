@@ -175,6 +175,41 @@ class ScoringTests(unittest.TestCase):
         self.assertFalse(daily.loc[["A", "B"]].isna().any())
         self.assertTrue(daily.loc[["C", "D", "E"]].isna().all())
 
+    def test_build_strategy_scores_liquidity_filter_matches_price_columns_case_insensitively(self) -> None:
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
+        index = pd.MultiIndex.from_product(
+            [[dates[-1]], ["000001.SZ", "600519.SH"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": [1.0, 2.0]}, index=index)
+        amount = pd.DataFrame(
+            {
+                "000001.sz": [1.0, 1.0],
+                "600519.sh": [100.0, 100.0],
+            },
+            index=dates,
+        )
+        close = pd.DataFrame(10.0, index=dates, columns=amount.columns)
+        prices = pd.concat({"close": close, "amount": amount}, axis=1)
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        config = {
+            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
+            "liquidity_filter": {
+                "enabled": True,
+                "field": "amount",
+                "window": 2,
+                "min_periods": 1,
+                "quantile": 0.5,
+                "side": "low",
+            },
+        }
+
+        scores = build_strategy_scores(factors, config, price_df=prices)
+
+        daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
+        self.assertFalse(pd.isna(daily.loc["000001.SZ"]))
+        self.assertTrue(pd.isna(daily.loc["600519.SH"]))
+
     def test_build_strategy_scores_applies_high_liquidity_filter(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
         instruments = ["A", "B", "C", "D", "E"]

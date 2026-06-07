@@ -340,7 +340,7 @@ def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg:
     date_level = scores.index.names[0] or 0
     instrument_level = scores.index.names[1] or 1
     score_dates = pd.to_datetime(scores.index.get_level_values(date_level)).normalize()
-    score_instruments = scores.index.get_level_values(instrument_level).astype(str)
+    score_instruments = [_normalize_instrument(value) for value in scores.index.get_level_values(instrument_level)]
     lookup_index = pd.MultiIndex.from_arrays([score_dates, score_instruments], names=["datetime", "instrument"])
 
     adv_stack = adv.stack(future_stack=True).rename("adv")
@@ -358,15 +358,24 @@ def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg:
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
-    field = str(field).lower()
+    field = str(field).strip().lower()
     if isinstance(prices.columns, pd.MultiIndex):
-        field_names = prices.columns.get_level_values(0).astype(str).str.lower()
+        field_names = prices.columns.get_level_values(0).astype(str).str.strip().str.lower()
         if field not in set(field_names):
             return pd.DataFrame(index=prices.index)
         frame = prices.loc[:, field_names == field].copy()
-        frame.columns = frame.columns.get_level_values(1).astype(str)
+        frame.columns = [_normalize_instrument(value) for value in frame.columns.get_level_values(1)]
+        frame = frame.loc[:, frame.columns != ""]
+        if frame.columns.has_duplicates:
+            frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
         return frame
     return pd.DataFrame(index=prices.index)
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _optional_float(value: object) -> float | None:
