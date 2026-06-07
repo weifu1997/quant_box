@@ -146,6 +146,57 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertTrue(quality["is_acceptable"])
             self.assertEqual(quality["windows"], 3)
 
+    def test_validated_strategy_evidence_requires_min_yearly_return(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            years_path = root / "validated_years.csv"
+            pd.DataFrame(
+                [
+                    {"year": 2022, "annual_return": 0.22, "max_drawdown": -0.10},
+                    {"year": 2023, "annual_return": 0.08, "max_drawdown": -0.12},
+                    {"year": 2024, "annual_return": 0.21, "max_drawdown": -0.18},
+                ]
+            ).to_csv(years_path, index=False)
+            summary_path = root / "validated_summary.csv"
+            pd.DataFrame(
+                [
+                    {
+                        "candidate": "validated_candidate",
+                        "annual_return": 0.21,
+                        "sharpe": 1.1,
+                        "max_drawdown": -0.18,
+                        "annual_turnover": 5.0,
+                        "annual_trade_cost_ratio": 0.02,
+                        "is_acceptable": True,
+                        "years_path": str(years_path),
+                    }
+                ]
+            ).to_csv(summary_path, index=False)
+            config = {
+                "validated_strategy": {
+                    "enabled": True,
+                    "candidate": "validated_candidate",
+                    "summary_file": str(summary_path),
+                    "require_is_acceptable": True,
+                }
+            }
+            quality = {
+                "min_validation_windows": 3,
+                "min_positive_return_rate": 0.5,
+                "min_optimizer_annual_return": 0.20,
+                "min_yearly_annual_return": 0.10,
+                "max_drawdown_limit": -0.20,
+                "max_annual_turnover": 20.0,
+                "max_annual_trade_cost_ratio": 0.2,
+            }
+
+            report = module._validated_strategy_quality(config, quality)
+
+            self.assertIsNotNone(report)
+            self.assertFalse(report.is_acceptable)
+            self.assertTrue(any(issue.startswith("annual_return_min_below_threshold") for issue in report.issues))
+
     def test_allow_low_quality_keeps_skip_optimize_run_as_candidate_outputs(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:

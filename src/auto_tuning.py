@@ -148,8 +148,10 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
     min_windows = int(cfg.get("min_validation_windows", 3))
     min_positive = float(cfg.get("min_positive_return_rate", 0.5))
     min_optimizer_return = float(cfg.get("min_optimizer_annual_return", cfg.get("target_annual_return", 0.20)))
+    min_yearly_return = float(cfg.get("min_yearly_annual_return", min_optimizer_return))
     min_sharpe = float(cfg.get("min_sharpe_mean", 0.0))
     max_drawdown = float(cfg.get("max_drawdown_limit", -0.20))
+    max_yearly_drawdown = float(cfg.get("max_yearly_drawdown_limit", max_drawdown))
     max_turnover = float(cfg.get("max_annual_turnover", 20.0))
     max_cost = float(cfg.get("max_annual_trade_cost_ratio", 0.2))
     issues: list[str] = []
@@ -191,10 +193,12 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
         issues.append(f"positive_return_rate_below_threshold:{positive_return_rate:.4f}<{min_positive:.4f}")
     if annual_return_mean < min_optimizer_return:
         issues.append(f"annual_return_mean_below_threshold:{annual_return_mean:.4f}<{min_optimizer_return:.4f}")
+    if annual_return_min < min_yearly_return:
+        issues.append(f"annual_return_min_below_threshold:{annual_return_min:.4f}<{min_yearly_return:.4f}")
     if sharpe_mean < min_sharpe:
         issues.append(f"sharpe_mean_below_threshold:{sharpe_mean:.4f}<{min_sharpe:.4f}")
-    if max_drawdown_worst < max_drawdown:
-        issues.append(f"max_drawdown_worse_than_limit:{max_drawdown_worst:.4f}<{max_drawdown:.4f}")
+    if max_drawdown_worst < max_yearly_drawdown:
+        issues.append(f"max_drawdown_worse_than_limit:{max_drawdown_worst:.4f}<{max_yearly_drawdown:.4f}")
     if annual_turnover_mean > max_turnover:
         issues.append(f"annual_turnover_above_threshold:{annual_turnover_mean:.4f}>{max_turnover:.4f}")
     if annual_trade_cost_ratio_mean > max_cost:
@@ -276,9 +280,16 @@ def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None)
         return summary
     min_return = float(cfg.get("min_optimizer_annual_return", cfg.get("target_annual_return", 0.20)))
     drawdown_limit = float(cfg.get("max_drawdown_limit", cfg.get("max_backtest_drawdown_limit", -0.20)))
+    min_yearly_return = float(cfg.get("min_yearly_annual_return", min_return))
+    yearly_drawdown_limit = float(cfg.get("max_yearly_drawdown_limit", drawdown_limit))
     annual = pd.to_numeric(summary["annual_return_mean"], errors="coerce")
     drawdown = pd.to_numeric(summary["max_drawdown_worst"], errors="coerce")
     mask = (annual >= min_return) & (drawdown >= drawdown_limit)
+    if "annual_return_min" in summary.columns:
+        annual_min = pd.to_numeric(summary["annual_return_min"], errors="coerce")
+        mask &= annual_min >= min_yearly_return
+    if "max_drawdown_worst" in summary.columns:
+        mask &= drawdown >= yearly_drawdown_limit
     if "annual_turnover_mean" in summary.columns:
         turnover = pd.to_numeric(summary["annual_turnover_mean"], errors="coerce")
         mask &= turnover <= float(cfg.get("max_annual_turnover", float("inf")))

@@ -49,6 +49,45 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertFalse(failing["is_acceptable"])
         self.assertFalse(failing["drawdown_pass"])
 
+    def test_quality_flags_require_yearly_return_and_drawdown_when_yearly_stats_are_provided(self) -> None:
+        quality = {
+            "min_backtest_annual_return": 0.20,
+            "max_backtest_drawdown_limit": -0.20,
+            "min_yearly_annual_return": 0.10,
+            "max_yearly_drawdown_limit": -0.20,
+            "max_annual_turnover": 20.0,
+            "max_annual_trade_cost_ratio": 0.2,
+        }
+        metrics = {
+            "annual_return": 0.21,
+            "max_drawdown": -0.19,
+            "annual_turnover": 19.0,
+            "annual_trade_cost_ratio": 0.1,
+        }
+        weak_year = pd.DataFrame(
+            [
+                {"year": 2023, "annual_return": 0.12, "max_drawdown": -0.10},
+                {"year": 2024, "annual_return": -0.02, "max_drawdown": -0.08},
+            ]
+        )
+        passing_years = pd.DataFrame(
+            [
+                {"year": 2023, "annual_return": 0.12, "max_drawdown": -0.10},
+                {"year": 2024, "annual_return": 0.11, "max_drawdown": -0.18},
+            ]
+        )
+
+        weak = _quality_flags(metrics, quality, weak_year)
+        passing = _quality_flags(metrics, quality, passing_years)
+
+        self.assertFalse(weak["is_acceptable"])
+        self.assertFalse(weak["yearly_annual_return_pass"])
+        self.assertTrue(weak["yearly_drawdown_pass"])
+        self.assertEqual(weak["year_ann_pass"], 1)
+        self.assertEqual(weak["year_dd_pass"], 2)
+        self.assertAlmostEqual(weak["min_year_annual_return"], -0.02)
+        self.assertTrue(passing["is_acceptable"])
+
     def test_yearly_pass_counts_use_quality_thresholds(self) -> None:
         yearly = pd.DataFrame(
             [
@@ -66,6 +105,26 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
 
         self.assertEqual(annual_passes, 1)
         self.assertEqual(drawdown_passes, 1)
+
+    def test_yearly_pass_counts_use_yearly_threshold_overrides(self) -> None:
+        yearly = pd.DataFrame(
+            [
+                {"year": 2022, "annual_return": 0.17, "max_drawdown": -0.16},
+                {"year": 2023, "annual_return": 0.09, "max_drawdown": -0.22},
+                {"year": 2024, "annual_return": 0.31, "max_drawdown": -0.10},
+            ]
+        )
+        quality = {
+            "min_backtest_annual_return": 0.25,
+            "max_backtest_drawdown_limit": -0.15,
+            "min_yearly_annual_return": 0.10,
+            "max_yearly_drawdown_limit": -0.20,
+        }
+
+        annual_passes, drawdown_passes = _yearly_pass_counts(yearly, quality)
+
+        self.assertEqual(annual_passes, 2)
+        self.assertEqual(drawdown_passes, 2)
 
     def test_write_candidate_artifacts_persists_trades_and_holdings(self) -> None:
         with TemporaryDirectory() as tmp:

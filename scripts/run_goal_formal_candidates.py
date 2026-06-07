@@ -90,16 +90,13 @@ def main() -> None:
 
         result = run_backtest(score_cache[scoring_key], prices, start_date, end_date, bt_config)
         yearly = _yearly_stats(result.equity_curve)
-        year_ann_pass, year_dd_pass = _yearly_pass_counts(yearly, config.get("quality", {}))
         row = {
             "candidate": candidate["name"],
             "seconds": time.monotonic() - started,
             **candidate.get("recorded_hint", {}),
             **result.metrics,
-            "year_ann_pass": year_ann_pass,
-            "year_dd_pass": year_dd_pass,
         }
-        row.update(_quality_flags(row, config.get("quality", {})))
+        row.update(_quality_flags(row, config.get("quality", {}), yearly))
         prefix = out_path.with_name(f"{out_path.stem}_{candidate['name']}")
         row.update(_write_candidate_artifacts(prefix, result, yearly, prices, config, write_diagnostics=not args.skip_diagnostics))
         Path(str(prefix) + "_metrics.json").write_text(json.dumps(row, indent=2, default=str), encoding="utf-8")
@@ -1770,7 +1767,11 @@ def _score_key(candidate: dict[str, Any]) -> str:
     return repr((strategy_items, liquidity_items, market_items, blend_items, filter_items))
 
 
-def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict[str, Any]:
+def _quality_flags(
+    metrics: dict[str, Any],
+    quality_cfg: dict[str, Any],
+    yearly: pd.DataFrame | None = None,
+) -> dict[str, Any]:
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
     annual_turnover = float(metrics.get("annual_turnover", 0.0) or 0.0)
@@ -1788,11 +1789,30 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
         "annual_turnover_limit": turnover_limit,
         "annual_trade_cost_ratio_limit": cost_limit,
     }
+    if yearly is not None:
+        yearly_flags = _yearly_quality_flags(yearly, quality_cfg)
+        flags.update(yearly_flags)
+    else:
+        flags.update(
+            {
+                "year_count": 0,
+                "year_ann_pass": 0,
+                "year_dd_pass": 0,
+                "min_year_annual_return": 0.0,
+                "worst_year_drawdown": 0.0,
+                "min_yearly_annual_return": _quality_yearly_thresholds(quality_cfg)[0],
+                "max_yearly_drawdown_limit": _quality_yearly_thresholds(quality_cfg)[1],
+                "yearly_annual_return_pass": True,
+                "yearly_drawdown_pass": True,
+            }
+        )
     flags["is_acceptable"] = bool(
         flags["annual_return_pass"]
         and flags["drawdown_pass"]
         and flags["annual_turnover_pass"]
         and flags["annual_trade_cost_ratio_pass"]
+        and flags["yearly_annual_return_pass"]
+        and flags["yearly_drawdown_pass"]
     )
     return flags
 
@@ -1803,10 +1823,36 @@ def _quality_return_drawdown_thresholds(quality_cfg: dict[str, Any]) -> tuple[fl
     return return_threshold, drawdown_limit
 
 
+def _quality_yearly_thresholds(quality_cfg: dict[str, Any]) -> tuple[float, float]:
+    return_threshold, drawdown_limit = _quality_return_drawdown_thresholds(quality_cfg)
+    yearly_return = float(quality_cfg.get("min_yearly_annual_return", return_threshold))
+    yearly_drawdown = float(quality_cfg.get("max_yearly_drawdown_limit", drawdown_limit))
+    return yearly_return, yearly_drawdown
+
+
+def _yearly_quality_flags(yearly: pd.DataFrame, quality_cfg: dict[str, Any]) -> dict[str, Any]:
+    year_count = int(len(yearly))
+    year_ann_pass, year_dd_pass = _yearly_pass_counts(yearly, quality_cfg)
+    annual = pd.to_numeric(yearly.get("annual_return", pd.Series(dtype=float)), errors="coerce")
+    drawdown = pd.to_numeric(yearly.get("max_drawdown", pd.Series(dtype=float)), errors="coerce")
+    return_threshold, drawdown_limit = _quality_yearly_thresholds(quality_cfg)
+    return {
+        "year_count": year_count,
+        "year_ann_pass": year_ann_pass,
+        "year_dd_pass": year_dd_pass,
+        "min_year_annual_return": float(annual.min()) if not annual.dropna().empty else 0.0,
+        "worst_year_drawdown": float(drawdown.min()) if not drawdown.dropna().empty else 0.0,
+        "min_yearly_annual_return": return_threshold,
+        "max_yearly_drawdown_limit": drawdown_limit,
+        "yearly_annual_return_pass": bool(year_count > 0 and year_ann_pass == year_count),
+        "yearly_drawdown_pass": bool(year_count > 0 and year_dd_pass == year_count),
+    }
+
+
 def _yearly_pass_counts(yearly: pd.DataFrame, quality_cfg: dict[str, Any]) -> tuple[int, int]:
     if yearly.empty:
         return 0, 0
-    return_threshold, drawdown_limit = _quality_return_drawdown_thresholds(quality_cfg)
+    return_threshold, drawdown_limit = _quality_yearly_thresholds(quality_cfg)
     annual_passes = int((yearly["annual_return"] >= return_threshold).sum())
     drawdown_passes = int((yearly["max_drawdown"] >= drawdown_limit).sum())
     return annual_passes, drawdown_passes

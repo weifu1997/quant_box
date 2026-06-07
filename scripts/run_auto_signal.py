@@ -689,8 +689,10 @@ def _validated_strategy_quality(config: dict[str, Any], quality_config: dict) ->
     min_windows = int(quality_config.get("min_validation_windows", 3))
     min_positive = float(quality_config.get("min_positive_return_rate", 0.5))
     min_return = float(quality_config.get("min_optimizer_annual_return", quality_config.get("target_annual_return", 0.20)))
+    min_yearly_return = float(quality_config.get("min_yearly_annual_return", min_return))
     min_sharpe = float(quality_config.get("min_sharpe_mean", 0.0))
     max_drawdown_limit = float(quality_config.get("max_drawdown_limit", -0.20))
+    max_yearly_drawdown_limit = float(quality_config.get("max_yearly_drawdown_limit", max_drawdown_limit))
     max_turnover = float(quality_config.get("max_annual_turnover", 20.0))
     max_cost = float(quality_config.get("max_annual_trade_cost_ratio", 0.2))
 
@@ -705,12 +707,14 @@ def _validated_strategy_quality(config: dict[str, Any], quality_config: dict) ->
         issues.append(f"validated_strategy_annual_return_below_threshold:{annual_return:.4f}<{min_return:.4f}")
     if annual_return_mean < min_return:
         issues.append(f"annual_return_mean_below_threshold:{annual_return_mean:.4f}<{min_return:.4f}")
+    if annual_return_min < min_yearly_return:
+        issues.append(f"annual_return_min_below_threshold:{annual_return_min:.4f}<{min_yearly_return:.4f}")
     if sharpe < min_sharpe:
         issues.append(f"sharpe_mean_below_threshold:{sharpe:.4f}<{min_sharpe:.4f}")
     if max_drawdown < max_drawdown_limit:
         issues.append(f"validated_strategy_max_drawdown_worse_than_limit:{max_drawdown:.4f}<{max_drawdown_limit:.4f}")
-    if max_drawdown_worst < max_drawdown_limit:
-        issues.append(f"max_drawdown_worse_than_limit:{max_drawdown_worst:.4f}<{max_drawdown_limit:.4f}")
+    if max_drawdown_worst < max_yearly_drawdown_limit:
+        issues.append(f"max_drawdown_worse_than_limit:{max_drawdown_worst:.4f}<{max_yearly_drawdown_limit:.4f}")
     if annual_turnover > max_turnover:
         issues.append(f"annual_turnover_above_threshold:{annual_turnover:.4f}>{max_turnover:.4f}")
     if annual_trade_cost_ratio > max_cost:

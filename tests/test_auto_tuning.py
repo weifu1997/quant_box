@@ -306,6 +306,36 @@ class AutoTuningTests(unittest.TestCase):
         self.assertTrue(any(issue.startswith("positive_return_rate_below_threshold") for issue in quality.issues))
         self.assertTrue(any(issue.startswith("annual_return_mean_below_threshold") for issue in quality.issues))
 
+    def test_assess_parameter_quality_blocks_low_min_yearly_return(self) -> None:
+        summary = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 5,
+                    "max_turnover": 1,
+                    "rank_buffer": 10,
+                    "rebalance_freq": "monthly",
+                    "windows": 3,
+                    "positive_return_rate": 1.0,
+                    "annual_return_mean": 0.24,
+                    "annual_return_min": 0.08,
+                    "sharpe_mean": 1.2,
+                    "max_drawdown_worst": -0.12,
+                    "annual_turnover_mean": 2.0,
+                    "annual_trade_cost_ratio_mean": 0.01,
+                    "auto_score": 1.0,
+                }
+            ]
+        )
+
+        quality = assess_parameter_quality(
+            summary,
+            {"min_optimizer_annual_return": 0.20, "min_yearly_annual_return": 0.10, "max_drawdown_limit": -0.20},
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertTrue(any(issue.startswith("annual_return_min_below_threshold") for issue in quality.issues))
+
     def test_assess_backtest_quality_requires_return_and_drawdown_targets(self) -> None:
         quality = assess_backtest_quality(
             {"annual_return": 0.195, "max_drawdown": -0.45, "calmar": 0.43},
