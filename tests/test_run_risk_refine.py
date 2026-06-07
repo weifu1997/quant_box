@@ -13,10 +13,12 @@ from scripts.run_risk_refine import (
     _combo_key,
     _completed_keys,
     _csv_bool_values,
+    _equity_overlay_state,
     _factor_group_values,
     _liquidity_filter_state,
     _requested_factor_columns_for_groups,
     _target_quality_fields,
+    _with_equity_overlay_overrides,
     _with_dynamic_candidates_override,
     _with_timing_overrides,
 )
@@ -24,46 +26,64 @@ from scripts.run_risk_refine import (
 
 class RunRiskRefineTests(unittest.TestCase):
     def test_combo_key_includes_factor_group(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("inverse_factor:KLEN", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("inverse_factor:KLEN", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_timing_exposure_and_drawdown_trigger(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.0, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.0, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_score_blend_weights(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.0, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.0, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_industry_weight_cap(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, 0.25, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, 0.25, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_score_weighted(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, True, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, True, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_max_turnover(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_annual_drawdown_guard(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, True, 0.18, 0.3, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, True, 0.18, 0.3, 0.08, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
+
+    def test_combo_key_includes_equity_overlay(self) -> None:
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "config", 0.5, 0.5, 0.15, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 0.2, 0.1, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+
+        self.assertNotEqual(base, changed)
+
+    def test_equity_overlay_state_and_config_overrides(self) -> None:
+        self.assertEqual(_equity_overlay_state("disabled", 0.2, 0.1, 0.08), ("disabled", 1.0, 1.0, 0.0))
+        self.assertEqual(_equity_overlay_state("enabled", 1.5, -0.1, -0.08), ("enabled", 1.0, 0.0, 0.08))
+        base = {"equity_overlay": {"enabled": True, "ma_window": 90, "sideways_exposure": 0.5}}
+
+        result = _with_equity_overlay_overrides(base, "enabled", 0.2, 0.1, 0.08)
+
+        self.assertEqual(result["equity_overlay"]["ma_window"], 90)
+        self.assertEqual(result["equity_overlay"]["sideways_exposure"], 0.2)
+        self.assertEqual(result["equity_overlay"]["bear_exposure"], 0.1)
+        self.assertFalse(_with_equity_overlay_overrides(base, "disabled", 1.0, 1.0, 0.0)["equity_overlay"]["enabled"])
 
     def test_annual_guard_state_normalizes_disabled_and_enabled(self) -> None:
         self.assertEqual(_annual_guard_state(None, 0.5, 0.1), (False, None, 0.0, None))
@@ -100,6 +120,10 @@ class RunRiskRefineTests(unittest.TestCase):
                         "annual_guard_drawdown": 0.18,
                         "annual_guard_target_exposure": 0.3,
                         "annual_guard_release_drawdown": 0.08,
+                        "equity_overlay": "enabled",
+                        "overlay_sideways_exposure": 0.2,
+                        "overlay_bear_exposure": 0.1,
+                        "overlay_drawdown_cut": 0.08,
                         "defensive_timing": "enabled",
                         "bull_exposure": 1.0,
                         "sideways_exposure": 0.6,
@@ -114,7 +138,7 @@ class RunRiskRefineTests(unittest.TestCase):
 
             keys = _completed_keys(path)
 
-        expected = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, 0.25, True, None, 0.65, 0.12, 60, 0.3, 0.02, True, 0.18, 0.3, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        expected = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, 0.25, True, None, 0.65, 0.12, 60, 0.3, 0.02, True, 0.18, 0.3, 0.08, "enabled", 0.2, 0.1, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
         self.assertIn(expected, keys)
 
     def test_factor_group_values_falls_back_to_config_group(self) -> None:

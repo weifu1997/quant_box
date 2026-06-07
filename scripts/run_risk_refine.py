@@ -58,6 +58,10 @@ def main() -> None:
     parser.add_argument("--annual-guard-drawdown", default="none", help="Comma-separated per-year drawdown triggers, or none.")
     parser.add_argument("--annual-guard-target-exposure", default="0.0", help="Comma-separated target exposures after annual guard triggers.")
     parser.add_argument("--annual-guard-release-drawdown", default="none", help="Comma-separated same-year release drawdowns, or none.")
+    parser.add_argument("--equity-overlay", choices=["config", "enabled", "disabled"], default="config")
+    parser.add_argument("--overlay-sideways-exposure", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("sideways_exposure", 0.5)))
+    parser.add_argument("--overlay-bear-exposure", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("bear_exposure", 0.5)))
+    parser.add_argument("--overlay-drawdown-cut", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("drawdown_cut", 0.15)))
     parser.add_argument("--bull-exposure", default=str(config.get("defensive_timing", {}).get("bull_exposure", 1.0)))
     parser.add_argument("--sideways-exposure", default=str(config.get("defensive_timing", {}).get("sideways_exposure", 0.60)))
     parser.add_argument("--bear-exposure", default=str(config.get("defensive_timing", {}).get("bear_exposure", 0.30)))
@@ -110,6 +114,10 @@ def main() -> None:
             _csv_optional_values(args.annual_guard_drawdown, float),
             _csv_values(args.annual_guard_target_exposure, float),
             _csv_optional_values(args.annual_guard_release_drawdown, float),
+            _csv_values(args.equity_overlay, str),
+            _csv_values(args.overlay_sideways_exposure, float),
+            _csv_values(args.overlay_bear_exposure, float),
+            _csv_values(args.overlay_drawdown_cut, float),
             _csv_values(args.bull_exposure, float),
             _csv_values(args.sideways_exposure, float),
             _csv_values(args.bear_exposure, float),
@@ -140,6 +148,10 @@ def main() -> None:
         annual_guard_drawdown,
         annual_guard_target_exposure,
         annual_guard_release_drawdown,
+        equity_overlay_mode,
+        overlay_sideways_exposure,
+        overlay_bear_exposure,
+        overlay_drawdown_cut,
         bull_exposure,
         sideways_exposure,
         bear_exposure,
@@ -153,6 +165,12 @@ def main() -> None:
             annual_guard_drawdown,
             annual_guard_target_exposure,
             annual_guard_release_drawdown,
+        )
+        overlay_mode_key, overlay_sideways_key, overlay_bear_key, overlay_drawdown_key = _equity_overlay_state(
+            equity_overlay_mode,
+            overlay_sideways_exposure,
+            overlay_bear_exposure,
+            overlay_drawdown_cut,
         )
         key = _combo_key(
             factor_group,
@@ -173,6 +191,10 @@ def main() -> None:
             annual_guard_drawdown_key,
             annual_guard_target_key,
             annual_guard_release_key,
+            overlay_mode_key,
+            overlay_sideways_key,
+            overlay_bear_key,
+            overlay_drawdown_key,
             args.defensive_timing,
             bull_exposure,
             sideways_exposure,
@@ -225,6 +247,13 @@ def main() -> None:
             bear_drawdown_threshold,
         )
         bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, timing_config)
+        bt_config = _with_equity_overlay_overrides(
+            bt_config,
+            overlay_mode_key,
+            overlay_sideways_key,
+            overlay_bear_key,
+            overlay_drawdown_key,
+        )
         bt_config.update(
             {
                 "top_n": top_n,
@@ -272,6 +301,10 @@ def main() -> None:
             "annual_guard_drawdown": annual_guard_drawdown_key,
             "annual_guard_target_exposure": annual_guard_target_key,
             "annual_guard_release_drawdown": annual_guard_release_key,
+            "equity_overlay": overlay_mode_key,
+            "overlay_sideways_exposure": overlay_sideways_key,
+            "overlay_bear_exposure": overlay_bear_key,
+            "overlay_drawdown_cut": overlay_drawdown_key,
             "bull_exposure": bull_exposure,
             "sideways_exposure": sideways_exposure,
             "bear_exposure": bear_exposure,
@@ -348,6 +381,51 @@ def _annual_guard_config(
     }
     if release_drawdown is not None:
         result["release_drawdown"] = release_drawdown
+    return result
+
+
+def _equity_overlay_state(
+    mode: str,
+    sideways_exposure: float,
+    bear_exposure: float,
+    drawdown_cut: float,
+) -> tuple[str, float, float, float]:
+    normalized = str(mode).strip().lower()
+    if normalized == "disabled":
+        return "disabled", 1.0, 1.0, 0.0
+    if normalized not in {"config", "enabled"}:
+        raise ValueError(f"Unsupported equity overlay mode: {mode}")
+    return (
+        normalized,
+        max(0.0, min(float(sideways_exposure), 1.0)),
+        max(0.0, min(float(bear_exposure), 1.0)),
+        abs(float(drawdown_cut)),
+    )
+
+
+def _with_equity_overlay_overrides(
+    bt_config: dict[str, Any],
+    mode: str,
+    sideways_exposure: float,
+    bear_exposure: float,
+    drawdown_cut: float,
+) -> dict[str, Any]:
+    result = dict(bt_config)
+    if mode == "config":
+        return result
+    if mode == "disabled":
+        result["equity_overlay"] = {"enabled": False}
+        return result
+    overlay = dict(result.get("equity_overlay", {}))
+    overlay.update(
+        {
+            "enabled": True,
+            "sideways_exposure": sideways_exposure,
+            "bear_exposure": bear_exposure,
+            "drawdown_cut": drawdown_cut,
+        }
+    )
+    result["equity_overlay"] = overlay
     return result
 
 
@@ -440,6 +518,10 @@ def _combo_key(
     annual_guard_drawdown: float | None,
     annual_guard_target_exposure: float,
     annual_guard_release_drawdown: float | None,
+    equity_overlay_mode: str,
+    overlay_sideways_exposure: float,
+    overlay_bear_exposure: float,
+    overlay_drawdown_cut: float,
     defensive_timing: str,
     bull_exposure: float,
     sideways_exposure: float,
@@ -471,6 +553,10 @@ def _combo_key(
     float,
     float,
     float,
+    str,
+    float,
+    float,
+    float,
     float | None,
     float,
     float,
@@ -495,6 +581,10 @@ def _combo_key(
         _optional_key(annual_guard_drawdown),
         round(float(annual_guard_target_exposure), 6),
         _optional_key(annual_guard_release_drawdown),
+        str(equity_overlay_mode).strip().lower(),
+        round(float(overlay_sideways_exposure), 6),
+        round(float(overlay_bear_exposure), 6),
+        round(float(overlay_drawdown_cut), 6),
         str(defensive_timing).strip().lower(),
         round(float(bull_exposure), 6),
         round(float(sideways_exposure), 6),
@@ -538,6 +628,10 @@ def _completed_keys(
         float,
         float,
         float,
+        str,
+        float,
+        float,
+        float,
         float | None,
         float,
         float,
@@ -566,6 +660,10 @@ def _completed_keys(
         "annual_guard_drawdown",
         "annual_guard_target_exposure",
         "annual_guard_release_drawdown",
+        "equity_overlay",
+        "overlay_sideways_exposure",
+        "overlay_bear_exposure",
+        "overlay_drawdown_cut",
         "defensive_timing",
         "bull_exposure",
         "sideways_exposure",
@@ -597,6 +695,10 @@ def _completed_keys(
             row["annual_guard_drawdown"],
             row["annual_guard_target_exposure"],
             row["annual_guard_release_drawdown"],
+            row["equity_overlay"],
+            row["overlay_sideways_exposure"],
+            row["overlay_bear_exposure"],
+            row["overlay_drawdown_cut"],
             row["defensive_timing"],
             row["bull_exposure"],
             row["sideways_exposure"],
