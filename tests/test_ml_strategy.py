@@ -299,6 +299,38 @@ class MLStrategyTests(unittest.TestCase):
         self.assertGreater(int(result.diagnostics.iloc[0]["train_rows_available"]), 0)
         self.assertEqual(set(result.scores.index.get_level_values("instrument")), set(instruments))
 
+    def test_build_ml_scores_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=18)
+        instruments = ["A", "B", "C"]
+        index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame(
+            {"F1": range(len(index)), "F2": range(len(index), 0, -1)},
+            index=index,
+            dtype=float,
+        )
+        prices = pd.DataFrame(
+            {
+                "open": [10.0 + i for i in range(len(dates))],
+                "close": [10.1 + i for i in range(len(dates))],
+                "volume": [1000.0] * len(dates),
+            },
+            index=dates,
+        )
+        config = {
+            "ml_strategy": {
+                "enabled": True,
+                "model_type": "ridge_numpy",
+                "train_years": 1,
+                "label_horizon_sessions": 1,
+                "min_train_rows": 6,
+                "max_train_rows": 100,
+                "feature_limit": None,
+            }
+        }
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            build_ml_scores(factors, prices, config, signal_dates=[dates[-1]])
+
     def test_build_ml_scores_supports_fractional_train_years(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=140)
         instruments = ["A", "B", "C"]

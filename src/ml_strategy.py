@@ -10,6 +10,9 @@ import pandas as pd
 from src.factor_ic import calculate_factor_ic, make_ic_weights
 
 
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
+
+
 @dataclass
 class MLStrategyResult:
     scores: pd.Series
@@ -309,9 +312,10 @@ def _close_frame(prices: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame(index=prices.index)
         close = prices.loc[:, fields == "close"].copy()
         close.columns = [_normalize_instrument(value) for value in close.columns.get_level_values(-1)]
-    elif "close" in prices.columns:
-        close = prices[["close"]].copy()
     else:
+        column_names = {str(column).strip().lower() for column in prices.columns}
+        if len(prices.columns) > 1 and column_names & PRICE_FIELD_COLUMNS:
+            raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
         close = prices.copy()
         close.columns = [_normalize_instrument(value) for value in close.columns]
     close.index = pd.to_datetime(close.index).normalize()
