@@ -153,6 +153,50 @@ class AutoTuningTests(unittest.TestCase):
 
         self.assertEqual(selected["factor_group"], "factor:LOW0")
 
+    def test_default_parameter_summary_preserves_risk_control_variants(self) -> None:
+        validation = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 5,
+                    "max_turnover": 1,
+                    "rank_buffer": 10,
+                    "rebalance_freq": "monthly",
+                    "stop_loss_pct": 0.08,
+                    "optimization_score": 1.5,
+                    "annual_return": 0.25,
+                    "sharpe": 1.2,
+                    "max_drawdown": -0.12,
+                    "annual_turnover": 2.0,
+                    "annual_trade_cost_ratio": 0.01,
+                },
+                {
+                    "factor_group": "momentum",
+                    "top_n": 5,
+                    "max_turnover": 1,
+                    "rank_buffer": 10,
+                    "rebalance_freq": "monthly",
+                    "stop_loss_pct": None,
+                    "optimization_score": -1.0,
+                    "annual_return": -0.05,
+                    "sharpe": -0.2,
+                    "max_drawdown": -0.35,
+                    "annual_turnover": 2.0,
+                    "annual_trade_cost_ratio": 0.01,
+                },
+            ]
+        )
+
+        summary = summarize_parameter_validation(validation)
+        selected = select_stable_params(
+            summary,
+            {"min_optimizer_annual_return": 0.20, "max_drawdown_limit": -0.20},
+        )
+
+        self.assertEqual(len(summary), 2)
+        self.assertIn("stop_loss_pct", summary.columns)
+        self.assertEqual(selected["stop_loss_pct"], 0.08)
+
     def test_assess_parameter_quality_uses_target_filtered_selection(self) -> None:
         summary = pd.DataFrame(
             [

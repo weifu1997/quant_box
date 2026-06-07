@@ -72,9 +72,9 @@ class BacktestQualityReport:
 
 def summarize_parameter_validation(
     validation: pd.DataFrame,
-    param_columns: Iterable[str] = PARAM_COLUMNS,
+    param_columns: Iterable[str] | None = None,
 ) -> pd.DataFrame:
-    param_columns = list(param_columns)
+    param_columns = _parameter_columns(validation, param_columns)
     if validation.empty:
         return pd.DataFrame(columns=[*param_columns, "auto_score"])
 
@@ -133,9 +133,9 @@ def summarize_parameter_validation(
 def select_stable_params(
     summary: pd.DataFrame,
     quality_config: dict | None = None,
-    param_columns: Iterable[str] = PARAM_COLUMNS,
+    param_columns: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    param_columns = list(param_columns)
+    param_columns = _parameter_columns(summary, param_columns)
     if summary.empty:
         raise ValueError("Cannot select parameters from an empty validation summary.")
     candidates = _target_filtered_summary(summary, quality_config)
@@ -287,6 +287,13 @@ def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None)
         mask &= cost <= float(cfg.get("max_annual_trade_cost_ratio", float("inf")))
     filtered = summary[mask]
     return filtered if not filtered.empty else summary
+
+
+def _parameter_columns(frame: pd.DataFrame, param_columns: Iterable[str] | None) -> list[str]:
+    if param_columns is not None:
+        return list(param_columns)
+    inferred = [column for column in OPTIMIZABLE_PARAM_COLUMNS if column in frame.columns]
+    return inferred or list(PARAM_COLUMNS)
 
 
 def _python_scalar(value: Any) -> Any:
