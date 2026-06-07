@@ -45,6 +45,7 @@ def main() -> None:
     parser.add_argument("--liquidity-sides", default=str(config.get("liquidity_filter", {}).get("side", "high")))
     parser.add_argument("--liquidity-quantiles", default="0.20,0.30")
     parser.add_argument("--top-n", default=str(config.get("strategy", {}).get("top_n", 15)))
+    parser.add_argument("--max-turnover", default=str(config.get("strategy", {}).get("max_turnover", 1)))
     parser.add_argument("--rank-buffer", default=str(config.get("strategy", {}).get("rank_buffer", 30)))
     parser.add_argument("--max-industry-weight", default=str(config.get("strategy", {}).get("max_industry_weight", "none")))
     parser.add_argument("--score-weighted", default=str(config.get("strategy", {}).get("score_weighted", config.get("backtest", {}).get("score_weighted", False))))
@@ -93,6 +94,7 @@ def main() -> None:
             _csv_values(args.liquidity_sides, str),
             _csv_values(args.liquidity_quantiles, float),
             _csv_values(args.top_n, int),
+            _csv_values(args.max_turnover, int),
             _csv_values(args.rank_buffer, int),
             _csv_optional_values(args.max_industry_weight, float),
             _csv_bool_values(args.score_weighted),
@@ -119,6 +121,7 @@ def main() -> None:
         liquidity_side,
         liquidity_quantile,
         top_n,
+        max_turnover,
         rank_buffer,
         max_industry_weight,
         score_weighted,
@@ -142,6 +145,7 @@ def main() -> None:
             liquidity_side_key,
             liquidity_quantile_key,
             top_n,
+            max_turnover,
             rank_buffer,
             max_industry_weight,
             score_weighted,
@@ -206,6 +210,7 @@ def main() -> None:
         bt_config.update(
             {
                 "top_n": top_n,
+                "max_turnover": max_turnover,
                 "rank_buffer": rank_buffer,
                 "max_industry_weight": max_industry_weight,
                 "score_weighted": score_weighted,
@@ -229,6 +234,7 @@ def main() -> None:
             "liquidity_side": score_key[1],
             "liquidity_quantile": liquidity_quantile_key,
             "top_n": top_n,
+            "max_turnover": max_turnover,
             "rank_buffer": rank_buffer,
             "max_industry_weight": max_industry_weight,
             "score_weighted": score_weighted,
@@ -364,6 +370,7 @@ def _combo_key(
     liquidity_side: str,
     liquidity_quantile: float,
     top_n: int,
+    max_turnover: int,
     rank_buffer: int,
     max_industry_weight: float | None,
     score_weighted: bool,
@@ -385,6 +392,7 @@ def _combo_key(
     str,
     str,
     float,
+    int,
     int,
     int,
     float | None,
@@ -409,6 +417,7 @@ def _combo_key(
         str(liquidity_side).strip().lower(),
         round(float(liquidity_quantile), 6),
         int(top_n),
+        int(max_turnover),
         int(rank_buffer),
         _optional_key(max_industry_weight),
         _bool_value(score_weighted),
@@ -444,6 +453,7 @@ def _completed_keys(
         float,
         int,
         int,
+        int,
         float | None,
         bool,
         float | None,
@@ -470,6 +480,7 @@ def _completed_keys(
         "liquidity_side",
         "liquidity_quantile",
         "top_n",
+        "max_turnover",
         "rank_buffer",
         "max_industry_weight",
         "score_weighted",
@@ -496,6 +507,7 @@ def _completed_keys(
             row["liquidity_side"],
             row["liquidity_quantile"],
             row["top_n"],
+            row["max_turnover"],
             row["rank_buffer"],
             row["max_industry_weight"],
             row["score_weighted"],

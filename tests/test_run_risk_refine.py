@@ -22,32 +22,38 @@ from scripts.run_risk_refine import (
 
 class RunRiskRefineTests(unittest.TestCase):
     def test_combo_key_includes_factor_group(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("inverse_factor:KLEN", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("inverse_factor:KLEN", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_timing_exposure_and_drawdown_trigger(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.0, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.0, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_score_blend_weights(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.0, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.0, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_industry_weight_cap(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 20, 0.25, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, 0.25, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_score_weighted(self) -> None:
-        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, True, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, True, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+
+        self.assertNotEqual(base, changed)
+
+    def test_combo_key_includes_max_turnover(self) -> None:
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
@@ -64,6 +70,7 @@ class RunRiskRefineTests(unittest.TestCase):
                         "liquidity_side": "low",
                         "liquidity_quantile": 0.35,
                         "top_n": 15,
+                        "max_turnover": 5,
                         "rank_buffer": 20,
                         "max_industry_weight": 0.25,
                         "score_weighted": True,
@@ -87,7 +94,7 @@ class RunRiskRefineTests(unittest.TestCase):
 
             keys = _completed_keys(path)
 
-        expected = _combo_key("factor:MIN60", "low", 0.35, 15, 20, 0.25, True, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        expected = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, 0.25, True, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
         self.assertIn(expected, keys)
 
     def test_factor_group_values_falls_back_to_config_group(self) -> None:
