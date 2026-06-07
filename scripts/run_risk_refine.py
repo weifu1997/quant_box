@@ -27,6 +27,7 @@ from src.trading_calendar import resolve_target_date_value
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
+LIQUIDITY_DISABLED_SIDES = {"none", "off", "disabled", "false", "0"}
 
 
 def main() -> None:
@@ -130,10 +131,11 @@ def main() -> None:
         sideways_defensive_weight,
         bear_defensive_weight,
     ) in enumerate(combos, start=1):
+        liquidity_enabled, liquidity_side_key, liquidity_quantile_key = _liquidity_filter_state(liquidity_side, liquidity_quantile)
         key = _combo_key(
             factor_group,
-            liquidity_side,
-            liquidity_quantile,
+            liquidity_side_key,
+            liquidity_quantile_key,
             top_n,
             rank_buffer,
             max_industry_weight,
@@ -162,8 +164,8 @@ def main() -> None:
         logger.info("Running row %s/%s: %s.", idx, len(combos), key)
         score_key = (
             str(factor_group).strip().lower(),
-            str(liquidity_side).strip().lower(),
-            float(liquidity_quantile),
+            liquidity_side_key,
+            liquidity_quantile_key,
             _optional_key(bear_drawdown_threshold),
             round(float(bull_defensive_weight), 6),
             round(float(sideways_defensive_weight), 6),
@@ -174,8 +176,10 @@ def main() -> None:
             scoring_config = deepcopy(config)
             scoring_config.setdefault("strategy", {})["factor_group"] = factor_group
             scoring_config.setdefault("liquidity_filter", {})
-            scoring_config["liquidity_filter"]["side"] = score_key[1]
-            scoring_config["liquidity_filter"]["quantile"] = liquidity_quantile
+            scoring_config["liquidity_filter"]["enabled"] = liquidity_enabled
+            if liquidity_enabled:
+                scoring_config["liquidity_filter"]["side"] = score_key[1]
+                scoring_config["liquidity_filter"]["quantile"] = liquidity_quantile_key
             scoring_config.setdefault("market_regime", {})["bear_drawdown_threshold"] = bear_drawdown_threshold
             scoring_config.setdefault("regime_score_blend", {})["bull_defensive_weight"] = bull_defensive_weight
             scoring_config.setdefault("regime_score_blend", {})["sideways_defensive_weight"] = sideways_defensive_weight
@@ -214,8 +218,9 @@ def main() -> None:
         yearly_coverage = build_yearly_equity_coverage(result.equity_curve, args.start_date, end_date)
         row = {
             "factor_group": factor_group,
+            "liquidity_enabled": liquidity_enabled,
             "liquidity_side": score_key[1],
-            "liquidity_quantile": liquidity_quantile,
+            "liquidity_quantile": liquidity_quantile_key,
             "top_n": top_n,
             "rank_buffer": rank_buffer,
             "max_industry_weight": max_industry_weight,
@@ -258,6 +263,13 @@ def _factor_group_values(value: str, config: dict[str, Any]) -> list[str]:
     if values:
         return values
     return [str(config.get("strategy", {}).get("factor_group", "momentum"))]
+
+
+def _liquidity_filter_state(side: str, quantile: float) -> tuple[bool, str, float]:
+    normalized = str(side).strip().lower()
+    if normalized in LIQUIDITY_DISABLED_SIDES:
+        return False, "none", 0.0
+    return True, normalized, float(quantile)
 
 
 def _requested_factor_columns_for_groups(factor_file: str, config: dict[str, Any], factor_groups: list[str]) -> list[str] | None:

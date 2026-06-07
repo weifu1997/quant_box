@@ -11,6 +11,7 @@ from scripts.run_risk_refine import (
     _combo_key,
     _completed_keys,
     _factor_group_values,
+    _liquidity_filter_state,
     _requested_factor_columns_for_groups,
     _target_quality_fields,
     _with_timing_overrides,
@@ -82,6 +83,11 @@ class RunRiskRefineTests(unittest.TestCase):
 
         self.assertEqual(_factor_group_values("", config), ["factor:MIN60"])
         self.assertEqual(_factor_group_values("factor:MIN60,inverse_factor:KLEN", config), ["factor:MIN60", "inverse_factor:KLEN"])
+
+    def test_liquidity_filter_state_supports_disabled_side(self) -> None:
+        self.assertEqual(_liquidity_filter_state("none", 0.35), (False, "none", 0.0))
+        self.assertEqual(_liquidity_filter_state("OFF", 0.20), (False, "none", 0.0))
+        self.assertEqual(_liquidity_filter_state("high", 0.20), (True, "high", 0.20))
 
     def test_requested_factor_columns_for_groups_unions_exact_factor_columns(self) -> None:
         with TemporaryDirectory() as tmp:
