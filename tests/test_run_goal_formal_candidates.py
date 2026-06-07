@@ -13,6 +13,7 @@ from scripts.run_goal_formal_candidates import (
     _quality_flags,
     _score_key,
     _write_candidate_artifacts,
+    _yearly_pass_counts,
 )
 
 
@@ -47,6 +48,24 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertTrue(passing["is_acceptable"])
         self.assertFalse(failing["is_acceptable"])
         self.assertFalse(failing["drawdown_pass"])
+
+    def test_yearly_pass_counts_use_quality_thresholds(self) -> None:
+        yearly = pd.DataFrame(
+            [
+                {"year": 2022, "annual_return": 0.17, "max_drawdown": -0.16},
+                {"year": 2023, "annual_return": 0.24, "max_drawdown": -0.22},
+                {"year": 2024, "annual_return": 0.31, "max_drawdown": -0.10},
+            ]
+        )
+        quality = {
+            "min_backtest_annual_return": 0.25,
+            "max_backtest_drawdown_limit": -0.15,
+        }
+
+        annual_passes, drawdown_passes = _yearly_pass_counts(yearly, quality)
+
+        self.assertEqual(annual_passes, 1)
+        self.assertEqual(drawdown_passes, 1)
 
     def test_write_candidate_artifacts_persists_trades_and_holdings(self) -> None:
         with TemporaryDirectory() as tmp:

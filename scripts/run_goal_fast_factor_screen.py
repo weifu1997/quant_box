@@ -97,11 +97,7 @@ def main() -> None:
                             "top_n": top_n,
                             **result.metrics,
                         }
-                        row["meets_full_target"] = bool(row.get("annual_return", 0.0) >= 0.20 and row.get("max_drawdown", 0.0) >= -0.20)
-                        row["target_gap"] = max(0.0, 0.20 - float(row.get("annual_return", 0.0))) + max(
-                            0.0,
-                            -0.20 - float(row.get("max_drawdown", 0.0)),
-                        )
+                        row.update(_screen_quality_fields(row, config))
                         rows.append(row)
         frame = _sorted(rows)
         frame.to_csv(out_path, index=False, encoding="utf-8-sig")
@@ -161,6 +157,23 @@ def _error_row(column: str, direction_name: str, liquidity_mode: dict[str, objec
         "target_gap": 1.0,
         "meets_full_target": False,
     }
+
+
+def _screen_quality_fields(metrics: dict[str, object], config: dict) -> dict[str, object]:
+    return_threshold, drawdown_limit = _quality_thresholds(config)
+    annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
+    max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
+    return {
+        "meets_full_target": bool(annual_return >= return_threshold and max_drawdown >= drawdown_limit),
+        "target_gap": max(0.0, return_threshold - annual_return) + max(0.0, drawdown_limit - max_drawdown),
+    }
+
+
+def _quality_thresholds(config: dict) -> tuple[float, float]:
+    quality = config.get("quality", {})
+    return_threshold = float(quality.get("min_backtest_annual_return", quality.get("target_annual_return", 0.20)))
+    drawdown_limit = float(quality.get("max_backtest_drawdown_limit", quality.get("max_drawdown_limit", -0.20)))
+    return return_threshold, drawdown_limit
 
 
 def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:

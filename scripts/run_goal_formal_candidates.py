@@ -90,13 +90,14 @@ def main() -> None:
 
         result = run_backtest(score_cache[scoring_key], prices, start_date, end_date, bt_config)
         yearly = _yearly_stats(result.equity_curve)
+        year_ann_pass, year_dd_pass = _yearly_pass_counts(yearly, config.get("quality", {}))
         row = {
             "candidate": candidate["name"],
             "seconds": time.monotonic() - started,
             **candidate.get("recorded_hint", {}),
             **result.metrics,
-            "year_ann_pass": int((yearly["annual_return"] >= 0.20).sum()) if not yearly.empty else 0,
-            "year_dd_pass": int((yearly["max_drawdown"] >= -0.20).sum()) if not yearly.empty else 0,
+            "year_ann_pass": year_ann_pass,
+            "year_dd_pass": year_dd_pass,
         }
         row.update(_quality_flags(row, config.get("quality", {})))
         prefix = out_path.with_name(f"{out_path.stem}_{candidate['name']}")
@@ -1774,8 +1775,7 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
     annual_turnover = float(metrics.get("annual_turnover", 0.0) or 0.0)
     annual_cost = float(metrics.get("annual_trade_cost_ratio", metrics.get("trade_cost_ratio", 0.0)) or 0.0)
-    return_threshold = float(quality_cfg.get("min_backtest_annual_return", quality_cfg.get("target_annual_return", 0.20)))
-    drawdown_limit = float(quality_cfg.get("max_backtest_drawdown_limit", quality_cfg.get("max_drawdown_limit", -0.20)))
+    return_threshold, drawdown_limit = _quality_return_drawdown_thresholds(quality_cfg)
     turnover_limit = float(quality_cfg.get("max_annual_turnover", 20.0))
     cost_limit = float(quality_cfg.get("max_annual_trade_cost_ratio", 0.2))
     flags = {
@@ -1795,6 +1795,21 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
         and flags["annual_trade_cost_ratio_pass"]
     )
     return flags
+
+
+def _quality_return_drawdown_thresholds(quality_cfg: dict[str, Any]) -> tuple[float, float]:
+    return_threshold = float(quality_cfg.get("min_backtest_annual_return", quality_cfg.get("target_annual_return", 0.20)))
+    drawdown_limit = float(quality_cfg.get("max_backtest_drawdown_limit", quality_cfg.get("max_drawdown_limit", -0.20)))
+    return return_threshold, drawdown_limit
+
+
+def _yearly_pass_counts(yearly: pd.DataFrame, quality_cfg: dict[str, Any]) -> tuple[int, int]:
+    if yearly.empty:
+        return 0, 0
+    return_threshold, drawdown_limit = _quality_return_drawdown_thresholds(quality_cfg)
+    annual_passes = int((yearly["annual_return"] >= return_threshold).sum())
+    drawdown_passes = int((yearly["max_drawdown"] >= drawdown_limit).sum())
+    return annual_passes, drawdown_passes
 
 
 def _write_candidate_artifacts(
