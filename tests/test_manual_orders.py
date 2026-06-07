@@ -299,6 +299,37 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(orders.iloc[0]["reference_price"]), 20.0)
         self.assertEqual(float(orders.iloc[0]["target_shares"]), 5000.0)
 
+    def test_generate_manual_orders_uses_last_intraday_price_for_trade_date(self) -> None:
+        signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
+        prices = _prices(
+            ["2024-01-04 09:30", "2024-01-04 15:00"],
+            {"000001.SZ": [10.0, 20.0]},
+        )
+        account = AccountState(
+            total_asset=100000,
+            cash=100000,
+            max_position_pct=None,
+            lot_size=100,
+            star_market_lot_size=200,
+            source_file="",
+            holdings_file="",
+            holdings_loaded=True,
+        )
+
+        orders = generate_manual_orders(
+            signal,
+            ["000001.SZ"],
+            prices,
+            signal_date="2024-01-03",
+            intended_trade_date="2024-01-04",
+            account=account,
+            current_holdings=pd.DataFrame(columns=["instrument", "shares"]),
+            config={"strategy": {}},
+        )
+
+        self.assertEqual(float(orders.iloc[0]["reference_price"]), 20.0)
+        self.assertEqual(float(orders.iloc[0]["target_shares"]), 5000.0)
+
     def test_generate_manual_orders_does_not_treat_plain_close_panel_as_st_flags(self) -> None:
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "600000.SH", "action": "BUY"}])
         prices = pd.DataFrame(

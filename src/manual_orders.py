@@ -444,24 +444,32 @@ def _price_row(price_df: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Ser
     matches = normalized_index == target
     if not matches.any():
         return pd.Series(dtype=float)
-    row_key = price_df.index[matches][0]
+    row_pos = _last_matching_price_position(price_df.index, matches)
     if isinstance(price_df.columns, pd.MultiIndex):
         fields = price_df.columns.get_level_values(0).astype(str).str.strip().str.lower()
         if field not in set(fields):
             return pd.Series(dtype=float)
         selected = price_df.loc[:, fields == field]
-        row = selected.loc[row_key].copy()
+        row = selected.iloc[row_pos].copy()
         row.index = [_normalize_instrument(value) for value in selected.columns.get_level_values(-1)]
     else:
         if field != "close":
             return pd.Series(dtype=float)
         if _looks_like_field_table(price_df.columns):
             raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
-        row = price_df.loc[row_key].copy()
+        row = price_df.iloc[row_pos].copy()
     row.index = [_normalize_instrument(value) for value in row.index]
     row = row[row.index != ""]
     row = row[~row.index.duplicated(keep="last")]
     return pd.to_numeric(row, errors="coerce")
+
+
+def _last_matching_price_position(index: pd.Index, matches: pd.Series | pd.Index | list[bool]) -> int:
+    positions = [pos for pos, is_match in enumerate(matches) if bool(is_match)]
+    if not positions:
+        raise ValueError("No matching price row.")
+    timestamps = pd.to_datetime(index)
+    return max(positions, key=lambda pos: (pd.Timestamp(timestamps[pos]), pos))
 
 
 def _reference_price(instrument: str, close: pd.Series) -> float | None:
