@@ -202,6 +202,32 @@ class ResearchDiagnosticsTests(unittest.TestCase):
 
         self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 1.0)
 
+    def test_benchmark_uses_last_intraday_close_per_trade_date(self) -> None:
+        equity_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        equity = pd.Series([100.0, 105.0, 110.0], index=equity_dates, name="equity")
+        price_dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00", "2024-01-04 15:00"])
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame(
+                    {
+                        "000001.SZ": [10.0, 30.0, 20.0, 20.0],
+                    },
+                    index=price_dates,
+                )
+            },
+            axis=1,
+        )
+
+        diagnostics, _tables = build_research_diagnostics(
+            equity,
+            pd.DataFrame(),
+            pd.DataFrame(),
+            prices,
+            {"backtest": {"annual_trading_days": 252}, "research": {"benchmark": {"method": "equal_weight_universe"}}},
+        )
+
+        self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 1.0)
+
     def test_research_diagnostics_accepts_plain_close_price_panel(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
         equity = pd.Series([100.0, 101.0, 103.0], index=dates, name="equity")

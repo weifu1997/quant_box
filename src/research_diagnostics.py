@@ -1111,10 +1111,24 @@ def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
         frame = price_df.copy()
     else:
         return pd.DataFrame(index=price_df.index)
-    frame.index = pd.to_datetime(frame.index).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(frame.index, errors="coerce"))
+    valid_dates = ~pd.isna(raw_dates)
+    if not valid_dates.all():
+        frame = frame.loc[valid_dates].copy()
+        raw_dates = raw_dates[valid_dates]
+    if frame.empty:
+        return frame
+
+    order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+    if not np.array_equal(order, np.arange(len(raw_dates))):
+        frame = frame.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    frame.index = raw_dates.normalize()
     frame.columns = [_normalize_instrument(value) for value in frame.columns]
     frame = frame.loc[:, frame.columns != ""]
     frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
+    if frame.index.has_duplicates:
+        frame = frame.loc[~frame.index.duplicated(keep="last")]
     return frame.sort_index().apply(pd.to_numeric, errors="coerce")
 
 
