@@ -190,11 +190,15 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
     index = pd.MultiIndex.from_arrays(
         [
             pd.to_datetime(score_panel.index.get_level_values(0)).normalize(),
-            score_panel.index.get_level_values(1).astype(str),
+            [_normalize_instrument(value) for value in score_panel.index.get_level_values(1)],
         ],
         names=["datetime", "instrument"],
     )
-    return pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=index, name="score").sort_index()
+    result = pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=index, name="score")
+    result = result[result.index.get_level_values("instrument") != ""]
+    if result.index.has_duplicates:
+        result = result.groupby(level=["datetime", "instrument"], sort=False).last()
+    return result.sort_index()
 
 
 def _price_frame(price_df: pd.DataFrame, field: str = "close") -> pd.DataFrame:
@@ -206,19 +210,28 @@ def _price_frame(price_df: pd.DataFrame, field: str = "close") -> pd.DataFrame:
         selected = price_df.loc[:, fields == field].copy()
         if selected.empty and field != "close":
             selected = price_df.loc[:, fields == "close"].copy()
-        selected.columns = selected.columns.get_level_values(-1).astype(str)
+        selected.columns = [_normalize_instrument(value) for value in selected.columns.get_level_values(-1)]
     elif field in price_df.columns:
         selected = price_df[[field]].copy()
     elif "close" in price_df.columns:
         selected = price_df[["close"]].copy()
     else:
         selected = price_df.copy()
-        selected.columns = selected.columns.astype(str)
+        selected.columns = [_normalize_instrument(value) for value in selected.columns]
     selected.index = pd.to_datetime(selected.index).normalize()
+    selected = selected.loc[:, selected.columns != ""]
+    if selected.columns.has_duplicates:
+        selected = selected.loc[:, ~selected.columns.duplicated(keep="last")]
     selected = selected.sort_index()
     if all(pd.api.types.is_numeric_dtype(dtype) for dtype in selected.dtypes):
         return selected
     return selected.apply(pd.to_numeric, errors="coerce")
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _next_price_date(price_dates: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp | None:

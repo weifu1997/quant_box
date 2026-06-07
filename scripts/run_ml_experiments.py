@@ -14,8 +14,8 @@ sys.path.insert(0, str(ROOT))
 
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
-from src.fast_monthly_backtest import _close_frame as _fast_close_frame
 from src.fast_monthly_backtest import prepare_fast_period_data
+from src.fast_monthly_backtest import _price_frame as _fast_price_frame
 from src.fast_monthly_backtest import run_fast_prepared_backtest
 from src.market_regime import defensive_exposure_schedule, detect_market_regime
 from src.selection_constraints import apply_selection_constraints_to_backtest_config
@@ -52,7 +52,7 @@ def main() -> None:
 
     end_date = resolve_target_date_value(args.end_date, config=config)
     prices = pd.read_parquet(resolve_path(args.price_file))
-    fast_prices = _fast_close_frame(prices) if args.engine == "fast" else prices
+    fast_prices = _fast_price_frame(prices) if args.engine == "fast" else prices
     scores = _load_scores(resolve_path(args.scores_file))
     timing_regimes = detect_market_regime(prices, config)
     out_path = resolve_path(args.out_file)

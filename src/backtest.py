@@ -534,11 +534,15 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
     normalized_index = pd.MultiIndex.from_arrays(
         [
             pd.to_datetime(score_panel.index.get_level_values(0)).normalize(),
-            score_panel.index.get_level_values(1).astype(str),
+            [_normalize_instrument(value) for value in score_panel.index.get_level_values(1)],
         ],
         names=["datetime", "instrument"],
     )
-    return pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=normalized_index, name=score_panel.name).sort_index()
+    result = pd.Series(pd.to_numeric(score_panel.to_numpy(), errors="coerce"), index=normalized_index, name=score_panel.name)
+    result = result[result.index.get_level_values("instrument") != ""]
+    if result.index.has_duplicates:
+        result = result.groupby(level=["datetime", "instrument"], sort=False).last()
+    return result.sort_index()
 
 
 def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
@@ -550,7 +554,7 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
         normalized_columns = pd.MultiIndex.from_arrays(
             [
                 prices.columns.get_level_values(0).astype(str).str.lower(),
-                prices.columns.get_level_values(1).astype(str),
+                [_normalize_instrument(value) for value in prices.columns.get_level_values(1)],
             ],
             names=["field", "instrument"],
         )
@@ -562,16 +566,31 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
             prices = prices.copy(deep=False)
             prices.index = normalized_index
             prices.columns = normalized_columns
+        prices = prices.loc[:, prices.columns.get_level_values("instrument") != ""]
+        if prices.columns.has_duplicates:
+            prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
         if not prices.index.is_monotonic_increasing:
             return prices.sort_index()
         return prices
 
     prices = prices.copy(deep=False)
     prices.index = normalized_index
-    prices.columns = pd.MultiIndex.from_product([["close"], prices.columns.astype(str)], names=["field", "instrument"])
+    prices.columns = pd.MultiIndex.from_product(
+        [["close"], [_normalize_instrument(value) for value in prices.columns]],
+        names=["field", "instrument"],
+    )
+    prices = prices.loc[:, prices.columns.get_level_values("instrument") != ""]
+    if prices.columns.has_duplicates:
+        prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
     if not prices.index.is_monotonic_increasing:
         return prices.sort_index()
     return prices
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:

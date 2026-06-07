@@ -44,6 +44,32 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertGreater(result.equity_curve.iloc[-1], 119.0)
         self.assertEqual(result.weights["instrument"].tolist(), ["A"])
 
+    def test_fast_period_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
+        dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
+        prices = pd.DataFrame(
+            {
+                ("close", "000001.sz"): [10.0, 10.0, 12.0],
+            },
+            index=dates,
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(dates[0], "000001.SZ")], names=["datetime", "instrument"]),
+            name="score",
+        )
+
+        result = run_fast_period_backtest(
+            scores,
+            prices,
+            "2024-01-01",
+            "2024-02-29",
+            {"initial_capital": 100.0, "top_n": 1, "max_turnover": 1},
+        )
+
+        self.assertFalse(result.weights.empty)
+        self.assertEqual(result.weights["instrument"].tolist(), ["000001.SZ"])
+
     def test_fast_period_backtest_respects_zero_exposure(self) -> None:
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(

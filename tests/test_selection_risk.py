@@ -39,6 +39,20 @@ class SelectionRiskTests(unittest.TestCase):
         self.assertEqual(float(filtered.loc["A"]), 2.0)
         self.assertEqual(float(filtered.loc["B"]), 1.0)
 
+    def test_filter_matches_price_columns_case_insensitively(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        prices = _price_panel(
+            dates,
+            open_values={"000001.sz": [10.0, 10.1]},
+            close_values={"000001.sz": [10.0, 10.1]},
+            low_values={"000001.sz": [10.0, 10.0]},
+        )
+        scores = pd.Series([1.0], index=["000001.SZ"], name="score")
+
+        filtered = filter_scores_by_selection_risk(scores, prices, "2024-01-03", _config())
+
+        self.assertEqual(float(filtered.loc["000001.SZ"]), 1.0)
+
     def test_growth_board_limit_down_uses_growth_threshold_when_star_threshold_differs(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         stock = "300001.SZ"

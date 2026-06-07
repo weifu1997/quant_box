@@ -29,7 +29,7 @@ def filter_scores_by_selection_risk(
 
     instruments = [str(code) for code in scores.dropna().index.tolist()]
     eligible = selection_risk_eligible_instruments(prices, signal_date, instruments, config or {})
-    mask = pd.Series([str(code) in eligible for code in scores.index], index=scores.index)
+    mask = pd.Series([_normalize_instrument(code) in eligible for code in scores.index], index=scores.index)
     result = scores.where(mask)
     result.attrs = dict(getattr(scores, "attrs", {}))
     return result.rename(scores.name)
@@ -43,7 +43,7 @@ def selection_risk_eligible_instruments(
 ) -> set[str]:
     cfg = _selection_risk_config(config or {})
     if not bool(cfg.get("enabled", False)):
-        return {str(code) for code in instruments}
+        return {_normalize_instrument(code) for code in instruments if _normalize_instrument(code)}
 
     normalized_prices = _normalize_price_frame(prices)
     signal_ts = pd.Timestamp(signal_date).normalize()
@@ -64,7 +64,8 @@ def selection_risk_eligible_instruments(
     max_limit_down_days = None if max_limit_down_days is None else max(0, int(max_limit_down_days))
     require_positive_volume = bool(cfg.get("require_positive_volume", True))
 
-    instrument_index = pd.Index([str(code) for code in instruments]).drop_duplicates()
+    instrument_index = pd.Index([_normalize_instrument(code) for code in instruments]).drop_duplicates()
+    instrument_index = instrument_index[instrument_index != ""]
     if instrument_index.empty:
         return set()
 
@@ -210,7 +211,7 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
         normalized_columns = pd.MultiIndex.from_arrays(
             [
                 prices.columns.get_level_values(0).astype(str).str.lower(),
-                prices.columns.get_level_values(1).astype(str),
+                [_normalize_instrument(value) for value in prices.columns.get_level_values(1)],
             ],
             names=["field", "instrument"],
         )
@@ -222,16 +223,31 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
             prices = prices.copy(deep=False)
             prices.index = normalized_index
             prices.columns = normalized_columns
+        prices = prices.loc[:, prices.columns.get_level_values("instrument") != ""]
+        if prices.columns.has_duplicates:
+            prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
         if not prices.index.is_monotonic_increasing:
             return prices.sort_index()
         return prices
 
     result = prices.copy(deep=False)
     result.index = normalized_index
-    result.columns = pd.MultiIndex.from_product([["close"], result.columns.astype(str)], names=["field", "instrument"])
+    result.columns = pd.MultiIndex.from_product(
+        [["close"], [_normalize_instrument(value) for value in result.columns]],
+        names=["field", "instrument"],
+    )
+    result = result.loc[:, result.columns.get_level_values("instrument") != ""]
+    if result.columns.has_duplicates:
+        result = result.loc[:, ~result.columns.duplicated(keep="last")]
     if not result.index.is_monotonic_increasing:
         return result.sort_index()
     return result
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:

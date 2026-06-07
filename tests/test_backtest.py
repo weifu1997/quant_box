@@ -47,6 +47,27 @@ class BacktestTests(unittest.TestCase):
 
         self.assertTrue((result.trades["side"] == "BUY").any())
 
+    def test_run_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(dates[0], "000001.SZ")], names=["datetime", "instrument"]),
+            name="score",
+        )
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"000001.sz": [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"000001.sz": [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(scores, prices, "2024-01-02", "2024-01-03", {"initial_capital": 100000, "top_n": 1})
+
+        buys = result.trades[result.trades["side"] == "BUY"]
+        self.assertFalse(buys.empty)
+        self.assertEqual(buys.iloc[0]["instrument"], "000001.SZ")
+
     def test_calculate_metrics_sortino_uses_downside_deviation_over_all_returns(self) -> None:
         equity = pd.Series(
             [100.0, 110.0, 104.5, 104.5],
