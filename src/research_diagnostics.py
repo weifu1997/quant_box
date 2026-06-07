@@ -139,15 +139,16 @@ def _benchmark_curve(price_df: pd.DataFrame, config: dict[str, Any], target_inde
             frame = pd.read_csv(hs300_file)
             code_col = "con_code" if "con_code" in frame.columns else "ts_code" if "ts_code" in frame.columns else None
             if code_col is not None:
-                symbols = [_normalize_instrument(value) for value in frame[code_col].dropna().astype(str)]
+                symbols = list(dict.fromkeys(_normalize_instrument(value) for value in frame[code_col].dropna().astype(str)))
                 selected = [symbol for symbol in symbols if symbol in close.columns]
                 if selected:
                     close = close[selected]
 
     returns = close.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
-    benchmark_returns = returns.mean(axis=1, skipna=True).dropna()
-    if benchmark_returns.empty:
+    benchmark_returns = returns.mean(axis=1, skipna=True)
+    if benchmark_returns.dropna().empty and close.dropna(how="all").empty:
         return None
+    benchmark_returns = benchmark_returns.fillna(0.0)
     curve = (1.0 + benchmark_returns).cumprod()
     return _normalize_curve(curve, target_index)
 
@@ -502,8 +503,9 @@ def _max_drawdown_from_returns(returns: pd.Series) -> float | None:
     clean = pd.to_numeric(returns, errors="coerce").dropna()
     if clean.empty:
         return None
-    curve = (1.0 + clean).cumprod()
-    return float((curve / curve.cummax() - 1.0).min())
+    wealth = np.concatenate([[1.0], (1.0 + clean).cumprod().to_numpy(dtype=float)])
+    running_peak = np.maximum.accumulate(wealth)
+    return float((wealth / running_peak - 1.0).min())
 
 
 def _regime_trade_diagnostics(

@@ -187,6 +187,87 @@ class ResearchDiagnosticsTests(unittest.TestCase):
             self.assertIsNone(diagnostics["drawdown"]["max_drawdown_recovery_date"])
             self.assertIn("research_diagnostics", paths)
 
+    def test_benchmark_comparison_includes_first_price_return(self) -> None:
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+        equity = pd.Series([100.0, 100.0, 100.0], index=dates, name="equity")
+        prices = pd.concat({"close": pd.DataFrame({"000001.SZ": [100.0, 200.0, 200.0]}, index=dates)}, axis=1)
+
+        diagnostics, _tables = build_research_diagnostics(
+            equity,
+            pd.DataFrame(),
+            pd.DataFrame(),
+            prices,
+            {"backtest": {"annual_trading_days": 252}, "research": {"benchmark": {"method": "equal_weight_universe"}}},
+        )
+
+        self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 1.0)
+
+    def test_hs300_equal_weight_benchmark_deduplicates_constituent_snapshots(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            constituents = root / "hs300_constituents.csv"
+            pd.DataFrame(
+                {
+                    "con_code": ["000001.SZ", "000001.SZ", "000002.SZ"],
+                    "trade_date": ["2024-01-01", "2024-02-01", "2024-02-01"],
+                }
+            ).to_csv(constituents, index=False)
+            dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+            equity = pd.Series([100.0, 100.0, 100.0], index=dates, name="equity")
+            prices = pd.concat(
+                {
+                    "close": pd.DataFrame(
+                        {
+                            "000001.SZ": [100.0, 200.0, 200.0],
+                            "000002.SZ": [100.0, 100.0, 100.0],
+                        },
+                        index=dates,
+                    )
+                },
+                axis=1,
+            )
+
+            diagnostics, _tables = build_research_diagnostics(
+                equity,
+                pd.DataFrame(),
+                pd.DataFrame(),
+                prices,
+                {
+                    "backtest": {"annual_trading_days": 252},
+                    "data": {"hs300_constituents_file": str(constituents)},
+                    "research": {"benchmark": {"method": "hs300_equal_weight"}},
+                },
+            )
+
+        self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 0.5)
+
+    def test_regime_return_drawdown_counts_first_negative_return(self) -> None:
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
+        equity = pd.Series([100.0, 90.0], index=dates, name="equity")
+        prices = pd.concat({"close": pd.DataFrame({"000001.SZ": [10.0, 9.0]}, index=dates)}, axis=1)
+
+        diagnostics, _tables = build_research_diagnostics(
+            equity,
+            pd.DataFrame(),
+            pd.DataFrame(),
+            prices,
+            {
+                "backtest": {"annual_trading_days": 252},
+                "market_regime": {
+                    "enabled": True,
+                    "ma_window": 1,
+                    "momentum_window": 1,
+                    "volatility_window": 1,
+                    "min_periods": 1,
+                    "high_volatility_threshold": 10.0,
+                    "lag_days": 0,
+                },
+            },
+        )
+
+        records = diagnostics["regime_returns"]["records"]
+        self.assertAlmostEqual(records[0]["strategy_max_drawdown"], -0.10)
+
     def test_market_cap_exposure_uses_point_in_time_asof_snapshot(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
