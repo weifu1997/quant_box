@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 
 from src.ml_strategy import (
@@ -113,6 +114,40 @@ class MLStrategyTests(unittest.TestCase):
 
         self.assertAlmostEqual(float(neutralized[["A", "B", "C"]].mean(axis=1).iloc[0]), 0.0)
         self.assertAlmostEqual(float(neutralized[["D", "E", "F"]].mean(axis=1).iloc[0]), 0.0)
+
+    def test_training_label_neutralization_normalizes_symbol_inputs(self) -> None:
+        labels = pd.DataFrame(
+            {" a ": [0.4], "b": [0.2], " C ": [0.0], "d": [-0.1], " E ": [-0.3], "f": [-0.5]},
+            index=pd.to_datetime(["2024-01-02"]),
+        )
+        industry = pd.Series({"A": "bank", "B": "bank", "C": "bank", "D": "tech", "E": "tech", "F": "tech"})
+        cap_values = [10.0, 20.0, 40.0]
+        cap_labels = pd.DataFrame(
+            {symbol: [float(np.log1p(cap))] for symbol, cap in zip([" a ", "b", " C "], cap_values, strict=True)},
+            index=pd.to_datetime(["2024-01-02"]),
+        )
+        daily_basic = pd.DataFrame(
+            {
+                "trade_date": ["2024-01-02"] * 3,
+                "ts_code": ["A", "B", "C"],
+                "circ_mv": cap_values,
+            }
+        )
+
+        industry_neutralized = _neutralize_label_frame(
+            labels,
+            {"training_neutralization": {"enabled": True, "industry": True, "market_cap": False, "min_obs": 3}},
+            industry_map=industry,
+        )
+        cap_neutralized = _neutralize_label_frame(
+            cap_labels,
+            {"training_neutralization": {"enabled": True, "industry": False, "market_cap": True, "min_obs": 3}},
+            daily_basic=daily_basic,
+        )
+
+        self.assertAlmostEqual(float(industry_neutralized[[" a ", "b", " C "]].mean(axis=1).iloc[0]), 0.0)
+        self.assertAlmostEqual(float(industry_neutralized[["d", " E ", "f"]].mean(axis=1).iloc[0]), 0.0)
+        self.assertTrue((cap_neutralized.abs() < 1e-12).all(axis=None))
 
     def test_ranking_objective_prepares_query_groups_and_relevance_labels(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"])

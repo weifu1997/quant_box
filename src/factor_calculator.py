@@ -169,7 +169,7 @@ def _factor_cache_matches_request(
         return False
 
     if price_symbols:
-        factor_symbols = set(factors.index.get_level_values(1).astype(str).str.upper())
+        factor_symbols = _normalize_symbols(factors.index.get_level_values(1))
         if not price_symbols.issubset(factor_symbols):
             return False
 
@@ -204,9 +204,9 @@ def _price_cache_state(config: dict, start_date: str, end_date: str) -> tuple[pd
     end = pd.Timestamp(end_date).normalize()
     dates = pd.DatetimeIndex(dates[(dates >= start) & (dates <= end)]).unique()
     if isinstance(prices.columns, pd.MultiIndex):
-        symbols = set(prices.columns.get_level_values(-1).astype(str).str.upper())
+        symbols = _normalize_symbols(prices.columns.get_level_values(-1))
     else:
-        symbols = set(prices.columns.astype(str).str.upper())
+        symbols = _normalize_symbols(prices.columns)
     return dates, symbols
 
 
@@ -269,8 +269,13 @@ def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, en
     if factors is not None and isinstance(factors.index, pd.MultiIndex):
         payload["columns"] = list(map(str, factors.columns))
         payload["rows"] = int(len(factors))
-        payload["symbols"] = sorted(set(factors.index.get_level_values(1).astype(str).str.upper()))
+        payload["symbols"] = sorted(_normalize_symbols(factors.index.get_level_values(1)))
     return payload
+
+
+def _normalize_symbols(values: object) -> set[str]:
+    symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
+    return set(symbol for symbol in symbols if symbol)
 
 
 def _should_write_factor_cache(path: Path, start_date: str, end_date: str, config: dict) -> bool:

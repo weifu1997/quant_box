@@ -547,8 +547,10 @@ def _neutralize_label_frame(
     min_obs = max(3, int(neutral_cfg.get("min_obs", 20)))
     if bool(neutral_cfg.get("industry", True)) and industry_map is not None and not industry_map.empty:
         industry = industry_map.copy()
-        industry.index = industry.index.astype(str).str.upper()
-        groups = pd.Series(result.columns.astype(str).str.upper(), index=result.columns).map(industry).fillna("UNKNOWN")
+        industry.index = [_normalize_instrument(value) for value in industry.index]
+        industry = industry[industry.index != ""]
+        industry = industry[~industry.index.duplicated(keep="last")]
+        groups = pd.Series([_normalize_instrument(value) for value in result.columns], index=result.columns).map(industry).fillna("UNKNOWN")
         for group in groups.dropna().unique():
             columns = groups.index[groups == group]
             if len(columns) >= min_obs:
@@ -575,21 +577,22 @@ def _market_cap_neutralize_label_frame(
         basics.index = pd.MultiIndex.from_arrays(
             [
                 pd.to_datetime(basics.index.get_level_values(date_level)).normalize(),
-                basics.index.get_level_values(symbol_level).astype(str).str.upper(),
+                [_normalize_instrument(value) for value in basics.index.get_level_values(symbol_level)],
             ],
             names=["datetime", "instrument"],
         )
     elif "trade_date" in basics.columns and "ts_code" in basics.columns:
         basics = basics.copy()
         basics["trade_date"] = pd.to_datetime(basics["trade_date"], errors="coerce").dt.normalize()
-        basics["ts_code"] = basics["ts_code"].astype(str).str.upper()
+        basics["ts_code"] = [_normalize_instrument(value) for value in basics["ts_code"]]
         basics = basics.dropna(subset=["trade_date", "ts_code"]).set_index(["trade_date", "ts_code"])
+        basics = basics[basics.index.get_level_values("ts_code") != ""]
         basics.index = basics.index.set_names(["datetime", "instrument"])
     else:
         return labels
 
     result = labels.copy()
-    upper_columns = pd.Index(result.columns.astype(str).str.upper())
+    upper_columns = pd.Index([_normalize_instrument(value) for value in result.columns])
     for date, row in result.iterrows():
         date_key = pd.Timestamp(date).normalize()
         try:

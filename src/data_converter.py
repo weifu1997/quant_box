@@ -159,7 +159,18 @@ def _load_tradable_codes(path_value: str | Path) -> set[str]:
     col = next((name for name in ["ts_code", "instrument", "code", "con_code"] if name in df.columns), None)
     if col is None:
         raise ValueError(f"{path} must contain one of: ts_code, instrument, code, con_code.")
-    return set(df[col].dropna().astype(str).str.upper())
+    symbols: set[str] = set()
+    for value in df[col].dropna():
+        symbol = _normalize_symbol(value)
+        if symbol:
+            symbols.add(symbol)
+    return symbols
+
+
+def _normalize_symbol(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _read_calendar_dates(path: Path) -> list[str]:

@@ -286,6 +286,53 @@ class DataConverterTests(unittest.TestCase):
             self.assertFalse(adjusted_close_path.exists())
             self.assertFalse(adjusted_ohlcv_path.exists())
 
+    def test_convert_to_qlib_format_normalizes_tradable_symbols(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            qlib_dir = root / "qlib"
+            tradable_file = root / "tradable.csv"
+            raw_dir.mkdir()
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 10.0,
+                        "high": 10.0,
+                        "low": 10.0,
+                        "close": 10.0,
+                        "vol": 1000.0,
+                        "amount": 10000.0,
+                        "adj_factor": 1.0,
+                    }
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+            pd.DataFrame([{"ts_code": " 000001.sz "}]).to_csv(tradable_file, index=False)
+            config = {
+                "data": {
+                    "raw_dir": str(raw_dir),
+                    "constituents_file": str(root / "mainboard_a_stocks.csv"),
+                    "tradable_file": str(tradable_file),
+                },
+                "qlib": {"provider_uri": str(qlib_dir), "instruments": "mainboard_a"},
+            }
+
+            def fake_resolve_path(value: str | Path) -> Path:
+                if str(value) == "data/prices":
+                    return root / "prices"
+                path = Path(value)
+                return path if path.is_absolute() else root / path
+
+            with patch("src.data_converter.load_config", return_value=config), patch(
+                "src.data_converter.resolve_path",
+                side_effect=fake_resolve_path,
+            ):
+                result = convert_to_qlib_format(raw_dir=raw_dir, qlib_dir=qlib_dir)
+
+            self.assertEqual(result["instruments"], 1)
+            self.assertTrue(Path(result["close_price_file"]).exists())
+
     def test_adjustment_scales_volume_opposite_to_prices(self) -> None:
         feature_df = pd.DataFrame(
             {
