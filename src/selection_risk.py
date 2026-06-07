@@ -164,12 +164,20 @@ def _limit_down_threshold_for_stock(stock: str, prices: pd.DataFrame, date: pd.T
 
 def _base_limit_down_threshold_for_stock(stock: str, config: dict[str, Any]) -> float:
     lowered = str(stock).lower()
-    if lowered.startswith(("688", "689", "300", "301")):
+    if lowered.startswith(("688", "689")):
         return float(
             _config_value(
                 config,
                 "star_limit_down_threshold",
                 _config_value(config, "growth_limit_down_threshold", 0.199),
+            )
+        )
+    if lowered.startswith(("300", "301")):
+        return float(
+            _config_value(
+                config,
+                "growth_limit_down_threshold",
+                _config_value(config, "star_limit_down_threshold", 0.199),
             )
         )
     if lowered.startswith(("8", "4")):

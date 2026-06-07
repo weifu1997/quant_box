@@ -653,8 +653,10 @@ def _limit_threshold_for_stock(stock: str, prices: pd.DataFrame, trade_date: pd.
     if _is_st_on_date(stock, prices, trade_date):
         return float(config.get(f"st_limit_{suffix}_threshold", 0.049))
     lowered = str(stock).lower()
-    if lowered.startswith(("688", "689", "300", "301")):
+    if lowered.startswith(("688", "689")):
         return float(config.get(f"star_limit_{suffix}_threshold", config.get(f"growth_limit_{suffix}_threshold", 0.199)))
+    if lowered.startswith(("300", "301")):
+        return float(config.get(f"growth_limit_{suffix}_threshold", config.get(f"star_limit_{suffix}_threshold", 0.199)))
     if lowered.startswith(("8", "4")):
         return float(config.get(f"bj_limit_{suffix}_threshold", 0.299))
     return float(config.get(f"limit_{suffix}_threshold", 0.099))

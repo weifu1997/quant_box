@@ -682,7 +682,7 @@ def _limit_state(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, co
     close_prev = _reference_price(instrument, _price_row(price_df, "close", previous))
     if close_prev is None:
         return False
-    threshold = _limit_threshold(instrument, config, side)
+    threshold = _limit_threshold_for_date(price_df, date, instrument, config, side)
     if side == "up":
         probe = _reference_price(instrument, _price_row(price_df, "high", current))
         probe = probe if probe is not None else _reference_price(instrument, _price_row(price_df, "close", current))
@@ -696,11 +696,20 @@ def _limit_threshold(instrument: str, config: dict, side: str) -> float:
     backtest_cfg = config.get("backtest", {})
     suffix = "up" if side == "up" else "down"
     lowered = instrument.lower()
-    if lowered.startswith(("688", "689", "300", "301")):
+    if lowered.startswith(("688", "689")):
+        return float(backtest_cfg.get(f"star_limit_{suffix}_threshold", backtest_cfg.get(f"growth_limit_{suffix}_threshold", 0.199)))
+    if lowered.startswith(("300", "301")):
         return float(backtest_cfg.get(f"growth_limit_{suffix}_threshold", backtest_cfg.get(f"star_limit_{suffix}_threshold", 0.199)))
     if lowered.startswith(("8", "4")):
         return float(backtest_cfg.get(f"bj_limit_{suffix}_threshold", 0.299))
     return float(backtest_cfg.get(f"limit_{suffix}_threshold", 0.099))
+
+
+def _limit_threshold_for_date(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict, side: str) -> float:
+    if _is_st(price_df, date, instrument):
+        suffix = "up" if side == "up" else "down"
+        return float(config.get("backtest", {}).get(f"st_limit_{suffix}_threshold", 0.049))
+    return _limit_threshold(instrument, config, side)
 
 
 def _is_st(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str) -> bool:

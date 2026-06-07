@@ -39,6 +39,23 @@ class SelectionRiskTests(unittest.TestCase):
         self.assertEqual(float(filtered.loc["A"]), 2.0)
         self.assertEqual(float(filtered.loc["B"]), 1.0)
 
+    def test_growth_board_limit_down_uses_growth_threshold_when_star_threshold_differs(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        stock = "300001.SZ"
+        prices = _price_panel(
+            dates,
+            open_values={stock: [10.0, 8.8]},
+            close_values={stock: [10.0, 8.8]},
+            low_values={stock: [10.0, 8.8]},
+        )
+        scores = pd.Series([1.0], index=[stock], name="score")
+        config = _config()
+        config["backtest"] = {"star_limit_down_threshold": 0.099, "growth_limit_down_threshold": 0.199}
+
+        filtered = filter_scores_by_selection_risk(scores, prices, "2024-01-03", config)
+
+        self.assertEqual(float(filtered.loc[stock]), 1.0)
+
 
 def _config() -> dict:
     return {

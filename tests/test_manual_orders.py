@@ -70,6 +70,62 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(by_code.loc["600519.SH", "reference_price_source"], "intended_trade_date_close")
         self.assertIn("suggested_limit_price", orders.columns)
 
+    def test_generate_manual_orders_marks_limit_flags_with_board_and_st_thresholds(self) -> None:
+        dates = pd.DatetimeIndex(["2024-01-03", "2024-01-04"])
+        star = "688001.SH"
+        growth = "300001.SZ"
+        st_stock = "600000.SH"
+        signal = pd.DataFrame(
+            [
+                {"date": "2024-01-03", "instrument": star, "action": "BUY"},
+                {"date": "2024-01-03", "instrument": growth, "action": "BUY"},
+                {"date": "2024-01-03", "instrument": st_stock, "action": "BUY"},
+            ]
+        )
+        prices = _price_panel(
+            dates,
+            {
+                "close": {star: [10.0, 11.2], growth: [10.0, 11.2], st_stock: [10.0, 10.6]},
+                "high": {star: [10.0, 11.2], growth: [10.0, 11.2], st_stock: [10.0, 10.6]},
+                "is_st": {star: [0.0, 0.0], growth: [0.0, 0.0], st_stock: [0.0, 1.0]},
+            },
+        )
+        account = AccountState(
+            total_asset=100000,
+            cash=100000,
+            max_position_pct=None,
+            lot_size=100,
+            star_market_lot_size=200,
+            source_file="",
+            holdings_file="",
+            holdings_loaded=True,
+        )
+
+        orders = generate_manual_orders(
+            signal,
+            [star, growth, st_stock],
+            prices,
+            signal_date="2024-01-03",
+            intended_trade_date="2024-01-04",
+            account=account,
+            current_holdings=pd.DataFrame(columns=["instrument", "shares"]),
+            config={
+                "strategy": {},
+                "backtest": {
+                    "star_limit_up_threshold": 0.099,
+                    "growth_limit_up_threshold": 0.199,
+                    "limit_up_threshold": 0.099,
+                    "st_limit_up_threshold": 0.049,
+                },
+            },
+        )
+
+        by_code = orders.set_index("instrument")
+        self.assertTrue(bool(by_code.loc[star, "is_limit_up"]))
+        self.assertFalse(bool(by_code.loc[growth, "is_limit_up"]))
+        self.assertTrue(bool(by_code.loc[st_stock, "is_st"]))
+        self.assertTrue(bool(by_code.loc[st_stock, "is_limit_up"]))
+
     def test_generate_manual_orders_marks_blocked_candidate(self) -> None:
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
         prices = _prices("2024-01-03", {"000001.SZ": 10.0})
@@ -366,6 +422,10 @@ def _prices(date: str | list[str], close_values: dict[str, float | list[float]])
             row.append(values[idx] if isinstance(values, list) else values)
         rows.append(row)
     return pd.DataFrame(rows, index=pd.DatetimeIndex(dates), columns=columns)
+
+
+def _price_panel(dates: pd.DatetimeIndex, fields: dict[str, dict[str, list[float]]]) -> pd.DataFrame:
+    return pd.concat({field: pd.DataFrame(values, index=dates) for field, values in fields.items()}, axis=1)
 
 
 if __name__ == "__main__":

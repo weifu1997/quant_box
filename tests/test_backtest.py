@@ -154,6 +154,37 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue((result.trades["side"] == "BUY").any())
         self.assertFalse((result.trades["reason"] == "not_buyable").any())
 
+    def test_growth_board_uses_growth_limit_threshold_when_star_threshold_differs(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        stock = "300001.SZ"
+        index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
+        scores = pd.Series([10, 10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 11.2]}, index=dates),
+                "high": pd.DataFrame({stock: [10.0, 11.2]}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-03",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "star_limit_up_threshold": 0.099,
+                "growth_limit_up_threshold": 0.199,
+            },
+        )
+
+        self.assertTrue((result.trades["side"] == "BUY").any())
+        self.assertFalse((result.trades["reason"] == "not_buyable").any())
+
     def test_st_uses_five_percent_limit_threshold(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         stock = "600000.SH"
