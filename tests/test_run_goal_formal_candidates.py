@@ -9,9 +9,11 @@ import pandas as pd
 
 from scripts.run_goal_formal_candidates import (
     _candidate_specs,
+    _filter_candidates,
     _load_existing_candidate_rows,
     _quality_flags,
     _score_key,
+    _split_filter_values,
     _write_candidate_artifacts,
     _yearly_pass_counts,
 )
@@ -34,6 +36,8 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
                 "annual_trade_cost_ratio": 0.1,
             },
             quality,
+            pd.DataFrame([{"year": 2024, "annual_return": 0.21, "max_drawdown": -0.10}]),
+            pd.DataFrame([{"year": 2024, "passes_min_days": True}]),
         )
         failing = _quality_flags(
             {
@@ -43,6 +47,8 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
                 "annual_trade_cost_ratio": 0.1,
             },
             quality,
+            pd.DataFrame([{"year": 2024, "annual_return": 0.30, "max_drawdown": -0.10}]),
+            pd.DataFrame([{"year": 2024, "passes_min_days": True}]),
         )
 
         self.assertTrue(passing["is_acceptable"])
@@ -87,6 +93,41 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertEqual(weak["year_dd_pass"], 2)
         self.assertAlmostEqual(weak["min_year_annual_return"], -0.02)
         self.assertTrue(passing["is_acceptable"])
+
+    def test_quality_flags_require_yearly_coverage_when_provided(self) -> None:
+        quality = {
+            "min_backtest_annual_return": 0.20,
+            "max_backtest_drawdown_limit": -0.20,
+            "min_yearly_annual_return": 0.10,
+            "max_yearly_drawdown_limit": -0.20,
+            "max_annual_turnover": 20.0,
+            "max_annual_trade_cost_ratio": 0.2,
+        }
+        metrics = {
+            "annual_return": 0.21,
+            "max_drawdown": -0.19,
+            "annual_turnover": 1.0,
+            "annual_trade_cost_ratio": 0.01,
+        }
+        yearly = pd.DataFrame(
+            [
+                {"year": 2023, "annual_return": 0.12, "max_drawdown": -0.10},
+                {"year": 2025, "annual_return": 0.11, "max_drawdown": -0.18},
+            ]
+        )
+        coverage = pd.DataFrame(
+            [
+                {"year": 2023, "passes_min_days": True},
+                {"year": 2024, "passes_min_days": True},
+                {"year": 2025, "passes_min_days": True},
+            ]
+        )
+
+        flags = _quality_flags(metrics, quality, yearly, coverage)
+
+        self.assertFalse(flags["is_acceptable"])
+        self.assertFalse(flags["year_coverage_pass"])
+        self.assertEqual(flags["missing_years"], "2024")
 
     def test_yearly_pass_counts_use_quality_thresholds(self) -> None:
         yearly = pd.DataFrame(
@@ -140,6 +181,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
                 root / "candidate_a",
                 result,
                 pd.DataFrame([{"year": 2024, "annual_return": 0.1, "max_drawdown": 0.0}]),
+                pd.DataFrame([{"year": 2024, "passes_min_days": True}]),
                 pd.DataFrame(),
                 {},
                 write_diagnostics=False,
@@ -147,9 +189,26 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
 
             self.assertTrue(Path(paths["equity_path"]).exists())
             self.assertTrue(Path(paths["years_path"]).exists())
+            self.assertTrue(Path(paths["year_coverage_path"]).exists())
             self.assertTrue(Path(paths["trades_path"]).exists())
             self.assertTrue(Path(paths["holdings_path"]).exists())
             self.assertEqual(pd.read_csv(paths["trades_path"]).iloc[0]["instrument"], "A")
+
+    def test_split_filter_values_accepts_repeated_and_comma_separated_values(self) -> None:
+        values = _split_filter_values(["a,b", " c "])
+
+        self.assertEqual(values, ["a", "b", "c"])
+
+    def test_filter_candidates_supports_exact_names_and_patterns(self) -> None:
+        candidates = [{"name": "alpha"}, {"name": "beta_selrisk3"}, {"name": "beta_selrisk5"}]
+
+        selected = _filter_candidates(candidates, exact_names=["alpha"], patterns=["*_selrisk3"])
+
+        self.assertEqual([candidate["name"] for candidate in selected], ["alpha", "beta_selrisk3"])
+
+    def test_filter_candidates_rejects_unknown_names(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "Unknown candidate"):
+            _filter_candidates([{"name": "alpha"}], exact_names=["missing"])
 
     def test_score_key_includes_regime_score_filter(self) -> None:
         base = {

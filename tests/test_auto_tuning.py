@@ -355,6 +355,67 @@ class AutoTuningTests(unittest.TestCase):
         self.assertTrue(quality.is_acceptable)
         self.assertEqual(quality.issues, [])
 
+    def test_assess_backtest_quality_blocks_weak_yearly_returns(self) -> None:
+        yearly = pd.DataFrame(
+            [
+                {"year": 2023, "annual_return": 0.12, "max_drawdown": -0.10},
+                {"year": 2024, "annual_return": 0.08, "max_drawdown": -0.12},
+            ]
+        )
+        coverage = pd.DataFrame(
+            [
+                {"year": 2023, "passes_min_days": True},
+                {"year": 2024, "passes_min_days": True},
+            ]
+        )
+
+        quality = assess_backtest_quality(
+            {"annual_return": 0.22, "max_drawdown": -0.18, "calmar": 1.2},
+            {
+                "min_backtest_annual_return": 0.20,
+                "max_backtest_drawdown_limit": -0.20,
+                "min_yearly_annual_return": 0.10,
+                "max_yearly_drawdown_limit": -0.20,
+            },
+            yearly=yearly,
+            yearly_coverage=coverage,
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertEqual(quality.year_ann_pass, 1)
+        self.assertTrue(any(issue.startswith("backtest_yearly_annual_return_below_threshold") for issue in quality.issues))
+
+    def test_assess_backtest_quality_blocks_missing_yearly_stats_coverage(self) -> None:
+        yearly = pd.DataFrame(
+            [
+                {"year": 2023, "annual_return": 0.12, "max_drawdown": -0.10},
+                {"year": 2025, "annual_return": 0.11, "max_drawdown": -0.12},
+            ]
+        )
+        coverage = pd.DataFrame(
+            [
+                {"year": 2023, "passes_min_days": True},
+                {"year": 2024, "passes_min_days": True},
+                {"year": 2025, "passes_min_days": True},
+            ]
+        )
+
+        quality = assess_backtest_quality(
+            {"annual_return": 0.22, "max_drawdown": -0.18, "calmar": 1.2},
+            {
+                "min_backtest_annual_return": 0.20,
+                "max_backtest_drawdown_limit": -0.20,
+                "min_yearly_annual_return": 0.10,
+                "max_yearly_drawdown_limit": -0.20,
+            },
+            yearly=yearly,
+            yearly_coverage=coverage,
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertFalse(quality.year_coverage_pass)
+        self.assertIn("backtest_year_coverage_incomplete:2024", quality.issues)
+
 
 if __name__ == "__main__":
     unittest.main()

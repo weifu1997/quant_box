@@ -25,6 +25,7 @@ from src.auto_tuning import (
 from src.adj_factor_metadata import build_adj_factor_metadata, write_adj_factor_metadata
 from src.backtest import BacktestResult, run_backtest
 from src.config_loader import load_config, resolve_path
+from src.data_coverage import build_yearly_equity_coverage
 from src.data_converter import convert_to_qlib_format
 from src.data_fetcher import update_daily_data_resumable
 from src.data_governance import build_data_governance_report, write_data_governance_report
@@ -330,6 +331,8 @@ def main() -> None:
         holdings_bt_path = out_dir / "auto_backtest_holdings.csv"
         trades_path = out_dir / "auto_backtest_trades.csv"
         metrics_path = out_dir / "auto_backtest_metrics.json"
+        yearly_path = out_dir / "auto_backtest_years.csv"
+        yearly_coverage_path = out_dir / "auto_backtest_year_coverage.csv"
         if args.skip_backtest:
             _stage(status, out_dir, "backtest", "skipped")
             result = BacktestResult(
@@ -359,11 +362,20 @@ def main() -> None:
             result.holdings.to_csv(holdings_bt_path, index=False, encoding="utf-8-sig")
             result.trades.to_csv(trades_path, index=False, encoding="utf-8-sig")
             _stage(status, out_dir, "backtest", "complete")
+        yearly = _yearly_stats(result.equity_curve)
+        yearly_coverage = build_yearly_equity_coverage(result.equity_curve, args.start_date, end_date)
+        yearly.to_csv(yearly_path, index=False, encoding="utf-8-sig")
+        yearly_coverage.to_csv(yearly_coverage_path, index=False, encoding="utf-8-sig")
         _write_json(metrics_path, result.metrics)
-        artifacts.append(metrics_path)
+        artifacts.extend([metrics_path, yearly_path, yearly_coverage_path])
         if not args.skip_backtest:
             artifacts.extend([equity_path, holdings_bt_path, trades_path])
-        backtest_quality = assess_backtest_quality(result.metrics, config.get("quality", {}))
+        backtest_quality = assess_backtest_quality(
+            result.metrics,
+            config.get("quality", {}),
+            yearly=yearly,
+            yearly_coverage=yearly_coverage,
+        )
         backtest_quality_path = out_dir / "auto_backtest_quality.json"
         _write_json(backtest_quality_path, backtest_quality.to_dict())
         artifacts.append(backtest_quality_path)
@@ -505,6 +517,8 @@ def main() -> None:
                 "data_governance": str(governance_path),
                 "parameter_quality": str(quality_path),
                 "backtest_metrics": str(metrics_path),
+                "backtest_years": str(yearly_path),
+                "backtest_year_coverage": str(yearly_coverage_path),
                 "backtest_quality": str(backtest_quality_path),
                 **research_files,
             },
@@ -768,6 +782,24 @@ def _formal_candidate_quality_report(quality_config: dict, issues: list[str]) ->
         max_annual_turnover=max_turnover,
         max_annual_trade_cost_ratio=max_cost,
     )
+
+
+def _yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
+    if equity_curve.empty:
+        return pd.DataFrame(columns=["year", "days", "annual_return", "max_drawdown"])
+    rows: list[dict[str, Any]] = []
+    curve = equity_curve.dropna().sort_index()
+    if curve.empty:
+        return pd.DataFrame(columns=["year", "days", "annual_return", "max_drawdown"])
+    curve.index = pd.to_datetime(curve.index)
+    for year, group in curve.groupby(curve.index.year):
+        if len(group) <= 1 or float(group.iloc[0]) <= 0:
+            continue
+        total_return = float(group.iloc[-1] / group.iloc[0] - 1.0)
+        annual_return = float((1.0 + total_return) ** (252 / max(len(group) - 1, 1)) - 1.0) if total_return > -1 else -1.0
+        max_drawdown = float((group / group.cummax() - 1.0).min())
+        rows.append({"year": int(year), "days": int(len(group)), "annual_return": annual_return, "max_drawdown": max_drawdown})
+    return pd.DataFrame(rows)
 
 
 def _quality_number(value: Any, default: float) -> float:

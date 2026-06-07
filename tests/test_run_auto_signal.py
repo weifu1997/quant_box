@@ -140,6 +140,8 @@ class RunAutoSignalTests(unittest.TestCase):
 
             self.assertTrue((root / "signal_2024-01-03.csv").exists())
             self.assertTrue((root / "manual_orders_2024-01-03.csv").exists())
+            self.assertTrue((root / "auto_backtest_years.csv").exists())
+            self.assertTrue((root / "auto_backtest_year_coverage.csv").exists())
             status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
             self.assertEqual(status["status"], "complete")
             quality = json.loads((root / "auto_parameter_quality.json").read_text(encoding="utf-8"))

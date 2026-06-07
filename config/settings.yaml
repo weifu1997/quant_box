@@ -151,7 +151,7 @@ regime_score_blend:
   enabled: false
 
 validated_strategy:
-  enabled: true
+  enabled: false
   candidate: "momentum_lowliq_q35_no_blend_top15_take035_overlay_signal_ma90_side05_bear05_ma90_schedsig_bear06_selrisk3"
   summary_file: "outputs/goal_formal_candidate_summary_selrisk_20260607.csv"
   require_is_acceptable: true

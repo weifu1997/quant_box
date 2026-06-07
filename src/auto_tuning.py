@@ -63,6 +63,15 @@ class BacktestQualityReport:
     annual_return: float
     max_drawdown: float
     calmar: float
+    year_count: int
+    expected_year_count: int
+    year_ann_pass: int
+    year_dd_pass: int
+    min_year_annual_return: float
+    worst_year_drawdown: float
+    min_yearly_annual_return: float
+    max_yearly_drawdown_limit: float
+    year_coverage_pass: bool
     min_backtest_annual_return: float
     max_backtest_drawdown_limit: float
 
@@ -225,10 +234,17 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
     )
 
 
-def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None = None) -> BacktestQualityReport:
+def assess_backtest_quality(
+    metrics: dict[str, Any],
+    quality_config: dict | None = None,
+    yearly: pd.DataFrame | None = None,
+    yearly_coverage: pd.DataFrame | None = None,
+) -> BacktestQualityReport:
     cfg = quality_config or {}
     min_return = float(cfg.get("min_backtest_annual_return", cfg.get("target_annual_return", 0.20)))
     max_drawdown = float(cfg.get("max_backtest_drawdown_limit", -0.20))
+    min_yearly_return = float(cfg.get("min_yearly_annual_return", min_return))
+    max_yearly_drawdown = float(cfg.get("max_yearly_drawdown_limit", max_drawdown))
     issues: list[str] = []
 
     if not metrics or bool(metrics.get("backtest_skipped", False)):
@@ -238,6 +254,15 @@ def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None
             annual_return=0.0,
             max_drawdown=0.0,
             calmar=0.0,
+            year_count=0,
+            expected_year_count=0,
+            year_ann_pass=0,
+            year_dd_pass=0,
+            min_year_annual_return=0.0,
+            worst_year_drawdown=0.0,
+            min_yearly_annual_return=min_yearly_return,
+            max_yearly_drawdown_limit=max_yearly_drawdown,
+            year_coverage_pass=False,
             min_backtest_annual_return=min_return,
             max_backtest_drawdown_limit=max_drawdown,
         )
@@ -245,11 +270,29 @@ def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None
     annual_return = _number(metrics.get("annual_return"), 0.0)
     observed_drawdown = _number(metrics.get("max_drawdown"), 0.0)
     calmar = _number(metrics.get("calmar"), 0.0)
+    yearly_fields = _backtest_yearly_quality_fields(yearly, yearly_coverage, min_yearly_return, max_yearly_drawdown)
 
     if annual_return < min_return:
         issues.append(f"backtest_annual_return_below_threshold:{annual_return:.4f}<{min_return:.4f}")
     if observed_drawdown < max_drawdown:
         issues.append(f"backtest_max_drawdown_worse_than_limit:{observed_drawdown:.4f}<{max_drawdown:.4f}")
+    if yearly is not None:
+        if not yearly_fields["year_coverage_pass"]:
+            missing = str(yearly_fields.get("missing_years", "")).strip()
+            suffix = f":{missing}" if missing else ""
+            issues.append(f"backtest_year_coverage_incomplete{suffix}")
+        if yearly_fields["year_count"] <= 0:
+            issues.append("backtest_yearly_stats_missing")
+        elif yearly_fields["year_ann_pass"] < yearly_fields["year_count"]:
+            issues.append(
+                "backtest_yearly_annual_return_below_threshold:"
+                f"{yearly_fields['min_year_annual_return']:.4f}<{min_yearly_return:.4f}"
+            )
+        if yearly_fields["year_count"] > 0 and yearly_fields["year_dd_pass"] < yearly_fields["year_count"]:
+            issues.append(
+                "backtest_yearly_drawdown_worse_than_limit:"
+                f"{yearly_fields['worst_year_drawdown']:.4f}<{max_yearly_drawdown:.4f}"
+            )
 
     return BacktestQualityReport(
         is_acceptable=not issues,
@@ -257,6 +300,15 @@ def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None
         annual_return=annual_return,
         max_drawdown=observed_drawdown,
         calmar=calmar,
+        year_count=int(yearly_fields["year_count"]),
+        expected_year_count=int(yearly_fields["expected_year_count"]),
+        year_ann_pass=int(yearly_fields["year_ann_pass"]),
+        year_dd_pass=int(yearly_fields["year_dd_pass"]),
+        min_year_annual_return=float(yearly_fields["min_year_annual_return"]),
+        worst_year_drawdown=float(yearly_fields["worst_year_drawdown"]),
+        min_yearly_annual_return=min_yearly_return,
+        max_yearly_drawdown_limit=max_yearly_drawdown,
+        year_coverage_pass=bool(yearly_fields["year_coverage_pass"]),
         min_backtest_annual_return=min_return,
         max_backtest_drawdown_limit=max_drawdown,
     )
@@ -298,6 +350,62 @@ def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None)
         mask &= cost <= float(cfg.get("max_annual_trade_cost_ratio", float("inf")))
     filtered = summary[mask]
     return filtered if not filtered.empty else summary
+
+
+def _backtest_yearly_quality_fields(
+    yearly: pd.DataFrame | None,
+    yearly_coverage: pd.DataFrame | None,
+    min_yearly_return: float,
+    max_yearly_drawdown: float,
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "year_count": 0,
+        "expected_year_count": 0,
+        "year_ann_pass": 0,
+        "year_dd_pass": 0,
+        "min_year_annual_return": 0.0,
+        "worst_year_drawdown": 0.0,
+        "year_coverage_pass": True,
+        "missing_years": "",
+    }
+    if yearly is not None and not yearly.empty:
+        annual = pd.to_numeric(yearly.get("annual_return", pd.Series(dtype=float)), errors="coerce")
+        drawdown = pd.to_numeric(yearly.get("max_drawdown", pd.Series(dtype=float)), errors="coerce")
+        valid = annual.notna() & drawdown.notna()
+        fields["year_count"] = int(valid.sum())
+        if int(valid.sum()):
+            fields["year_ann_pass"] = int((annual[valid] >= min_yearly_return).sum())
+            fields["year_dd_pass"] = int((drawdown[valid] >= max_yearly_drawdown).sum())
+            fields["min_year_annual_return"] = float(annual[valid].min())
+            fields["worst_year_drawdown"] = float(drawdown[valid].min())
+    if yearly_coverage is not None:
+        fields["expected_year_count"] = int(len(yearly_coverage))
+        if yearly_coverage.empty:
+            fields["year_coverage_pass"] = False
+            return fields
+        if "passes_min_days" in yearly_coverage.columns:
+            coverage = yearly_coverage["passes_min_days"].fillna(False).astype(bool)
+        elif "has_equity" in yearly_coverage.columns:
+            coverage = yearly_coverage["has_equity"].fillna(False).astype(bool)
+        else:
+            coverage = pd.Series(False, index=yearly_coverage.index)
+        fields["year_coverage_pass"] = bool(coverage.all())
+        missing: list[str] = []
+        if not coverage.all() and "year" in yearly_coverage.columns:
+            missing.extend(yearly_coverage.loc[~coverage, "year"].dropna().astype(int).astype(str).tolist())
+        if "year" in yearly_coverage.columns:
+            expected_years = set(yearly_coverage["year"].dropna().astype(int).astype(str))
+            observed_years: set[str] = set()
+            if yearly is not None and not yearly.empty and "year" in yearly.columns:
+                observed_years = set(yearly["year"].dropna().astype(int).astype(str))
+            missing.extend(sorted(expected_years - observed_years))
+        missing = sorted(set(missing))
+        if missing:
+            fields["year_coverage_pass"] = False
+            fields["missing_years"] = ",".join(missing)
+    else:
+        fields["expected_year_count"] = int(fields["year_count"])
+    return fields
 
 
 def _parameter_columns(frame: pd.DataFrame, param_columns: Iterable[str] | None) -> list[str]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+import fnmatch
 import json
 from pathlib import Path
 import sys
@@ -16,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from scripts.run_backtest import _requested_factor_columns
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
+from src.data_coverage import build_yearly_equity_coverage
 from src.factor_calculator import load_or_compute_factors
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.research_diagnostics import build_research_diagnostics, write_research_diagnostics
@@ -30,6 +32,18 @@ def main() -> None:
     parser.add_argument("--output", default="outputs/goal_formal_candidate_summary_20260606.csv")
     parser.add_argument("--start-index", type=int, default=1, help="1-based candidate index to start from.")
     parser.add_argument("--max-candidates", type=int, default=0)
+    parser.add_argument(
+        "--candidate",
+        action="append",
+        default=[],
+        help="Exact candidate name to run. May be repeated or comma-separated.",
+    )
+    parser.add_argument(
+        "--candidate-pattern",
+        action="append",
+        default=[],
+        help="Shell-style candidate name pattern to run, for example '*selrisk3'. May be repeated or comma-separated.",
+    )
     parser.add_argument("--skip-diagnostics", action="store_true", help="Skip candidate-level research diagnostics.")
     parser.add_argument("--resume", action="store_true", help="Skip candidates already present in the output CSV.")
     args = parser.parse_args()
@@ -42,10 +56,15 @@ def main() -> None:
     out_path = resolve_path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    candidates = _candidate_specs()
+    candidates = _filter_candidates(
+        _candidate_specs(),
+        exact_names=_split_filter_values(args.candidate),
+        patterns=_split_filter_values(args.candidate_pattern),
+    )
     candidates = candidates[max(0, args.start_index - 1) :]
     if args.max_candidates:
         candidates = candidates[: args.max_candidates]
+    print(f"Selected {len(candidates)} candidate(s).", flush=True)
 
     factor_cache: dict[tuple[str, ...] | None, pd.DataFrame] = {}
     score_cache: dict[str, pd.Series] = {}
@@ -55,6 +74,7 @@ def main() -> None:
             print(f"{idx}/{len(candidates)} {candidate['name']}: skipped existing result", flush=True)
             continue
         started = time.monotonic()
+        print(f"{idx}/{len(candidates)} {candidate['name']}: preparing config", flush=True)
         strategy = _strategy_config(config, candidate)
         factor_config = _scoring_config(config, strategy, candidate)
         factor_columns = _requested_factor_columns(
@@ -67,17 +87,25 @@ def main() -> None:
         )
         factor_key = None if factor_columns is None else tuple(sorted(factor_columns))
         if factor_key not in factor_cache:
+            print(
+                f"{idx}/{len(candidates)} {candidate['name']}: loading factors "
+                f"columns={len(factor_columns) if factor_columns is not None else 'all'}",
+                flush=True,
+            )
             factor_cache[factor_key] = load_or_compute_factors(
                 start_date,
                 end_date,
                 cache_file=config["factors"]["cache_file"],
                 columns=factor_columns,
             )
+            print(f"{idx}/{len(candidates)} {candidate['name']}: factors loaded rows={len(factor_cache[factor_key])}", flush=True)
         scoring_key = _score_key(candidate)
         if scoring_key not in score_cache:
+            print(f"{idx}/{len(candidates)} {candidate['name']}: building scores", flush=True)
             scoring_config = factor_config
             scores = build_strategy_scores(factor_cache[factor_key], scoring_config, price_df=prices)
             score_cache[scoring_key] = resample_signals(scores, strategy.get("rebalance_freq", "daily"))
+            print(f"{idx}/{len(candidates)} {candidate['name']}: scores ready rows={len(score_cache[scoring_key])}", flush=True)
 
         timing_config = _timing_config(config, candidate)
         bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **strategy}, prices, timing_config)
@@ -88,23 +116,38 @@ def main() -> None:
                 bt_config[key] = value
         bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
 
+        print(f"{idx}/{len(candidates)} {candidate['name']}: running backtest", flush=True)
         result = run_backtest(score_cache[scoring_key], prices, start_date, end_date, bt_config)
+        print(f"{idx}/{len(candidates)} {candidate['name']}: computing yearly gates", flush=True)
         yearly = _yearly_stats(result.equity_curve)
+        yearly_coverage = build_yearly_equity_coverage(result.equity_curve, start_date, end_date)
         row = {
             "candidate": candidate["name"],
             "seconds": time.monotonic() - started,
             **candidate.get("recorded_hint", {}),
             **result.metrics,
         }
-        row.update(_quality_flags(row, config.get("quality", {}), yearly))
+        row.update(_quality_flags(row, config.get("quality", {}), yearly, yearly_coverage))
         prefix = out_path.with_name(f"{out_path.stem}_{candidate['name']}")
-        row.update(_write_candidate_artifacts(prefix, result, yearly, prices, config, write_diagnostics=not args.skip_diagnostics))
+        print(f"{idx}/{len(candidates)} {candidate['name']}: writing artifacts", flush=True)
+        row.update(
+            _write_candidate_artifacts(
+                prefix,
+                result,
+                yearly,
+                yearly_coverage,
+                prices,
+                config,
+                write_diagnostics=not args.skip_diagnostics,
+            )
+        )
         Path(str(prefix) + "_metrics.json").write_text(json.dumps(row, indent=2, default=str), encoding="utf-8")
         rows.append(row)
         pd.DataFrame(rows).to_csv(out_path, index=False, encoding="utf-8-sig")
         print(
             f"{idx}/{len(candidates)} {candidate['name']}: annual={row['annual_return']:.4f} "
-            f"dd={row['max_drawdown']:.4f} acceptable={row['is_acceptable']} yearly={row['year_ann_pass']}/{row['year_dd_pass']}",
+            f"dd={row['max_drawdown']:.4f} acceptable={row['is_acceptable']} "
+            f"yearly={row['year_ann_pass']}/{row['year_dd_pass']} coverage={row['year_coverage_pass']}",
             flush=True,
         )
 
@@ -123,6 +166,58 @@ def _load_existing_candidate_rows(path: Path) -> tuple[list[dict[str, Any]], set
     rows = frame.to_dict(orient="records")
     candidates = {str(value) for value in frame["candidate"].dropna().astype(str)}
     return rows, candidates
+
+
+def _split_filter_values(values: list[str] | None) -> list[str]:
+    result: list[str] = []
+    for value in values or []:
+        result.extend(item.strip() for item in str(value).split(",") if item.strip())
+    return result
+
+
+def _filter_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    exact_names: list[str] | None = None,
+    patterns: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    exact = _dedupe_preserve_order(exact_names or [])
+    globs = _dedupe_preserve_order(patterns or [])
+    if not exact and not globs:
+        return candidates
+
+    by_name = {str(candidate.get("name", "")): candidate for candidate in candidates}
+    selected: list[dict[str, Any]] = []
+    missing = [name for name in exact if name not in by_name]
+    if missing:
+        raise SystemExit(f"Unknown candidate name(s): {', '.join(missing)}")
+    for name in exact:
+        selected.append(by_name[name])
+    for pattern in globs:
+        matches = [candidate for candidate in candidates if fnmatch.fnmatchcase(str(candidate.get("name", "")), pattern)]
+        if not matches:
+            raise SystemExit(f"Candidate pattern matched nothing: {pattern}")
+        selected.extend(matches)
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in selected:
+        name = str(candidate.get("name", ""))
+        if name in seen:
+            continue
+        seen.add(name)
+        unique.append(candidate)
+    return unique
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _candidate_specs() -> list[dict[str, Any]]:
@@ -1771,6 +1866,7 @@ def _quality_flags(
     metrics: dict[str, Any],
     quality_cfg: dict[str, Any],
     yearly: pd.DataFrame | None = None,
+    yearly_coverage: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
@@ -1790,18 +1886,21 @@ def _quality_flags(
         "annual_trade_cost_ratio_limit": cost_limit,
     }
     if yearly is not None:
-        yearly_flags = _yearly_quality_flags(yearly, quality_cfg)
+        yearly_flags = _yearly_quality_flags(yearly, quality_cfg, yearly_coverage)
         flags.update(yearly_flags)
     else:
         flags.update(
             {
                 "year_count": 0,
+                "expected_year_count": 0,
                 "year_ann_pass": 0,
                 "year_dd_pass": 0,
                 "min_year_annual_return": 0.0,
                 "worst_year_drawdown": 0.0,
                 "min_yearly_annual_return": _quality_yearly_thresholds(quality_cfg)[0],
                 "max_yearly_drawdown_limit": _quality_yearly_thresholds(quality_cfg)[1],
+                "year_coverage_pass": False,
+                "missing_years": "",
                 "yearly_annual_return_pass": True,
                 "yearly_drawdown_pass": True,
             }
@@ -1811,6 +1910,7 @@ def _quality_flags(
         and flags["drawdown_pass"]
         and flags["annual_turnover_pass"]
         and flags["annual_trade_cost_ratio_pass"]
+        and flags["year_coverage_pass"]
         and flags["yearly_annual_return_pass"]
         and flags["yearly_drawdown_pass"]
     )
@@ -1830,20 +1930,53 @@ def _quality_yearly_thresholds(quality_cfg: dict[str, Any]) -> tuple[float, floa
     return yearly_return, yearly_drawdown
 
 
-def _yearly_quality_flags(yearly: pd.DataFrame, quality_cfg: dict[str, Any]) -> dict[str, Any]:
+def _yearly_quality_flags(
+    yearly: pd.DataFrame,
+    quality_cfg: dict[str, Any],
+    yearly_coverage: pd.DataFrame | None = None,
+) -> dict[str, Any]:
     year_count = int(len(yearly))
     year_ann_pass, year_dd_pass = _yearly_pass_counts(yearly, quality_cfg)
     annual = pd.to_numeric(yearly.get("annual_return", pd.Series(dtype=float)), errors="coerce")
     drawdown = pd.to_numeric(yearly.get("max_drawdown", pd.Series(dtype=float)), errors="coerce")
     return_threshold, drawdown_limit = _quality_yearly_thresholds(quality_cfg)
+    expected_year_count = year_count
+    year_coverage_pass = bool(year_count > 0)
+    missing_years = ""
+    if yearly_coverage is not None:
+        expected_year_count = int(len(yearly_coverage))
+        if yearly_coverage.empty:
+            year_coverage_pass = False
+        else:
+            if "passes_min_days" in yearly_coverage.columns:
+                coverage = yearly_coverage["passes_min_days"].fillna(False).astype(bool)
+            elif "has_equity" in yearly_coverage.columns:
+                coverage = yearly_coverage["has_equity"].fillna(False).astype(bool)
+            else:
+                coverage = pd.Series(False, index=yearly_coverage.index)
+            year_coverage_pass = bool(coverage.all())
+            missing: list[str] = []
+            if not coverage.all() and "year" in yearly_coverage.columns:
+                missing.extend(yearly_coverage.loc[~coverage, "year"].dropna().astype(int).astype(str).tolist())
+            if "year" in yearly_coverage.columns:
+                expected_years = set(yearly_coverage["year"].dropna().astype(int).astype(str))
+                observed_years = set(yearly["year"].dropna().astype(int).astype(str)) if "year" in yearly.columns else set()
+                missing.extend(sorted(expected_years - observed_years))
+            missing = sorted(set(missing))
+            if missing:
+                year_coverage_pass = False
+                missing_years = ",".join(missing)
     return {
         "year_count": year_count,
+        "expected_year_count": expected_year_count,
         "year_ann_pass": year_ann_pass,
         "year_dd_pass": year_dd_pass,
         "min_year_annual_return": float(annual.min()) if not annual.dropna().empty else 0.0,
         "worst_year_drawdown": float(drawdown.min()) if not drawdown.dropna().empty else 0.0,
         "min_yearly_annual_return": return_threshold,
         "max_yearly_drawdown_limit": drawdown_limit,
+        "year_coverage_pass": year_coverage_pass,
+        "missing_years": missing_years,
         "yearly_annual_return_pass": bool(year_count > 0 and year_ann_pass == year_count),
         "yearly_drawdown_pass": bool(year_count > 0 and year_dd_pass == year_count),
     }
@@ -1862,6 +1995,7 @@ def _write_candidate_artifacts(
     prefix: Path,
     result,
     yearly: pd.DataFrame,
+    yearly_coverage: pd.DataFrame,
     prices: pd.DataFrame,
     config: dict[str, Any],
     write_diagnostics: bool,
@@ -1869,11 +2003,13 @@ def _write_candidate_artifacts(
     paths = {
         "equity_path": str(prefix) + "_equity.csv",
         "years_path": str(prefix) + "_years.csv",
+        "year_coverage_path": str(prefix) + "_year_coverage.csv",
         "trades_path": str(prefix) + "_trades.csv",
         "holdings_path": str(prefix) + "_holdings.csv",
     }
     result.equity_curve.to_csv(paths["equity_path"], encoding="utf-8-sig")
     yearly.to_csv(paths["years_path"], index=False, encoding="utf-8-sig")
+    yearly_coverage.to_csv(paths["year_coverage_path"], index=False, encoding="utf-8-sig")
     result.trades.to_csv(paths["trades_path"], index=False, encoding="utf-8-sig")
     result.holdings.to_csv(paths["holdings_path"], index=False, encoding="utf-8-sig")
     if write_diagnostics:
