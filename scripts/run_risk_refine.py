@@ -39,6 +39,7 @@ def main() -> None:
     parser.add_argument("--end-date", default=config["data"]["end_date"])
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
     parser.add_argument("--price-file", default=config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
+    parser.add_argument("--factor-groups", default=str(config.get("strategy", {}).get("factor_group", "momentum")))
     parser.add_argument("--liquidity-sides", default=str(config.get("liquidity_filter", {}).get("side", "high")))
     parser.add_argument("--liquidity-quantiles", default="0.20,0.30")
     parser.add_argument("--top-n", default=str(config.get("strategy", {}).get("top_n", 15)))
@@ -73,14 +74,8 @@ def main() -> None:
     start_time = time.monotonic()
     end_date = resolve_target_date_value(args.end_date, config=config)
     prices = pd.read_parquet(resolve_path(args.price_file))
-    factor_columns = _requested_factor_columns(
-        args.factor_file,
-        config.get("strategy", {}),
-        config.get("dynamic_ic_selector", {}),
-        config.get("ml_strategy", {}),
-        config.get("regime_score_blend", {}),
-        config.get("regime_score_filter", {}),
-    )
+    factor_groups = _factor_group_values(args.factor_groups, config)
+    factor_columns = _requested_factor_columns_for_groups(args.factor_file, config, factor_groups)
     factors = load_or_compute_factors(args.start_date, end_date, cache_file=args.factor_file, columns=factor_columns)
 
     output_path = resolve_path(args.output)
@@ -90,6 +85,7 @@ def main() -> None:
 
     combos = list(
         product(
+            factor_groups,
             _csv_values(args.liquidity_sides, str),
             _csv_values(args.liquidity_quantiles, float),
             _csv_values(args.top_n, int),
@@ -112,8 +108,9 @@ def main() -> None:
     )
     logger.info("Risk refinement grid has %s exact backtest candidates.", len(combos))
 
-    score_cache: dict[tuple[str, float, float | None, float, float, float], pd.Series] = {}
+    score_cache: dict[tuple[str, str, float, float | None, float, float, float], pd.Series] = {}
     for idx, (
+        factor_group,
         liquidity_side,
         liquidity_quantile,
         top_n,
@@ -134,6 +131,7 @@ def main() -> None:
         bear_defensive_weight,
     ) in enumerate(combos, start=1):
         key = _combo_key(
+            factor_group,
             liquidity_side,
             liquidity_quantile,
             top_n,
@@ -163,6 +161,7 @@ def main() -> None:
 
         logger.info("Running row %s/%s: %s.", idx, len(combos), key)
         score_key = (
+            str(factor_group).strip().lower(),
             str(liquidity_side).strip().lower(),
             float(liquidity_quantile),
             _optional_key(bear_drawdown_threshold),
@@ -173,8 +172,9 @@ def main() -> None:
         scores = score_cache.get(score_key)
         if scores is None:
             scoring_config = deepcopy(config)
+            scoring_config.setdefault("strategy", {})["factor_group"] = factor_group
             scoring_config.setdefault("liquidity_filter", {})
-            scoring_config["liquidity_filter"]["side"] = score_key[0]
+            scoring_config["liquidity_filter"]["side"] = score_key[1]
             scoring_config["liquidity_filter"]["quantile"] = liquidity_quantile
             scoring_config.setdefault("market_regime", {})["bear_drawdown_threshold"] = bear_drawdown_threshold
             scoring_config.setdefault("regime_score_blend", {})["bull_defensive_weight"] = bull_defensive_weight
@@ -213,7 +213,8 @@ def main() -> None:
         yearly = _yearly_stats(result.equity_curve)
         yearly_coverage = build_yearly_equity_coverage(result.equity_curve, args.start_date, end_date)
         row = {
-            "liquidity_side": score_key[0],
+            "factor_group": factor_group,
+            "liquidity_side": score_key[1],
             "liquidity_quantile": liquidity_quantile,
             "top_n": top_n,
             "rank_buffer": rank_buffer,
@@ -250,6 +251,32 @@ def main() -> None:
     if not rows.empty:
         logger.info("Best rows by target fit:\n%s", _best_rows(rows, args.target_annual_return, args.drawdown_limit).to_string(index=False))
     logger.info("Risk refinement results saved to %s", output_path)
+
+
+def _factor_group_values(value: str, config: dict[str, Any]) -> list[str]:
+    values = _csv_values(value, str)
+    if values:
+        return values
+    return [str(config.get("strategy", {}).get("factor_group", "momentum"))]
+
+
+def _requested_factor_columns_for_groups(factor_file: str, config: dict[str, Any], factor_groups: list[str]) -> list[str] | None:
+    requested: set[str] = set()
+    for factor_group in factor_groups:
+        strategy_cfg = dict(config.get("strategy", {}))
+        strategy_cfg["factor_group"] = factor_group
+        columns = _requested_factor_columns(
+            factor_file,
+            strategy_cfg,
+            config.get("dynamic_ic_selector", {}),
+            config.get("ml_strategy", {}),
+            config.get("regime_score_blend", {}),
+            config.get("regime_score_filter", {}),
+        )
+        if columns is None:
+            return None
+        requested.update(str(column) for column in columns)
+    return sorted(requested) if requested else None
 
 
 def _csv_values(value: str, cast: Callable[[str], Any]) -> list[Any]:
@@ -289,6 +316,7 @@ def _with_timing_overrides(
 
 
 def _combo_key(
+    factor_group: str,
     liquidity_side: str,
     liquidity_quantile: float,
     top_n: int,
@@ -310,6 +338,7 @@ def _combo_key(
     bear_defensive_weight: float,
 ) -> tuple[
     str,
+    str,
     float,
     int,
     int,
@@ -330,6 +359,7 @@ def _combo_key(
     float,
 ]:
     return (
+        str(factor_group).strip().lower(),
         str(liquidity_side).strip().lower(),
         round(float(liquidity_quantile), 6),
         int(top_n),
@@ -363,6 +393,7 @@ def _completed_keys(
 ) -> set[
     tuple[
         str,
+        str,
         float,
         int,
         int,
@@ -387,6 +418,7 @@ def _completed_keys(
     if frame.empty:
         return set()
     required = [
+        "factor_group",
         "liquidity_side",
         "liquidity_quantile",
         "top_n",
@@ -411,6 +443,7 @@ def _completed_keys(
         return set()
     return {
         _combo_key(
+            row["factor_group"],
             row["liquidity_side"],
             row["liquidity_quantile"],
             row["top_n"],

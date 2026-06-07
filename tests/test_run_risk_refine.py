@@ -6,25 +6,39 @@ import unittest
 
 import pandas as pd
 
-from scripts.run_risk_refine import _best_rows, _combo_key, _completed_keys, _target_quality_fields, _with_timing_overrides
+from scripts.run_risk_refine import (
+    _best_rows,
+    _combo_key,
+    _completed_keys,
+    _factor_group_values,
+    _requested_factor_columns_for_groups,
+    _target_quality_fields,
+    _with_timing_overrides,
+)
 
 
 class RunRiskRefineTests(unittest.TestCase):
+    def test_combo_key_includes_factor_group(self) -> None:
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("inverse_factor:KLEN", "low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+
+        self.assertNotEqual(base, changed)
+
     def test_combo_key_includes_timing_exposure_and_drawdown_trigger(self) -> None:
-        base = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.0, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.0, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_score_blend_weights(self) -> None:
-        base = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.0, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.0, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_industry_weight_cap(self) -> None:
-        base = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
-        changed = _combo_key("low", 0.35, 15, 20, 0.25, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 20, 0.25, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
@@ -34,6 +48,7 @@ class RunRiskRefineTests(unittest.TestCase):
             pd.DataFrame(
                 [
                     {
+                        "factor_group": "factor:MIN60",
                         "liquidity_side": "low",
                         "liquidity_quantile": 0.35,
                         "top_n": 15,
@@ -59,8 +74,41 @@ class RunRiskRefineTests(unittest.TestCase):
 
             keys = _completed_keys(path)
 
-        expected = _combo_key("low", 0.35, 15, 20, 0.25, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        expected = _combo_key("factor:MIN60", "low", 0.35, 15, 20, 0.25, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
         self.assertIn(expected, keys)
+
+    def test_factor_group_values_falls_back_to_config_group(self) -> None:
+        config = {"strategy": {"factor_group": "factor:MIN60"}}
+
+        self.assertEqual(_factor_group_values("", config), ["factor:MIN60"])
+        self.assertEqual(_factor_group_values("factor:MIN60,inverse_factor:KLEN", config), ["factor:MIN60", "inverse_factor:KLEN"])
+
+    def test_requested_factor_columns_for_groups_unions_exact_factor_columns(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "factors.parquet"
+            pd.DataFrame(
+                {
+                    "datetime": [pd.Timestamp("2024-01-01")],
+                    "instrument": ["A"],
+                    "MIN60": [1.0],
+                    "KLEN": [2.0],
+                    "ROC20": [3.0],
+                }
+            ).to_parquet(path)
+
+            columns = _requested_factor_columns_for_groups(
+                str(path),
+                {
+                    "strategy": {"factor_group": "momentum"},
+                    "dynamic_ic_selector": {},
+                    "ml_strategy": {},
+                    "regime_score_blend": {},
+                    "regime_score_filter": {},
+                },
+                ["factor:MIN60", "inverse_factor:KLEN"],
+            )
+
+        self.assertEqual(columns, ["KLEN", "MIN60"])
 
     def test_with_timing_overrides_applies_exposure_and_market_drawdown_trigger(self) -> None:
         config = {"defensive_timing": {"enabled": False}, "market_regime": {}}
