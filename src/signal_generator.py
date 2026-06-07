@@ -25,7 +25,7 @@ def read_previous_holdings(path: str | Path | None = None) -> list[str]:
     col = "instrument" if "instrument" in df.columns else "ticker"
     if col not in df.columns:
         return []
-    return df[col].dropna().astype(str).tolist()
+    return _normalize_instruments(df[col].dropna().tolist())
 
 
 def generate_signal(
@@ -63,7 +63,8 @@ def generate_signal(
     if selection_risk_filter_enabled(config):
         prices = price_df if price_df is not None else _load_price_frame(price_file, config)
         latest_scores = filter_scores_by_selection_risk(latest_scores, prices, latest_date, config)
-    previous_holdings = previous_holdings if previous_holdings is not None else read_previous_holdings()
+    latest_scores = _normalize_score_index(latest_scores)
+    previous_holdings = _normalize_instruments(previous_holdings if previous_holdings is not None else read_previous_holdings())
     max_industry_weight = strategy_cfg.get("max_industry_weight")
     industry_map = load_industry_group_map(config) if max_industry_weight is not None else None
     holdings = select_stocks(
@@ -116,6 +117,36 @@ def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
         raise ValueError("factors must use MultiIndex: date/instrument.")
     date_level = factors.index.names[0] or 0
     return pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(date_level)).normalize()).unique().sort_values()
+
+
+def _normalize_score_index(scores: pd.Series) -> pd.Series:
+    if scores.empty:
+        return scores
+    result = scores.copy()
+    result.index = pd.Index([_normalize_instrument(value) for value in result.index], name=result.index.name)
+    result = result[result.index != ""]
+    if result.index.has_duplicates:
+        result = result.groupby(level=0, sort=False).last()
+    result.attrs = dict(getattr(scores, "attrs", {}))
+    return result
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _normalize_instruments(values: list[str] | pd.Series) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        instrument = _normalize_instrument(value)
+        if not instrument or instrument in seen:
+            continue
+        result.append(instrument)
+        seen.add(instrument)
+    return result
 
 
 def save_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str, config: dict | None = None) -> tuple[Path, Path]:

@@ -70,6 +70,30 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(holdings, ["E"])
         self.assertEqual(signal["date"].unique().tolist(), ["2024-01-02"])
 
+    def test_generate_signal_matches_previous_holdings_case_insensitively(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["000001.sz", "600519.sh"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"ROC5": [2.0, 1.0]}, index=index)
+        config = {
+            "data": {"start_date": "2024-01-01", "end_date": "2024-01-02"},
+            "strategy": {
+                "factor_group": "momentum",
+                "top_n": 1,
+                "max_turnover": 1,
+                "rank_buffer": 0,
+                "min_cross_section_obs": 1,
+            },
+            "factors": {"cache_file": "unused.parquet"},
+            "outputs": {"holdings_file": "unused.csv"},
+        }
+
+        signal, holdings = generate_signal("latest", previous_holdings=["000001.SZ"], config=config, factors=factors)
+
+        self.assertEqual(holdings, ["000001.SZ"])
+        self.assertEqual(signal[["instrument", "action"]].to_dict("records"), [{"instrument": "000001.SZ", "action": "HOLD"}])
+
     def test_empty_signal_keeps_effective_signal_date_metadata(self) -> None:
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
