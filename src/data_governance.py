@@ -413,7 +413,7 @@ def _delisted_rows(frame: pd.DataFrame) -> int:
     if "list_status" in frame.columns:
         count += int((frame["list_status"].fillna("").astype(str).str.upper() == "D").sum())
     if "delist_date" in frame.columns:
-        delisted = pd.to_datetime(frame["delist_date"].astype(str), format="%Y%m%d", errors="coerce")
+        delisted = _coerce_dates(frame["delist_date"])
         count = max(count, int(delisted.notna().sum()))
     return count
 
@@ -425,7 +425,7 @@ def _has_any_column(frame: pd.DataFrame, columns: list[str]) -> bool:
 def _date_range_text(series: pd.Series | None) -> tuple[str, str]:
     if series is None:
         return "", ""
-    dates = pd.to_datetime(series.astype(str).str.replace("-", "", regex=False), format="%Y%m%d", errors="coerce").dropna()
+    dates = _coerce_dates(series).dropna()
     if dates.empty:
         return "", ""
     return str(dates.min().date()), str(dates.max().date())
@@ -436,11 +436,7 @@ def _date_range_from_columns(frame: pd.DataFrame, columns: list[str]) -> tuple[s
     for column in columns:
         if column not in frame.columns:
             continue
-        values = pd.to_datetime(
-            frame[column].astype(str).str.replace("-", "", regex=False),
-            format="%Y%m%d",
-            errors="coerce",
-        ).dropna()
+        values = _coerce_dates(frame[column]).dropna()
         if not values.empty:
             date_parts.append(values)
     if not date_parts:
@@ -558,7 +554,12 @@ def _coerce_dates(values: Any) -> pd.Series:
     if compact_date.any():
         parsed.loc[compact_date] = pd.to_datetime(compact.loc[compact_date], format="%Y%m%d", errors="coerce")
     if (~compact_date).any():
-        parsed.loc[~compact_date] = pd.to_datetime(text.loc[~compact_date], errors="coerce")
+        fallback = pd.to_datetime(text.loc[~compact_date], errors="coerce")
+        fallback_series = pd.Series(fallback, index=text.loc[~compact_date].index)
+        if fallback_series.isna().any():
+            mixed = pd.to_datetime(text.loc[~compact_date], errors="coerce", format="mixed")
+            fallback_series = fallback_series.where(fallback_series.notna(), pd.Series(mixed, index=fallback_series.index))
+        parsed.loc[~compact_date] = fallback_series
     return parsed
 
 

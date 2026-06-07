@@ -260,6 +260,84 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertEqual(daily_action["end_date"], "2024-02-05")
             self.assertIn("--skip-index-constituents --skip-st-calendar", daily_action["commands"][0])
 
+    def test_build_data_governance_report_parses_intraday_daily_basic_range(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            factor_dir = root / "factors"
+            factor_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            st_calendar = raw_dir / "st_calendar.csv"
+            index_file = raw_dir / "hs300_constituents.csv"
+            daily_basic_file = factor_dir / "daily_basic.parquet"
+            factor_cache = factor_dir / "alpha158.parquet"
+
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "name": ["A"],
+                    "industry": ["Bank"],
+                    "list_status": ["L"],
+                    "list_date": ["20200101"],
+                    "delist_date": [""],
+                }
+            ).to_csv(universe_file, index=False)
+            pd.DataFrame({"ts_code": ["000001.SZ"], "st_start_date": ["20240101"], "st_end_date": ["20240104"]}).to_csv(
+                st_calendar,
+                index=False,
+            )
+            pd.DataFrame(
+                {
+                    "index_code": ["000300.SH"],
+                    "con_code": ["000001.SZ"],
+                    "trade_date": ["20240103"],
+                    "weight": [1.0],
+                }
+            ).to_csv(index_file, index=False)
+            pd.DataFrame(
+                {
+                    "trade_date": ["2024-01-03 15:00"],
+                    "ts_code": ["000001.SZ"],
+                    "circ_mv": [100.0],
+                }
+            ).to_parquet(daily_basic_file)
+            pd.DataFrame({"ts_code": ["000001.SZ"], "trade_date": ["2024-01-03"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                raw_dir / "000001.SZ.csv",
+                index=False,
+            )
+            (Path(str(factor_cache) + ".meta.json")).write_text(
+                json.dumps({"start_date": "2024-01-02", "end_date": "2024-01-04", "symbols": ["000001.SZ"]}),
+                encoding="utf-8",
+            )
+            adj_meta = factor_dir / "adj_factor_meta.json"
+            adj_metadata = build_adj_factor_metadata({"data": {"raw_dir": str(raw_dir)}})
+            write_adj_factor_metadata(adj_metadata, path=adj_meta)
+
+            report = build_data_governance_report(
+                {
+                    "data": {
+                        "start_date": "2024-01-02",
+                        "raw_dir": str(raw_dir),
+                        "constituents_file": str(universe_file),
+                        "st_calendar_file": str(st_calendar),
+                        "exclude_st": True,
+                    },
+                    "factors": {"cache_file": str(factor_cache)},
+                    "data_governance": {
+                        "index_constituents_file": str(index_file),
+                        "adj_factor_meta_file": str(adj_meta),
+                    },
+                    "research": {"exposure": {"daily_basic_file": str(daily_basic_file), "market_cap_field": "circ_mv"}},
+                },
+                sample_raw_files=1,
+            )
+
+            self.assertEqual(report.daily_basic_start_date, "2024-01-03")
+            self.assertEqual(report.daily_basic_end_date, "2024-01-03")
+            self.assertIn("daily_basic_start_after_point_in_time_start:2024-01-03>2024-01-02", report.issues)
+            self.assertIn("daily_basic_end_before_factor_end:2024-01-03<2024-01-04", report.warnings)
+
     def test_build_data_governance_report_flags_point_in_time_coverage_gaps(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

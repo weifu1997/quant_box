@@ -73,17 +73,26 @@ class RunRiskRefineTests(unittest.TestCase):
 
         self.assertNotEqual(base, changed)
 
+    def test_combo_key_includes_equity_overlay_timing(self) -> None:
+        base = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 0.2, 0.1, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0, overlay_ma_window=90, overlay_momentum_window=5, overlay_rebalance_on_signal_only=True)
+        changed = _combo_key("factor:MIN60", "low", 0.35, 15, 1, 20, None, False, None, 0.65, 0.12, 60, 0.3, 0.02, False, None, 0.0, None, "enabled", 0.2, 0.1, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0, overlay_ma_window=120, overlay_momentum_window=5, overlay_rebalance_on_signal_only=True)
+
+        self.assertNotEqual(base, changed)
+
     def test_equity_overlay_state_and_config_overrides(self) -> None:
-        self.assertEqual(_equity_overlay_state("disabled", 0.2, 0.1, 0.08), ("disabled", 1.0, 1.0, 0.0))
-        self.assertEqual(_equity_overlay_state("enabled", 1.5, -0.1, -0.08), ("enabled", 1.0, 0.0, 0.08))
+        self.assertEqual(_equity_overlay_state("disabled", 0.2, 0.1, 0.08, 60, 2, True), ("disabled", 1.0, 1.0, 0.0, 0, 0, False))
+        self.assertEqual(_equity_overlay_state("config", 0.2, 0.1, 0.08, 60, 2, True), ("config", 1.0, 1.0, 0.0, 0, 0, False))
+        self.assertEqual(_equity_overlay_state("enabled", 1.5, -0.1, -0.08, 0, -5, "yes"), ("enabled", 1.0, 0.0, 0.08, 1, 1, True))
         base = {"equity_overlay": {"enabled": True, "ma_window": 90, "sideways_exposure": 0.5}}
 
-        result = _with_equity_overlay_overrides(base, "enabled", 0.2, 0.1, 0.08)
+        result = _with_equity_overlay_overrides(base, "enabled", 0.2, 0.1, 0.08, 60, 2, True)
 
-        self.assertEqual(result["equity_overlay"]["ma_window"], 90)
+        self.assertEqual(result["equity_overlay"]["ma_window"], 60)
+        self.assertEqual(result["equity_overlay"]["momentum_window"], 2)
+        self.assertTrue(result["equity_overlay"]["rebalance_on_signal_only"])
         self.assertEqual(result["equity_overlay"]["sideways_exposure"], 0.2)
         self.assertEqual(result["equity_overlay"]["bear_exposure"], 0.1)
-        self.assertFalse(_with_equity_overlay_overrides(base, "disabled", 1.0, 1.0, 0.0)["equity_overlay"]["enabled"])
+        self.assertFalse(_with_equity_overlay_overrides(base, "disabled", 1.0, 1.0, 0.0, 0, 0, False)["equity_overlay"]["enabled"])
 
     def test_annual_guard_state_normalizes_disabled_and_enabled(self) -> None:
         self.assertEqual(_annual_guard_state(None, 0.5, 0.1), (False, None, 0.0, None))
@@ -124,6 +133,9 @@ class RunRiskRefineTests(unittest.TestCase):
                         "overlay_sideways_exposure": 0.2,
                         "overlay_bear_exposure": 0.1,
                         "overlay_drawdown_cut": 0.08,
+                        "overlay_ma_window": 60,
+                        "overlay_momentum_window": 2,
+                        "overlay_rebalance_on_signal_only": True,
                         "defensive_timing": "enabled",
                         "bull_exposure": 1.0,
                         "sideways_exposure": 0.6,
@@ -138,7 +150,7 @@ class RunRiskRefineTests(unittest.TestCase):
 
             keys = _completed_keys(path)
 
-        expected = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, 0.25, True, None, 0.65, 0.12, 60, 0.3, 0.02, True, 0.18, 0.3, 0.08, "enabled", 0.2, 0.1, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        expected = _combo_key("factor:MIN60", "low", 0.35, 15, 5, 20, 0.25, True, None, 0.65, 0.12, 60, 0.3, 0.02, True, 0.18, 0.3, 0.08, "enabled", 0.2, 0.1, 0.08, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0, overlay_ma_window=60, overlay_momentum_window=2, overlay_rebalance_on_signal_only=True)
         self.assertIn(expected, keys)
 
     def test_factor_group_values_falls_back_to_config_group(self) -> None:

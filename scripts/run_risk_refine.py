@@ -58,10 +58,13 @@ def main() -> None:
     parser.add_argument("--annual-guard-drawdown", default="none", help="Comma-separated per-year drawdown triggers, or none.")
     parser.add_argument("--annual-guard-target-exposure", default="0.0", help="Comma-separated target exposures after annual guard triggers.")
     parser.add_argument("--annual-guard-release-drawdown", default="none", help="Comma-separated same-year release drawdowns, or none.")
-    parser.add_argument("--equity-overlay", choices=["config", "enabled", "disabled"], default="config")
+    parser.add_argument("--equity-overlay", default="config", help="Comma-separated config/enabled/disabled overlay modes.")
     parser.add_argument("--overlay-sideways-exposure", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("sideways_exposure", 0.5)))
     parser.add_argument("--overlay-bear-exposure", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("bear_exposure", 0.5)))
     parser.add_argument("--overlay-drawdown-cut", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("drawdown_cut", 0.15)))
+    parser.add_argument("--overlay-ma-window", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("ma_window", 90)))
+    parser.add_argument("--overlay-momentum-window", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("momentum_window", 5)))
+    parser.add_argument("--overlay-rebalance-on-signal-only", default=str(config.get("backtest", {}).get("equity_overlay", {}).get("rebalance_on_signal_only", False)))
     parser.add_argument("--bull-exposure", default=str(config.get("defensive_timing", {}).get("bull_exposure", 1.0)))
     parser.add_argument("--sideways-exposure", default=str(config.get("defensive_timing", {}).get("sideways_exposure", 0.60)))
     parser.add_argument("--bear-exposure", default=str(config.get("defensive_timing", {}).get("bear_exposure", 0.30)))
@@ -118,6 +121,9 @@ def main() -> None:
             _csv_values(args.overlay_sideways_exposure, float),
             _csv_values(args.overlay_bear_exposure, float),
             _csv_values(args.overlay_drawdown_cut, float),
+            _csv_values(args.overlay_ma_window, int),
+            _csv_values(args.overlay_momentum_window, int),
+            _csv_bool_values(args.overlay_rebalance_on_signal_only),
             _csv_values(args.bull_exposure, float),
             _csv_values(args.sideways_exposure, float),
             _csv_values(args.bear_exposure, float),
@@ -152,6 +158,9 @@ def main() -> None:
         overlay_sideways_exposure,
         overlay_bear_exposure,
         overlay_drawdown_cut,
+        overlay_ma_window,
+        overlay_momentum_window,
+        overlay_rebalance_on_signal_only,
         bull_exposure,
         sideways_exposure,
         bear_exposure,
@@ -166,11 +175,22 @@ def main() -> None:
             annual_guard_target_exposure,
             annual_guard_release_drawdown,
         )
-        overlay_mode_key, overlay_sideways_key, overlay_bear_key, overlay_drawdown_key = _equity_overlay_state(
+        (
+            overlay_mode_key,
+            overlay_sideways_key,
+            overlay_bear_key,
+            overlay_drawdown_key,
+            overlay_ma_window_key,
+            overlay_momentum_window_key,
+            overlay_rebalance_signal_key,
+        ) = _equity_overlay_state(
             equity_overlay_mode,
             overlay_sideways_exposure,
             overlay_bear_exposure,
             overlay_drawdown_cut,
+            overlay_ma_window,
+            overlay_momentum_window,
+            overlay_rebalance_on_signal_only,
         )
         key = _combo_key(
             factor_group,
@@ -203,6 +223,9 @@ def main() -> None:
             bull_defensive_weight,
             sideways_defensive_weight,
             bear_defensive_weight,
+            overlay_ma_window=overlay_ma_window_key,
+            overlay_momentum_window=overlay_momentum_window_key,
+            overlay_rebalance_on_signal_only=overlay_rebalance_signal_key,
         )
         if key in completed:
             logger.info("Skipping completed row %s/%s: %s.", idx, len(combos), key)
@@ -253,6 +276,9 @@ def main() -> None:
             overlay_sideways_key,
             overlay_bear_key,
             overlay_drawdown_key,
+            overlay_ma_window_key,
+            overlay_momentum_window_key,
+            overlay_rebalance_signal_key,
         )
         bt_config.update(
             {
@@ -305,6 +331,9 @@ def main() -> None:
             "overlay_sideways_exposure": overlay_sideways_key,
             "overlay_bear_exposure": overlay_bear_key,
             "overlay_drawdown_cut": overlay_drawdown_key,
+            "overlay_ma_window": overlay_ma_window_key,
+            "overlay_momentum_window": overlay_momentum_window_key,
+            "overlay_rebalance_on_signal_only": overlay_rebalance_signal_key,
             "bull_exposure": bull_exposure,
             "sideways_exposure": sideways_exposure,
             "bear_exposure": bear_exposure,
@@ -319,6 +348,7 @@ def main() -> None:
         row.update(_target_quality_fields(result.metrics, yearly, yearly_coverage, quality, args.target_annual_return, args.drawdown_limit))
         rows = pd.concat([rows, pd.DataFrame([row])], ignore_index=True)
         rows.to_csv(output_path, index=False, encoding="utf-8-sig")
+        completed.add(key)
         logger.info(
             "Saved row %s: annual_return=%.4f max_drawdown=%.4f sharpe=%.4f meets_target=%s.",
             idx,
@@ -389,10 +419,15 @@ def _equity_overlay_state(
     sideways_exposure: float,
     bear_exposure: float,
     drawdown_cut: float,
-) -> tuple[str, float, float, float]:
+    ma_window: int,
+    momentum_window: int,
+    rebalance_on_signal_only: bool,
+) -> tuple[str, float, float, float, int, int, bool]:
     normalized = str(mode).strip().lower()
     if normalized == "disabled":
-        return "disabled", 1.0, 1.0, 0.0
+        return "disabled", 1.0, 1.0, 0.0, 0, 0, False
+    if normalized == "config":
+        return "config", 1.0, 1.0, 0.0, 0, 0, False
     if normalized not in {"config", "enabled"}:
         raise ValueError(f"Unsupported equity overlay mode: {mode}")
     return (
@@ -400,6 +435,9 @@ def _equity_overlay_state(
         max(0.0, min(float(sideways_exposure), 1.0)),
         max(0.0, min(float(bear_exposure), 1.0)),
         abs(float(drawdown_cut)),
+        max(1, int(ma_window)),
+        max(1, int(momentum_window)),
+        _bool_value(rebalance_on_signal_only),
     )
 
 
@@ -409,6 +447,9 @@ def _with_equity_overlay_overrides(
     sideways_exposure: float,
     bear_exposure: float,
     drawdown_cut: float,
+    ma_window: int,
+    momentum_window: int,
+    rebalance_on_signal_only: bool,
 ) -> dict[str, Any]:
     result = dict(bt_config)
     if mode == "config":
@@ -423,6 +464,9 @@ def _with_equity_overlay_overrides(
             "sideways_exposure": sideways_exposure,
             "bear_exposure": bear_exposure,
             "drawdown_cut": drawdown_cut,
+            "ma_window": ma_window,
+            "momentum_window": momentum_window,
+            "rebalance_on_signal_only": rebalance_on_signal_only,
         }
     )
     result["equity_overlay"] = overlay
@@ -530,38 +574,10 @@ def _combo_key(
     bull_defensive_weight: float,
     sideways_defensive_weight: float,
     bear_defensive_weight: float,
-) -> tuple[
-    str,
-    str,
-    float,
-    int,
-    int,
-    int,
-    float | None,
-    bool,
-    float | None,
-    float | None,
-    float | None,
-    int,
-    float,
-    float,
-    bool,
-    float | None,
-    float,
-    float | None,
-    str,
-    float,
-    float,
-    float,
-    str,
-    float,
-    float,
-    float,
-    float | None,
-    float,
-    float,
-    float,
-]:
+    overlay_ma_window: int = 0,
+    overlay_momentum_window: int = 0,
+    overlay_rebalance_on_signal_only: bool = False,
+) -> tuple[Any, ...]:
     return (
         str(factor_group).strip().lower(),
         str(liquidity_side).strip().lower(),
@@ -593,6 +609,9 @@ def _combo_key(
         round(float(bull_defensive_weight), 6),
         round(float(sideways_defensive_weight), 6),
         round(float(bear_defensive_weight), 6),
+        int(overlay_ma_window),
+        int(overlay_momentum_window),
+        _bool_value(overlay_rebalance_on_signal_only),
     )
 
 
@@ -602,42 +621,7 @@ def _optional_key(value: object) -> float | None:
     return round(float(value), 6)
 
 
-def _completed_keys(
-    output_path: Path,
-) -> set[
-    tuple[
-        str,
-        str,
-        float,
-        int,
-        int,
-        int,
-        float | None,
-        bool,
-        float | None,
-        float | None,
-        float | None,
-        int,
-        float,
-        float,
-        bool,
-        float | None,
-        float,
-        float | None,
-        str,
-        float,
-        float,
-        float,
-        str,
-        float,
-        float,
-        float,
-        float | None,
-        float,
-        float,
-        float,
-    ]
-]:
+def _completed_keys(output_path: Path) -> set[tuple[Any, ...]]:
     frame = _read_existing(output_path)
     if frame.empty:
         return set()
@@ -664,6 +648,9 @@ def _completed_keys(
         "overlay_sideways_exposure",
         "overlay_bear_exposure",
         "overlay_drawdown_cut",
+        "overlay_ma_window",
+        "overlay_momentum_window",
+        "overlay_rebalance_on_signal_only",
         "defensive_timing",
         "bull_exposure",
         "sideways_exposure",
@@ -707,6 +694,9 @@ def _completed_keys(
             row["bull_defensive_weight"],
             row["sideways_defensive_weight"],
             row["bear_defensive_weight"],
+            overlay_ma_window=row["overlay_ma_window"],
+            overlay_momentum_window=row["overlay_momentum_window"],
+            overlay_rebalance_on_signal_only=row["overlay_rebalance_on_signal_only"],
         )
         for _, row in frame.iterrows()
     }
