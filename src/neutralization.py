@@ -16,7 +16,11 @@ def load_industry_map(path: str | Path) -> pd.Series:
     frame = pd.read_csv(file_path)
     if "ts_code" not in frame.columns or "industry" not in frame.columns:
         return pd.Series(dtype=object, name="industry")
-    industry = frame.set_index(frame["ts_code"].astype(str).str.upper())["industry"].fillna("UNKNOWN").astype(str)
+    clean = frame.copy()
+    clean["ts_code"] = clean["ts_code"].map(_normalize_instrument)
+    clean = clean[clean["ts_code"] != ""]
+    clean = clean.drop_duplicates("ts_code", keep="last")
+    industry = clean.set_index("ts_code")["industry"].fillna("UNKNOWN").astype(str)
     return industry.rename("industry")
 
 
@@ -29,8 +33,10 @@ def load_daily_basic(path: str | Path) -> pd.DataFrame:
         return pd.DataFrame()
     frame = frame.copy()
     frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce").dt.normalize()
-    frame["ts_code"] = frame["ts_code"].astype(str).str.upper()
+    frame["ts_code"] = frame["ts_code"].map(_normalize_instrument)
     frame = frame.dropna(subset=["trade_date", "ts_code"])
+    frame = frame[frame["ts_code"] != ""]
+    frame = frame.drop_duplicates(["trade_date", "ts_code"], keep="last")
     return frame.set_index(["trade_date", "ts_code"]).sort_index()
 
 
@@ -67,10 +73,12 @@ def neutralize_score_panel(
     for date, daily_scores in scores.groupby(level=0, sort=True):
         daily = daily_scores.droplevel(0).astype(float).copy()
         neutralized = daily.copy()
-        normalized_symbols = neutralized.index.astype(str).str.upper()
+        normalized_symbols = pd.Index([_normalize_instrument(value) for value in neutralized.index])
         if industry_enabled and not industry_map.empty:
             normalized_industry = industry_map.copy()
-            normalized_industry.index = normalized_industry.index.astype(str).str.upper()
+            normalized_industry.index = [_normalize_instrument(value) for value in normalized_industry.index]
+            normalized_industry = normalized_industry[normalized_industry.index != ""]
+            normalized_industry = normalized_industry[~normalized_industry.index.duplicated(keep="last")]
             groups = pd.Series(normalized_symbols, index=neutralized.index).map(normalized_industry).fillna("UNKNOWN")
             neutralized = neutralized - neutralized.groupby(groups).transform("mean")
             industry_dates += 1
@@ -83,7 +91,9 @@ def neutralize_score_panel(
                 basics = pd.DataFrame()
             if not basics.empty:
                 basics = basics.copy()
-                basics.index = basics.index.astype(str).str.upper()
+                basics.index = [_normalize_instrument(value) for value in basics.index]
+                basics = basics[basics.index != ""]
+                basics = basics[~basics.index.duplicated(keep="last")]
                 cap = pd.to_numeric(basics[market_cap_field].reindex(normalized_symbols), errors="coerce")
                 cap.index = neutralized.index
                 residual = _market_cap_residual(neutralized, cap, min_obs)
@@ -106,6 +116,12 @@ def neutralize_score_panel(
         "market_cap_dates": market_cap_dates,
         "market_cap_field": market_cap_field,
     }
+
+
+def _normalize_instrument(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
 
 
 def _market_cap_residual(scores: pd.Series, market_cap: pd.Series, min_obs: int) -> pd.Series | None:
