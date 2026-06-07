@@ -587,20 +587,13 @@ def _market_cap_neutralize_label_frame(
         names = list(basics.index.names)
         date_level = names.index("trade_date") if "trade_date" in names else 0
         symbol_level = names.index("ts_code") if "ts_code" in names else 1
-        basics.index = pd.MultiIndex.from_arrays(
-            [
-                pd.to_datetime(basics.index.get_level_values(date_level)).normalize(),
-                [_normalize_instrument(value) for value in basics.index.get_level_values(symbol_level)],
-            ],
-            names=["datetime", "instrument"],
+        basics = _normalize_daily_basic_frame(
+            basics,
+            basics.index.get_level_values(date_level),
+            basics.index.get_level_values(symbol_level),
         )
     elif "trade_date" in basics.columns and "ts_code" in basics.columns:
-        basics = basics.copy()
-        basics["trade_date"] = pd.to_datetime(basics["trade_date"], errors="coerce").dt.normalize()
-        basics["ts_code"] = [_normalize_instrument(value) for value in basics["ts_code"]]
-        basics = basics.dropna(subset=["trade_date", "ts_code"]).set_index(["trade_date", "ts_code"])
-        basics = basics[basics.index.get_level_values("ts_code") != ""]
-        basics.index = basics.index.set_names(["datetime", "instrument"])
+        basics = _normalize_daily_basic_frame(basics, basics["trade_date"], basics["ts_code"])
     else:
         return labels
 
@@ -617,6 +610,44 @@ def _market_cap_neutralize_label_frame(
         if residual is not None:
             result.loc[date] = residual.to_numpy(dtype=float)
     return result
+
+
+def _normalize_daily_basic_frame(
+    basics: pd.DataFrame,
+    dates: object,
+    instruments: object,
+) -> pd.DataFrame:
+    raw_dates = _parse_datetime_values(dates)
+    normalized_instruments = [_normalize_instrument(value) for value in instruments]
+    rows = pd.DataFrame(
+        {
+            "date": raw_dates.dt.normalize(),
+            "raw_date": raw_dates,
+            "instrument": normalized_instruments,
+            "position": range(len(basics)),
+        }
+    )
+    rows = rows[rows["date"].notna() & (rows["instrument"] != "")]
+    if rows.empty:
+        result = basics.iloc[0:0].copy()
+        result.index = pd.MultiIndex.from_arrays([[], []], names=["datetime", "instrument"])
+        return result
+    rows = rows.sort_values(
+        ["date", "instrument", "raw_date", "position"],
+        kind="mergesort",
+        na_position="first",
+    ).drop_duplicates(["date", "instrument"], keep="last")
+    result = basics.iloc[rows["position"].to_numpy()].copy()
+    result.index = pd.MultiIndex.from_arrays([rows["date"], rows["instrument"]], names=["datetime", "instrument"])
+    return result.sort_index()
+
+
+def _parse_datetime_values(values: object) -> pd.Series:
+    parsed = pd.to_datetime(values, errors="coerce")
+    if pd.Series(parsed).isna().any():
+        mixed = pd.to_datetime(values, errors="coerce", format="mixed")
+        parsed = pd.Series(parsed).where(pd.Series(parsed).notna(), pd.Series(mixed))
+    return pd.Series(parsed)
 
 
 def _residualize_row_by_market_cap(row: pd.Series, cap: pd.Series, min_obs: int) -> pd.Series | None:

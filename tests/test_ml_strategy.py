@@ -162,6 +162,28 @@ class MLStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(float(industry_neutralized[["d", " E ", "f"]].mean(axis=1).iloc[0]), 0.0)
         self.assertTrue((cap_neutralized.abs() < 1e-12).all(axis=None))
 
+    def test_training_label_neutralization_uses_latest_intraday_market_cap(self) -> None:
+        cap_values = {"A": 10.0, "B": 20.0, "C": 40.0}
+        labels = pd.DataFrame(
+            {symbol: [float(np.log1p(cap))] for symbol, cap in cap_values.items()},
+            index=pd.to_datetime(["2024-01-02"]),
+        )
+        daily_basic = pd.DataFrame(
+            {
+                "trade_date": ["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-02", "2024-01-02"],
+                "ts_code": ["A", "A", "B", "C"],
+                "circ_mv": [10.0, 999.0, 20.0, 40.0],
+            }
+        )
+
+        neutralized = _neutralize_label_frame(
+            labels,
+            {"training_neutralization": {"enabled": True, "industry": False, "market_cap": True, "min_obs": 3}},
+            daily_basic=daily_basic,
+        )
+
+        self.assertTrue((neutralized.abs() < 1e-12).all(axis=None))
+
     def test_ranking_objective_prepares_query_groups_and_relevance_labels(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"])
         instruments = ["A", "B", "A", "B"]
