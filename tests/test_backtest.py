@@ -47,6 +47,29 @@ class BacktestTests(unittest.TestCase):
 
         self.assertTrue((result.trades["side"] == "BUY").any())
 
+    def test_run_backtest_normalizes_intraday_price_timestamps_to_trade_dates(self) -> None:
+        dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-03 15:00"])
+        stock = "000001.SZ"
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([("2024-01-02", stock)], names=["datetime", "instrument"]),
+            name="score",
+        )
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(scores, prices, "2024-01-02", "2024-01-03", {"initial_capital": 100000, "top_n": 1})
+
+        buys = result.trades[result.trades["side"] == "BUY"]
+        self.assertFalse(buys.empty)
+        self.assertEqual(pd.Timestamp(buys.iloc[0]["date"]), pd.Timestamp("2024-01-03"))
+        self.assertEqual(result.equity_curve.index.tolist(), [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")])
+
     def test_run_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         scores = pd.Series(

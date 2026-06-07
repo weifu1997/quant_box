@@ -548,7 +548,7 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
 
 def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
     prices = price_df
-    normalized_index = pd.to_datetime(prices.index)
+    normalized_index = pd.to_datetime(prices.index).normalize()
     if isinstance(prices.columns, pd.MultiIndex):
         if prices.columns.nlevels != 2:
             raise ValueError("price_df MultiIndex columns must be field/instrument.")
@@ -567,6 +567,8 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
             prices = prices.copy(deep=False)
             prices.index = normalized_index
             prices.columns = normalized_columns
+        if prices.index.has_duplicates:
+            prices = prices.loc[~prices.index.duplicated(keep="last")]
         prices = prices.loc[:, prices.columns.get_level_values("instrument") != ""]
         if prices.columns.has_duplicates:
             prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
@@ -579,6 +581,8 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
 
     prices = prices.copy(deep=False)
     prices.index = normalized_index
+    if prices.index.has_duplicates:
+        prices = prices.loc[~prices.index.duplicated(keep="last")]
     prices.columns = pd.MultiIndex.from_product(
         [["close"], [_normalize_instrument(value) for value in prices.columns]],
         names=["field", "instrument"],
