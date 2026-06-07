@@ -7,6 +7,7 @@ import weakref
 import numpy as np
 import pandas as pd
 
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str], dict[str, pd.DataFrame]]] = {}
 
 
@@ -230,6 +231,9 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
             return prices.sort_index()
         return prices
 
+    if _looks_like_field_table(prices.columns):
+        raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
+
     result = prices.copy(deep=False)
     result.index = normalized_index
     result.columns = pd.MultiIndex.from_product(
@@ -254,6 +258,11 @@ def _normalize_price_field(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().lower()
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:

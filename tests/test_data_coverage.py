@@ -27,6 +27,20 @@ class DataCoverageTests(unittest.TestCase):
         self.assertEqual(summary["gap_dates"], 1)
         self.assertAlmostEqual(float(summary["min_coverage"]), 0.5)
 
+    def test_price_coverage_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        prices = pd.DataFrame(
+            {
+                "open": [10.0, 10.1],
+                "close": [10.0, 10.2],
+                "volume": [1000.0, 1200.0],
+            },
+            index=dates,
+        )
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            price_coverage_summary(prices, "2024-01-02", "2024-01-03")
+
     def test_skipped_months_filters_non_empty_reasons(self) -> None:
         diagnostics = pd.DataFrame(
             [

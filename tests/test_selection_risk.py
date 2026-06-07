@@ -56,6 +56,21 @@ class SelectionRiskTests(unittest.TestCase):
 
         self.assertEqual(float(filtered.loc["000001.SZ"]), 1.0)
 
+    def test_filter_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        prices = pd.DataFrame(
+            {
+                "open": [10.0, 10.1],
+                "close": [10.0, 10.1],
+                "volume": [1000.0, 1000.0],
+            },
+            index=dates,
+        )
+        scores = pd.Series([1.0], index=["000001.SZ"], name="score")
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            filter_scores_by_selection_risk(scores, prices, "2024-01-03", _config())
+
     def test_growth_board_limit_down_uses_growth_threshold_when_star_threshold_differs(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         stock = "300001.SZ"

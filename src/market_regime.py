@@ -13,6 +13,7 @@ REGIME_BULL = "bull"
 REGIME_BEAR = "bear"
 REGIME_SIDEWAYS = "sideways"
 REGIME_STATES = {REGIME_BULL, REGIME_BEAR, REGIME_SIDEWAYS}
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 def market_regime_enabled(config: dict[str, Any]) -> bool:
@@ -311,10 +312,14 @@ def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
         close = price_df.loc[:, fields == "close"].copy()
         close.columns = close.columns.get_level_values(-1).astype(str)
         return close
-    lower_columns = {str(column).strip().lower(): column for column in price_df.columns}
-    if "close" in lower_columns:
-        return price_df[[lower_columns["close"]]]
+    if _looks_like_field_table(price_df.columns):
+        raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
     return price_df
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _load_hs300_symbols(path_value: str | Path | None) -> set[str]:

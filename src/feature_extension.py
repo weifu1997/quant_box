@@ -250,7 +250,9 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
             return pd.DataFrame(index=prices.index)
         frame = prices.loc[:, fields == field].copy()
         frame.columns = [_normalize_instrument(value) for value in frame.columns.get_level_values(-1)]
-    elif field == "close" and not _looks_like_field_table(prices.columns):
+    elif _looks_like_field_table(prices.columns):
+        raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
+    elif field == "close":
         frame = prices.copy()
     elif field in {str(column).strip().lower() for column in prices.columns}:
         columns = prices.columns.astype(str).str.strip().str.lower()
@@ -268,7 +270,7 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
 
 def _looks_like_field_table(columns: pd.Index) -> bool:
     labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and "close" in labels and labels.issubset(PRICE_FIELD_NAMES)
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_NAMES)
 
 
 def _normalize_instrument(value: object) -> str:

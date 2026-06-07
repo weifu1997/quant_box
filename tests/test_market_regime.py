@@ -94,6 +94,20 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(reporting.name, "reporting_regime")
         self.assertIn(REGIME_BULL, set(reporting.iloc[:4]))
 
+    def test_detect_market_regime_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=6)
+        prices = pd.DataFrame(
+            {
+                "open": [10.0, 10.1, 10.2, 10.3, 10.4, 10.5],
+                "close": [10.0, 10.2, 10.4, 10.6, 10.8, 11.0],
+                "volume": [1000.0] * 6,
+            },
+            index=dates,
+        )
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            detect_market_regime(prices, {"market_regime": {"enabled": True}})
+
     def test_defensive_exposure_schedule_maps_regimes_to_total_exposure(self) -> None:
         dates = pd.bdate_range("2024-01-02", periods=3)
         regimes = pd.Series([REGIME_BULL, REGIME_SIDEWAYS, REGIME_BEAR], index=dates)
