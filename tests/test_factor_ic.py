@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
+from src.factor_ic import calculate_factor_ic, make_forward_returns, make_ic_weights, summarize_ic
 
 
 class FactorICTests(unittest.TestCase):
@@ -106,6 +106,21 @@ class FactorICTests(unittest.TestCase):
 
         self.assertEqual(ic.index.to_list(), factor_dates.to_list())
         self.assertTrue(ic["F1"].notna().all())
+
+    def test_make_forward_returns_uses_last_intraday_close_per_trade_date(self) -> None:
+        prices = pd.DataFrame(
+            {
+                "A": [10.0, 30.0, 20.0],
+                "B": [20.0, 10.0, 40.0],
+            },
+            index=pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"]),
+        )
+
+        returns = make_forward_returns(prices)
+
+        by_code = returns.xs(pd.Timestamp("2024-01-02"), level="datetime")
+        self.assertAlmostEqual(float(by_code.loc["A"]), 1.0)
+        self.assertAlmostEqual(float(by_code.loc["B"]), 1.0)
 
     def test_calculate_factor_ic_deduplicates_normalized_factor_instruments(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])

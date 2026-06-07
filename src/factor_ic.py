@@ -290,7 +290,19 @@ def _close_prices(price_df: pd.DataFrame) -> pd.DataFrame:
 
 def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
     result = close.copy()
-    result.index = pd.to_datetime(result.index).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(result.index, errors="coerce"))
+    valid_dates = ~pd.isna(raw_dates)
+    if not valid_dates.all():
+        result = result.loc[valid_dates].copy()
+        raw_dates = raw_dates[valid_dates]
+    if result.empty:
+        return result
+
+    order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+    if not np.array_equal(order, np.arange(len(raw_dates))):
+        result = result.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    result.index = raw_dates.normalize()
     result.columns = [_normalize_instrument(value) for value in result.columns]
     result = result.loc[:, result.columns != ""]
     if result.columns.has_duplicates:
