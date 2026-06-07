@@ -56,6 +56,23 @@ class SelectionRiskTests(unittest.TestCase):
 
         self.assertEqual(float(filtered.loc["000001.SZ"]), 1.0)
 
+    def test_filter_uses_last_intraday_price_per_trade_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"])
+        prices = pd.concat(
+            {
+                "open": pd.DataFrame({"A": [10.0, None, 10.1]}, index=dates),
+                "close": pd.DataFrame({"A": [10.0, None, 10.1]}, index=dates),
+                "low": pd.DataFrame({"A": [10.0, None, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, None, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+        scores = pd.Series([1.0], index=["A"], name="score")
+
+        filtered = filter_scores_by_selection_risk(scores, prices, "2024-01-03", _config())
+
+        self.assertEqual(float(filtered.loc["A"]), 1.0)
+
     def test_filter_rejects_flat_ohlcv_price_frame(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         prices = pd.DataFrame(

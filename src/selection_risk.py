@@ -211,7 +211,17 @@ def _config_value(config: dict[str, Any], key: str, default: Any) -> Any:
 
 
 def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
-    normalized_index = pd.to_datetime(prices.index).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
+    valid_dates = ~pd.isna(raw_dates)
+    if not valid_dates.all():
+        prices = prices.loc[valid_dates].copy(deep=False)
+        raw_dates = raw_dates[valid_dates]
+
+    order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+    if not np.array_equal(order, np.arange(len(raw_dates))):
+        prices = prices.iloc[order].copy(deep=False)
+        raw_dates = raw_dates[order]
+    normalized_index = raw_dates.normalize()
     if isinstance(prices.columns, pd.MultiIndex):
         normalized_columns = pd.MultiIndex.from_arrays(
             [
@@ -228,6 +238,8 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
             prices = prices.copy(deep=False)
             prices.index = normalized_index
             prices.columns = normalized_columns
+        if prices.index.has_duplicates:
+            prices = prices.loc[~prices.index.duplicated(keep="last")]
         prices = prices.loc[:, prices.columns.get_level_values("instrument") != ""]
         if prices.columns.has_duplicates:
             prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
@@ -240,6 +252,8 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
 
     result = prices.copy(deep=False)
     result.index = normalized_index
+    if result.index.has_duplicates:
+        result = result.loc[~result.index.duplicated(keep="last")]
     result.columns = pd.MultiIndex.from_product(
         [["close"], [_normalize_instrument(value) for value in result.columns]],
         names=["field", "instrument"],
