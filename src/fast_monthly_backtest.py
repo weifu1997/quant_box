@@ -9,6 +9,9 @@ import pandas as pd
 from src.strategy import select_stocks
 
 
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
+
+
 @dataclass
 class FastBacktestResult:
     equity_curve: pd.Series
@@ -204,18 +207,16 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
 def _price_frame(price_df: pd.DataFrame, field: str = "close") -> pd.DataFrame:
     if price_df.empty:
         return pd.DataFrame()
-    field = str(field or "close").lower()
+    field = str(field or "close").strip().lower()
     if isinstance(price_df.columns, pd.MultiIndex):
-        fields = price_df.columns.get_level_values(0).astype(str).str.lower()
+        fields = price_df.columns.get_level_values(0).astype(str).str.strip().str.lower()
         selected = price_df.loc[:, fields == field].copy()
         if selected.empty and field != "close":
             selected = price_df.loc[:, fields == "close"].copy()
         selected.columns = [_normalize_instrument(value) for value in selected.columns.get_level_values(-1)]
-    elif field in price_df.columns:
-        selected = price_df[[field]].copy()
-    elif "close" in price_df.columns:
-        selected = price_df[["close"]].copy()
     else:
+        if _looks_like_field_table(price_df.columns):
+            raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
         selected = price_df.copy()
         selected.columns = [_normalize_instrument(value) for value in selected.columns]
     selected.index = pd.to_datetime(selected.index).normalize()
@@ -232,6 +233,11 @@ def _normalize_instrument(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
+
+
+def _looks_like_field_table(columns: pd.Index) -> bool:
+    labels = {str(column).strip().lower() for column in columns}
+    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _next_price_date(price_dates: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp | None:

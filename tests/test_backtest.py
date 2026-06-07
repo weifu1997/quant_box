@@ -68,6 +68,25 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(buys.empty)
         self.assertEqual(buys.iloc[0]["instrument"], "000001.SZ")
 
+    def test_run_backtest_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(dates[0], "000001.SZ")], names=["datetime", "instrument"]),
+            name="score",
+        )
+        prices = pd.DataFrame(
+            {
+                "open": [10.0, 10.5],
+                "close": [10.2, 10.8],
+                "volume": [1000.0, 1200.0],
+            },
+            index=dates,
+        )
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            run_backtest(scores, prices, "2024-01-02", "2024-01-03", {"initial_capital": 100000, "top_n": 1})
+
     def test_calculate_metrics_sortino_uses_downside_deviation_over_all_returns(self) -> None:
         equity = pd.Series(
             [100.0, 110.0, 104.5, 104.5],

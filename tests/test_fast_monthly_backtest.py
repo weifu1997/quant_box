@@ -70,6 +70,31 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertFalse(result.weights.empty)
         self.assertEqual(result.weights["instrument"].tolist(), ["000001.SZ"])
 
+    def test_fast_period_backtest_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
+        prices = pd.DataFrame(
+            {
+                "open": [10.0, 10.5, 11.0],
+                "close": [10.2, 10.8, 11.2],
+                "volume": [1000.0, 1200.0, 1300.0],
+            },
+            index=dates,
+        )
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(dates[0], "000001.SZ")], names=["datetime", "instrument"]),
+            name="score",
+        )
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            run_fast_period_backtest(
+                scores,
+                prices,
+                "2024-01-01",
+                "2024-02-28",
+                {"initial_capital": 100.0, "top_n": 1, "max_turnover": 1},
+            )
+
     def test_fast_period_backtest_respects_zero_exposure(self) -> None:
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
