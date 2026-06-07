@@ -24,7 +24,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
             pd.DataFrame(
                 {
                     "trade_date": ["2024-01-03", "2024-01-03"],
-                    "ts_code": ["000001.SZ", "600519.SH"],
+                    "ts_code": [" 000001.sz ", "600519.SH"],
                     "circ_mv": [100.0, 10000.0],
                 }
             ).to_parquet(daily_basic_file)
@@ -57,9 +57,9 @@ class ResearchDiagnosticsTests(unittest.TestCase):
                     {
                         "date": "2024-01-03",
                         "instrument": "000001.SZ",
-                        "side": "SELL",
-                        "status": "filled",
-                        "reason": "",
+                        "side": " sell ",
+                        "status": " FILLED ",
+                        "reason": " ",
                         "shares": 100,
                         "price": 10.0,
                         "cash": 1000.0,
@@ -73,7 +73,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
                         "date": "2024-01-03",
                         "instrument": "600519.SH",
                         "side": "SELL",
-                        "status": "risk_exit",
+                        "status": " RISK_EXIT ",
                         "reason": "stop_loss",
                         "shares": 100,
                         "price": 9.0,
@@ -88,7 +88,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
                         "date": "2024-01-03",
                         "instrument": "600519.SH",
                         "side": "SELL",
-                        "status": "blocked",
+                        "status": " BLOCKED ",
                         "reason": "not_sellable",
                         "shares": 100,
                         "price": 0.0,

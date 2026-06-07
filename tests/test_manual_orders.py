@@ -416,8 +416,8 @@ class ManualOrdersTests(unittest.TestCase):
         current = pd.DataFrame({"instrument": ["000001.SZ", "600519.SH"], "shares": [1000, 300]})
         fills = pd.DataFrame(
             [
-                {"instrument": "000001.SZ", "side": "BUY", "executed_shares": 200, "fill_status": "FILLED"},
-                {"instrument": "600519.SH", "side": "SELL", "executed_shares": 100, "fill_status": "PARTIAL"},
+                {"instrument": "000001.SZ", "side": "BUY", "executed_shares": 200, "fill_status": " filled "},
+                {"instrument": "600519.SH", "side": "SELL", "executed_shares": 100, "fill_status": " partial "},
                 {"instrument": "000002.SZ", "side": "BUY", "executed_shares": 500, "fill_status": "CANCELLED"},
             ]
         )

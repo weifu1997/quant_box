@@ -275,9 +275,9 @@ def _max_drawdown_trade_tables(trades: pd.DataFrame, peak_date: object, trough_d
         return {}
 
     frame["instrument"] = _column_or_default(frame, "instrument", "").map(_normalize_instrument)
-    frame["side"] = _column_or_default(frame, "side", "").fillna("").astype(str).str.upper()
-    frame["status"] = _column_or_default(frame, "status", "").fillna("").astype(str).str.lower()
-    frame["reason"] = _column_or_default(frame, "reason", "").fillna("").astype(str).replace("", "rebalance")
+    frame["side"] = _normalize_trade_side(_column_or_default(frame, "side", ""))
+    frame["status"] = _normalize_trade_status(_column_or_default(frame, "status", ""))
+    frame["reason"] = _normalize_trade_reason(_column_or_default(frame, "reason", "")).replace("", "rebalance")
     frame["shares"] = pd.to_numeric(_column_or_default(frame, "shares", 0.0), errors="coerce").fillna(0.0)
     frame["price"] = pd.to_numeric(_column_or_default(frame, "price", 0.0), errors="coerce").fillna(0.0)
     frame["cash"] = pd.to_numeric(_column_or_default(frame, "cash", 0.0), errors="coerce").fillna(0.0)
@@ -380,8 +380,8 @@ def _trade_counts_between(trades: pd.DataFrame, start_date: pd.Timestamp, end_da
     frame = trades.copy()
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.normalize()
     frame = frame[(frame["date"] >= pd.Timestamp(start_date).normalize()) & (frame["date"] <= pd.Timestamp(end_date).normalize())]
-    side = frame.get("side", pd.Series(dtype=str)).fillna("").astype(str).str.upper()
-    status = frame.get("status", pd.Series(dtype=str)).fillna("").astype(str).str.lower()
+    side = _normalize_trade_side(frame.get("side", pd.Series(dtype=str)))
+    status = _normalize_trade_status(frame.get("status", pd.Series(dtype=str)))
     return {
         "trades_peak_to_trough": int(len(frame)),
         "buy_trades_peak_to_trough": int((side == "BUY").sum()),
@@ -529,9 +529,9 @@ def _regime_trade_diagnostics(
     if frame.empty:
         return {"enabled": False, "issues": ["regime_trade_overlap_empty"]}, {}
 
-    frame["side"] = _column_or_default(frame, "side", "").fillna("").astype(str).str.upper()
-    frame["status"] = _column_or_default(frame, "status", "").fillna("").astype(str).str.lower()
-    frame["reason"] = _column_or_default(frame, "reason", "").fillna("").astype(str).replace("", "rebalance")
+    frame["side"] = _normalize_trade_side(_column_or_default(frame, "side", ""))
+    frame["status"] = _normalize_trade_status(_column_or_default(frame, "status", ""))
+    frame["reason"] = _normalize_trade_reason(_column_or_default(frame, "reason", "")).replace("", "rebalance")
     frame["cash"] = pd.to_numeric(_column_or_default(frame, "cash", 0.0), errors="coerce").fillna(0.0)
     frame["shares"] = pd.to_numeric(_column_or_default(frame, "shares", 0.0), errors="coerce").fillna(0.0)
     frame["price"] = pd.to_numeric(_column_or_default(frame, "price", 0.0), errors="coerce").fillna(0.0)
@@ -592,7 +592,7 @@ def _cost_attribution(trades: pd.DataFrame, equity: pd.Series) -> dict[str, Any]
     summary["total_trade_cost"] = total
     summary["cost_drag_on_initial_equity"] = float(total / initial) if initial > 0 else None
     if not trades.empty and "status" in trades.columns:
-        summary["trade_status_counts"] = trades["status"].astype(str).value_counts().to_dict()
+        summary["trade_status_counts"] = _normalize_trade_status(trades["status"]).value_counts().to_dict()
     if not trades.empty and "capacity_warning" in trades.columns:
         summary["capacity_warning_count"] = int(pd.Series(trades["capacity_warning"]).astype(bool).sum())
     return summary
@@ -609,9 +609,9 @@ def _turnover_attribution(
         return {"enabled": False, "issues": ["trades_unavailable"]}, {}
 
     frame = trades.copy()
-    frame["side"] = frame["side"].astype(str).str.upper()
-    frame["status"] = _column_or_default(frame, "status", "").fillna("").astype(str).str.lower()
-    frame["reason"] = _column_or_default(frame, "reason", "").fillna("").astype(str)
+    frame["side"] = _normalize_trade_side(frame["side"])
+    frame["status"] = _normalize_trade_status(_column_or_default(frame, "status", ""))
+    frame["reason"] = _normalize_trade_reason(_column_or_default(frame, "reason", ""))
     frame["instrument"] = _column_or_default(frame, "instrument", "").map(_normalize_instrument)
     frame["date"] = pd.to_datetime(_column_or_default(frame, "date", pd.NaT), errors="coerce").dt.normalize()
     frame["shares"] = pd.to_numeric(_column_or_default(frame, "shares", 0.0), errors="coerce").fillna(0.0)
@@ -994,9 +994,13 @@ def _market_cap_exposure(latest_holdings: pd.DataFrame, latest_date: pd.Timestam
         return pd.DataFrame()
     frame = daily_basic.copy()
     frame["trade_date"] = pd.to_datetime(frame["trade_date"], errors="coerce").dt.normalize()
-    frame["ts_code"] = frame["ts_code"].astype(str).str.upper()
+    frame["ts_code"] = frame["ts_code"].map(_normalize_instrument)
     frame[market_cap_field] = pd.to_numeric(frame[market_cap_field], errors="coerce")
-    frame = frame[(frame["trade_date"] <= pd.Timestamp(latest_date).normalize()) & frame[market_cap_field].notna()]
+    frame = frame[
+        (frame["ts_code"] != "")
+        & (frame["trade_date"] <= pd.Timestamp(latest_date).normalize())
+        & frame[market_cap_field].notna()
+    ]
     if frame.empty:
         return pd.DataFrame()
     last_basic_date = frame["trade_date"].max()
@@ -1190,6 +1194,18 @@ def _normalize_instrument(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
+
+
+def _normalize_trade_side(values: pd.Series) -> pd.Series:
+    return values.fillna("").astype(str).str.strip().str.upper()
+
+
+def _normalize_trade_status(values: pd.Series) -> pd.Series:
+    return values.fillna("").astype(str).str.strip().str.lower()
+
+
+def _normalize_trade_reason(values: pd.Series) -> pd.Series:
+    return values.fillna("").astype(str).str.strip()
 
 
 def _json_safe(value: Any) -> Any:

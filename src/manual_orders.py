@@ -305,7 +305,7 @@ def apply_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFr
     issues = validate_fill_feedback(current_holdings, fills)
     if issues:
         raise ValueError("Invalid fill feedback: " + ",".join(issues[:10]))
-    status = fills.get("fill_status", pd.Series("FILLED", index=fills.index)).fillna("").astype(str).str.upper()
+    status = fills.get("fill_status", pd.Series("FILLED", index=fills.index)).fillna("").astype(str).str.strip().str.upper()
     valid_status = status.isin({"FILLED", "PARTIAL"})
     for _, row in fills[valid_status].iterrows():
         instrument = _normalize_instrument(row.get("instrument", ""))
