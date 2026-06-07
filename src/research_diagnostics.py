@@ -11,6 +11,9 @@ from src.config_loader import resolve_path
 from src.market_regime import detect_reporting_regime
 
 
+PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
+
+
 def build_research_diagnostics(
     equity_curve: pd.Series | pd.DataFrame,
     holdings: pd.DataFrame,
@@ -1102,6 +1105,9 @@ def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
         frame = price_df.loc[:, fields == field].copy()
         frame.columns = [_normalize_instrument(value) for value in frame.columns.get_level_values(-1)]
     elif field == "close":
+        column_names = {str(column).strip().lower() for column in price_df.columns}
+        if len(price_df.columns) > 1 and column_names & PRICE_FIELD_COLUMNS:
+            raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
         frame = price_df.copy()
     else:
         return pd.DataFrame(index=price_df.index)

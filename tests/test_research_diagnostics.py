@@ -235,6 +235,27 @@ class ResearchDiagnosticsTests(unittest.TestCase):
         self.assertTrue(diagnostics["holding_attribution"]["enabled"])
         self.assertIn("holding_contributions", tables)
 
+    def test_research_diagnostics_rejects_flat_ohlcv_price_frame(self) -> None:
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+        equity = pd.Series([100.0, 101.0, 103.0], index=dates, name="equity")
+        prices = pd.DataFrame(
+            {
+                "open": [10.0, 10.5, 11.0],
+                "close": [10.2, 10.8, 11.2],
+                "volume": [1000.0, 1200.0, 1300.0],
+            },
+            index=dates,
+        )
+
+        with self.assertRaisesRegex(ValueError, "close-price panel"):
+            build_research_diagnostics(
+                equity,
+                pd.DataFrame(),
+                pd.DataFrame(),
+                prices,
+                {"backtest": {"annual_trading_days": 252}},
+            )
+
     def test_hs300_equal_weight_benchmark_deduplicates_constituent_snapshots(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
