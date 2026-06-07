@@ -6,7 +6,7 @@ import unittest
 
 import pandas as pd
 
-from scripts.run_risk_refine import _combo_key, _completed_keys, _with_timing_overrides
+from scripts.run_risk_refine import _best_rows, _combo_key, _completed_keys, _target_quality_fields, _with_timing_overrides
 
 
 class RunRiskRefineTests(unittest.TestCase):
@@ -72,6 +72,94 @@ class RunRiskRefineTests(unittest.TestCase):
         self.assertEqual(result["defensive_timing"]["bear_exposure"], 0.1)
         self.assertEqual(result["market_regime"]["bear_drawdown_threshold"], 0.08)
         self.assertFalse(config["defensive_timing"]["enabled"])
+
+    def test_target_quality_fields_reject_total_pass_with_weak_year(self) -> None:
+        yearly = pd.DataFrame(
+            [
+                {"year": 2024, "annual_return": 0.12, "max_drawdown": -0.10},
+                {"year": 2025, "annual_return": -0.02, "max_drawdown": -0.18},
+            ]
+        )
+        coverage = pd.DataFrame(
+            [
+                {"year": 2024, "passes_min_days": True},
+                {"year": 2025, "passes_min_days": True},
+            ]
+        )
+
+        fields = _target_quality_fields(
+            {"annual_return": 0.30, "max_drawdown": -0.10},
+            yearly,
+            coverage,
+            {"min_yearly_annual_return": 0.10, "max_yearly_drawdown_limit": -0.20},
+            0.20,
+            -0.20,
+        )
+
+        self.assertGreater(fields["annual_return_gap"], 0)
+        self.assertGreater(fields["drawdown_buffer"], 0)
+        self.assertEqual(fields["year_ann_pass"], 1)
+        self.assertEqual(fields["year_dd_pass"], 2)
+        self.assertFalse(fields["yearly_annual_return_pass"])
+        self.assertFalse(fields["meets_target"])
+
+    def test_target_quality_fields_reject_missing_year_coverage(self) -> None:
+        yearly = pd.DataFrame([{"year": 2024, "annual_return": 0.12, "max_drawdown": -0.10}])
+        coverage = pd.DataFrame(
+            [
+                {"year": 2024, "passes_min_days": True},
+                {"year": 2025, "passes_min_days": True},
+            ]
+        )
+
+        fields = _target_quality_fields(
+            {"annual_return": 0.30, "max_drawdown": -0.10},
+            yearly,
+            coverage,
+            {"min_yearly_annual_return": 0.10, "max_yearly_drawdown_limit": -0.20},
+            0.20,
+            -0.20,
+        )
+
+        self.assertFalse(fields["year_coverage_pass"])
+        self.assertEqual(fields["missing_years"], "2025")
+        self.assertFalse(fields["meets_target"])
+
+    def test_best_rows_prioritizes_yearly_shortfalls(self) -> None:
+        rows = pd.DataFrame(
+            [
+                {
+                    "name": "high_total_bad_year",
+                    "annual_return": 0.50,
+                    "max_drawdown": -0.10,
+                    "min_year_annual_return": -0.05,
+                    "worst_year_drawdown": -0.10,
+                    "min_yearly_annual_return": 0.10,
+                    "max_yearly_drawdown_limit": -0.20,
+                    "year_coverage_pass": True,
+                    "meets_target": False,
+                    "sharpe": 2.0,
+                    "calmar": 5.0,
+                },
+                {
+                    "name": "lower_total_better_year",
+                    "annual_return": 0.18,
+                    "max_drawdown": -0.18,
+                    "min_year_annual_return": 0.09,
+                    "worst_year_drawdown": -0.19,
+                    "min_yearly_annual_return": 0.10,
+                    "max_yearly_drawdown_limit": -0.20,
+                    "year_coverage_pass": True,
+                    "meets_target": False,
+                    "sharpe": 1.0,
+                    "calmar": 1.0,
+                },
+            ]
+        )
+
+        best = _best_rows(rows, 0.20, -0.20)
+
+        self.assertEqual(best.iloc[0]["name"], "lower_total_better_year")
 
 
 if __name__ == "__main__":

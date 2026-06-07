@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from scripts.run_backtest import _requested_factor_columns
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
+from src.data_coverage import build_yearly_equity_coverage
 from src.factor_calculator import load_or_compute_factors
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.scoring import build_strategy_scores
@@ -209,6 +210,8 @@ def main() -> None:
 
         row_start = time.monotonic()
         result = run_backtest(scores, prices, args.start_date, end_date, bt_config)
+        yearly = _yearly_stats(result.equity_curve)
+        yearly_coverage = build_yearly_equity_coverage(result.equity_curve, args.start_date, end_date)
         row = {
             "liquidity_side": score_key[0],
             "liquidity_quantile": liquidity_quantile,
@@ -232,9 +235,7 @@ def main() -> None:
             "seconds": time.monotonic() - row_start,
             **result.metrics,
         }
-        row["annual_return_gap"] = float(row.get("annual_return", 0.0)) - args.target_annual_return
-        row["drawdown_buffer"] = float(row.get("max_drawdown", 0.0)) - args.drawdown_limit
-        row["meets_target"] = bool(row["annual_return_gap"] >= 0 and row["drawdown_buffer"] >= 0)
+        row.update(_target_quality_fields(result.metrics, yearly, yearly_coverage, quality, args.target_annual_return, args.drawdown_limit))
         rows = pd.concat([rows, pd.DataFrame([row])], ignore_index=True)
         rows.to_csv(output_path, index=False, encoding="utf-8-sig")
         logger.info(
@@ -442,14 +443,158 @@ def _read_existing(output_path: Path) -> pd.DataFrame:
 
 def _best_rows(rows: pd.DataFrame, target_annual_return: float, drawdown_limit: float) -> pd.DataFrame:
     frame = rows.copy()
-    for column in ["annual_return", "max_drawdown", "sharpe", "calmar"]:
-        frame[column] = pd.to_numeric(frame.get(column, 0.0), errors="coerce").fillna(0.0)
+    for column in ["annual_return", "max_drawdown", "sharpe", "calmar", "min_year_annual_return", "worst_year_drawdown"]:
+        frame[column] = _numeric_column(frame, column, 0.0)
+    min_yearly_return = _numeric_column(frame, "min_yearly_annual_return", target_annual_return)
+    max_yearly_drawdown = _numeric_column(frame, "max_yearly_drawdown_limit", drawdown_limit)
+    frame["year_coverage_pass"] = _bool_column(frame, "year_coverage_pass", False)
     frame["target_distance"] = (frame["annual_return"] - target_annual_return).clip(upper=0).abs()
     frame["drawdown_shortfall"] = (drawdown_limit - frame["max_drawdown"]).clip(lower=0)
+    frame["yearly_return_shortfall"] = (min_yearly_return - frame["min_year_annual_return"]).clip(lower=0)
+    frame["yearly_drawdown_shortfall"] = (max_yearly_drawdown - frame["worst_year_drawdown"]).clip(lower=0)
     return frame.sort_values(
-        ["meets_target", "drawdown_shortfall", "target_distance", "max_drawdown", "sharpe"],
-        ascending=[False, True, True, False, False],
+        [
+            "meets_target",
+            "year_coverage_pass",
+            "yearly_return_shortfall",
+            "yearly_drawdown_shortfall",
+            "drawdown_shortfall",
+            "target_distance",
+            "max_drawdown",
+            "sharpe",
+        ],
+        ascending=[False, False, True, True, True, True, False, False],
     ).head(10)
+
+
+def _numeric_column(frame: pd.DataFrame, column: str, default: float) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(float(default), index=frame.index, dtype=float)
+    return pd.to_numeric(frame[column], errors="coerce").fillna(float(default))
+
+
+def _bool_column(frame: pd.DataFrame, column: str, default: bool) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(bool(default), index=frame.index, dtype=bool)
+    values = frame[column]
+    if pd.api.types.is_bool_dtype(values):
+        return values.fillna(bool(default)).astype(bool)
+    normalized = values.fillna(str(default)).astype(str).str.strip().str.lower()
+    return normalized.isin({"1", "true", "yes", "y"})
+
+
+def _target_quality_fields(
+    metrics: dict[str, Any],
+    yearly: pd.DataFrame,
+    yearly_coverage: pd.DataFrame,
+    quality_cfg: dict[str, Any],
+    target_annual_return: float,
+    drawdown_limit: float,
+) -> dict[str, Any]:
+    yearly_fields = _yearly_quality_fields(yearly, yearly_coverage, quality_cfg, target_annual_return, drawdown_limit)
+    annual_return_gap = _number(metrics.get("annual_return")) - float(target_annual_return)
+    drawdown_buffer = _number(metrics.get("max_drawdown")) - float(drawdown_limit)
+    yearly_return_gap = float(yearly_fields["min_year_annual_return"]) - float(yearly_fields["min_yearly_annual_return"])
+    yearly_drawdown_buffer = float(yearly_fields["worst_year_drawdown"]) - float(yearly_fields["max_yearly_drawdown_limit"])
+    return {
+        **yearly_fields,
+        "annual_return_gap": annual_return_gap,
+        "drawdown_buffer": drawdown_buffer,
+        "yearly_return_gap": yearly_return_gap,
+        "yearly_drawdown_buffer": yearly_drawdown_buffer,
+        "meets_target": bool(
+            annual_return_gap >= 0
+            and drawdown_buffer >= 0
+            and bool(yearly_fields["year_coverage_pass"])
+            and bool(yearly_fields["yearly_annual_return_pass"])
+            and bool(yearly_fields["yearly_drawdown_pass"])
+        ),
+    }
+
+
+def _yearly_quality_fields(
+    yearly: pd.DataFrame,
+    yearly_coverage: pd.DataFrame | None,
+    quality_cfg: dict[str, Any],
+    target_annual_return: float,
+    drawdown_limit: float,
+) -> dict[str, Any]:
+    min_yearly_return = float(quality_cfg.get("min_yearly_annual_return", target_annual_return))
+    max_yearly_drawdown = float(quality_cfg.get("max_yearly_drawdown_limit", drawdown_limit))
+    fields: dict[str, Any] = {
+        "year_count": 0,
+        "expected_year_count": 0,
+        "year_ann_pass": 0,
+        "year_dd_pass": 0,
+        "min_year_annual_return": 0.0,
+        "worst_year_drawdown": 0.0,
+        "min_yearly_annual_return": min_yearly_return,
+        "max_yearly_drawdown_limit": max_yearly_drawdown,
+        "year_coverage_pass": False,
+        "missing_years": "",
+        "yearly_annual_return_pass": False,
+        "yearly_drawdown_pass": False,
+    }
+    if yearly is not None and not yearly.empty:
+        annual = pd.to_numeric(yearly.get("annual_return", pd.Series(dtype=float)), errors="coerce")
+        drawdown = pd.to_numeric(yearly.get("max_drawdown", pd.Series(dtype=float)), errors="coerce")
+        valid = annual.notna() & drawdown.notna()
+        fields["year_count"] = int(valid.sum())
+        if int(valid.sum()):
+            fields["year_ann_pass"] = int((annual[valid] >= min_yearly_return).sum())
+            fields["year_dd_pass"] = int((drawdown[valid] >= max_yearly_drawdown).sum())
+            fields["min_year_annual_return"] = float(annual[valid].min())
+            fields["worst_year_drawdown"] = float(drawdown[valid].min())
+            fields["yearly_annual_return_pass"] = bool(fields["year_ann_pass"] == fields["year_count"])
+            fields["yearly_drawdown_pass"] = bool(fields["year_dd_pass"] == fields["year_count"])
+    if yearly_coverage is None:
+        fields["expected_year_count"] = int(fields["year_count"])
+        fields["year_coverage_pass"] = bool(fields["year_count"] > 0)
+        return fields
+    fields["expected_year_count"] = int(len(yearly_coverage))
+    if yearly_coverage.empty:
+        return fields
+    if "passes_min_days" in yearly_coverage.columns:
+        coverage = yearly_coverage["passes_min_days"].fillna(False).astype(bool)
+    elif "has_equity" in yearly_coverage.columns:
+        coverage = yearly_coverage["has_equity"].fillna(False).astype(bool)
+    else:
+        coverage = pd.Series(False, index=yearly_coverage.index)
+    missing: list[str] = []
+    if not coverage.all() and "year" in yearly_coverage.columns:
+        missing.extend(yearly_coverage.loc[~coverage, "year"].dropna().astype(int).astype(str).tolist())
+    if "year" in yearly_coverage.columns:
+        expected_years = set(yearly_coverage["year"].dropna().astype(int).astype(str))
+        observed_years = set(yearly["year"].dropna().astype(int).astype(str)) if yearly is not None and not yearly.empty and "year" in yearly.columns else set()
+        missing.extend(sorted(expected_years - observed_years))
+    missing = sorted(set(missing))
+    fields["missing_years"] = ",".join(missing)
+    fields["year_coverage_pass"] = bool(coverage.all() and not missing)
+    return fields
+
+
+def _yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
+    if equity_curve.empty:
+        return pd.DataFrame(columns=["year", "days", "annual_return", "max_drawdown"])
+    rows: list[dict[str, object]] = []
+    equity = equity_curve.sort_index().astype(float)
+    equity.index = pd.to_datetime(equity.index).normalize()
+    for year, group in equity.groupby(equity.index.year):
+        if len(group) <= 1 or float(group.iloc[0]) <= 0:
+            continue
+        total_return = float(group.iloc[-1] / group.iloc[0] - 1.0)
+        calendar_days = max(int((group.index[-1] - group.index[0]).days), 1)
+        annual_return = float((1.0 + total_return) ** (365.25 / calendar_days) - 1.0) if total_return > -1 else -1.0
+        drawdown = group / group.cummax() - 1.0
+        rows.append(
+            {
+                "year": int(year),
+                "days": int(len(group)),
+                "annual_return": annual_return,
+                "max_drawdown": float(drawdown.min()),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _number(value: object) -> float:
