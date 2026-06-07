@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.ml_strategy import (
     _adjust_label_returns,
+    _close_frame,
     _feature_columns,
     _neutralize_label_frame,
     _prepare_training_matrix,
@@ -98,6 +99,18 @@ class MLStrategyTests(unittest.TestCase):
         columns = _feature_columns(frame, {"feature_limit": 2})
 
         self.assertEqual(columns, ["F1", "F2", "PX_LOW_AMOUNT_20", "DB_circ_mv"])
+
+    def test_close_frame_keeps_latest_intraday_price_per_session(self) -> None:
+        prices = pd.DataFrame(
+            {("close", "a"): [10.0, 30.0, 20.0]},
+            index=pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"]),
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+
+        close = _close_frame(prices)
+
+        self.assertEqual(close.index.to_list(), list(pd.to_datetime(["2024-01-02", "2024-01-03"])))
+        self.assertAlmostEqual(float(close.loc[pd.Timestamp("2024-01-02"), "A"]), 10.0)
 
     def test_training_label_neutralization_removes_industry_means(self) -> None:
         labels = pd.DataFrame(

@@ -319,7 +319,15 @@ def _close_frame(prices: pd.DataFrame) -> pd.DataFrame:
             raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
         close = prices.copy()
         close.columns = [_normalize_instrument(value) for value in close.columns]
-    close.index = pd.to_datetime(close.index).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(close.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    close = close.loc[valid_dates].copy()
+    raw_dates = raw_dates[valid_dates]
+    if not close.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        close = close.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    close.index = raw_dates.normalize()
     close.columns = [_normalize_instrument(value) for value in close.columns]
     close = close.loc[:, close.columns != ""]
     if close.columns.has_duplicates:

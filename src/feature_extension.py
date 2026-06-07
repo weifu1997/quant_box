@@ -260,11 +260,20 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
         frame.columns = [_normalize_instrument(value) for value in frame.columns]
     else:
         return pd.DataFrame(index=prices.index)
-    frame.index = pd.to_datetime(frame.index).normalize()
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(frame.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    frame = frame.loc[valid_dates].copy()
+    raw_dates = raw_dates[valid_dates]
+    if not frame.empty:
+        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+        frame = frame.iloc[order].copy()
+        raw_dates = raw_dates[order]
+    frame.index = raw_dates.normalize()
     frame.columns = [_normalize_instrument(value) for value in frame.columns]
     frame = frame.loc[:, frame.columns != ""]
     if frame.columns.has_duplicates:
         frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
+    frame = frame[~frame.index.duplicated(keep="last")]
     return frame.sort_index().apply(pd.to_numeric, errors="coerce")
 
 

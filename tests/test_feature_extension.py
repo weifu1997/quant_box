@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.feature_extension import append_daily_basic_features, append_price_derived_features
+from src.feature_extension import _price_field, append_daily_basic_features, append_price_derived_features
 
 
 class FeatureExtensionTests(unittest.TestCase):
@@ -137,6 +137,18 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertTrue(pd.isna(extended.loc[(dates[0], "000001.SZ"), "PX_LOW_AMOUNT_2"]))
         expected = -np.log1p(150.0)
         self.assertAlmostEqual(float(extended.loc[(dates[2], "000001.SZ"), "PX_LOW_AMOUNT_2"]), expected, places=6)
+
+    def test_price_field_keeps_latest_intraday_price_per_session(self) -> None:
+        prices = pd.DataFrame(
+            {("close", "000001.sz"): [10.0, 30.0, 20.0]},
+            index=pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"]),
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+
+        close = _price_field(prices, "close")
+
+        self.assertEqual(close.index.to_list(), list(pd.to_datetime(["2024-01-02", "2024-01-03"])))
+        self.assertAlmostEqual(float(close.loc[pd.Timestamp("2024-01-02"), "000001.SZ"]), 10.0)
 
     def test_append_price_derived_features_accepts_plain_close_panel(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
