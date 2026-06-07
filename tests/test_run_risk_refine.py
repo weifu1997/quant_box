@@ -14,6 +14,7 @@ from scripts.run_risk_refine import (
     _liquidity_filter_state,
     _requested_factor_columns_for_groups,
     _target_quality_fields,
+    _with_dynamic_candidates_override,
     _with_timing_overrides,
 )
 
@@ -83,6 +84,19 @@ class RunRiskRefineTests(unittest.TestCase):
 
         self.assertEqual(_factor_group_values("", config), ["factor:MIN60"])
         self.assertEqual(_factor_group_values("factor:MIN60,inverse_factor:KLEN", config), ["factor:MIN60", "inverse_factor:KLEN"])
+
+    def test_with_dynamic_candidates_override_updates_copy(self) -> None:
+        config = {"dynamic_ic_selector": {"candidates": ["factor:OLD"]}}
+
+        result = _with_dynamic_candidates_override(config, "factor:MIN60,inverse_factor:CORD5")
+
+        self.assertEqual(result["dynamic_ic_selector"]["candidates"], ["factor:MIN60", "inverse_factor:CORD5"])
+        self.assertEqual(config["dynamic_ic_selector"]["candidates"], ["factor:OLD"])
+
+    def test_with_dynamic_candidates_override_ignores_empty_value(self) -> None:
+        config = {"dynamic_ic_selector": {"candidates": ["factor:OLD"]}}
+
+        self.assertIs(_with_dynamic_candidates_override(config, ""), config)
 
     def test_liquidity_filter_state_supports_disabled_side(self) -> None:
         self.assertEqual(_liquidity_filter_state("none", 0.35), (False, "none", 0.0))

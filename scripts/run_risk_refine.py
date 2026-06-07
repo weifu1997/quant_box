@@ -41,6 +41,7 @@ def main() -> None:
     parser.add_argument("--factor-file", default=config["factors"]["cache_file"])
     parser.add_argument("--price-file", default=config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
     parser.add_argument("--factor-groups", default=str(config.get("strategy", {}).get("factor_group", "momentum")))
+    parser.add_argument("--dynamic-candidates", default="", help="Comma-separated dynamic_ic_selector candidates to use for this run.")
     parser.add_argument("--liquidity-sides", default=str(config.get("liquidity_filter", {}).get("side", "high")))
     parser.add_argument("--liquidity-quantiles", default="0.20,0.30")
     parser.add_argument("--top-n", default=str(config.get("strategy", {}).get("top_n", 15)))
@@ -73,6 +74,7 @@ def main() -> None:
     args = parser.parse_args()
 
     start_time = time.monotonic()
+    config = _with_dynamic_candidates_override(config, args.dynamic_candidates)
     end_date = resolve_target_date_value(args.end_date, config=config)
     prices = pd.read_parquet(resolve_path(args.price_file))
     factor_groups = _factor_group_values(args.factor_groups, config)
@@ -263,6 +265,15 @@ def _factor_group_values(value: str, config: dict[str, Any]) -> list[str]:
     if values:
         return values
     return [str(config.get("strategy", {}).get("factor_group", "momentum"))]
+
+
+def _with_dynamic_candidates_override(config: dict[str, Any], candidates_value: str) -> dict[str, Any]:
+    candidates = _csv_values(candidates_value, str)
+    if not candidates:
+        return config
+    result = deepcopy(config)
+    result.setdefault("dynamic_ic_selector", {})["candidates"] = candidates
+    return result
 
 
 def _liquidity_filter_state(side: str, quantile: float) -> tuple[bool, str, float]:
