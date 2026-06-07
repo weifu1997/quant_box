@@ -414,6 +414,43 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(blocked.empty)
         self.assertEqual(blocked.iloc[0]["reason"], "capacity_limited")
 
+    def test_capacity_cache_uses_prior_valid_amounts_across_gaps(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[1]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series([10], index=index, name="score")
+        prices = pd.concat(
+            {
+                "open": pd.DataFrame({"A": [10.0, 10.0, 10.0]}, index=dates),
+                "close": pd.DataFrame({"A": [10.0, 10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, np.nan, 1_000_000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "trade_price_field": "open",
+                "max_participation_rate": 0.1,
+                "amount_unit": 1000.0,
+                "capacity_window": 2,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+            },
+        )
+
+        buy = result.trades[result.trades["side"] == "BUY"].iloc[0]
+        self.assertEqual(buy["status"], "filled")
+        self.assertGreater(int(buy["shares"]), 0)
+
     def test_stop_loss_forces_exit(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])

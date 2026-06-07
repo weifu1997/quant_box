@@ -15,6 +15,8 @@ from src.strategy import select_stocks
 LOT_SIZE = 100
 PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str], dict[str, pd.DataFrame]]] = {}
+_PRIOR_ADV_CACHE_KEY = "__prior_adv_cache"
+_PriorAdvCache = dict[tuple[str, int, float], pd.Series]
 
 
 @dataclass
@@ -32,6 +34,8 @@ def run_backtest(
     end_date: str,
     config: dict,
 ) -> BacktestResult:
+    config = dict(config)
+    config[_PRIOR_ADV_CACHE_KEY] = {}
     score_panel = _ensure_score_panel(score_panel)
     prices = _normalize_price_frame(price_df)
 
@@ -698,12 +702,13 @@ def _tradability(
         valid_prev = prev_close > 0
         high = _field_on_date(prices, "high", trade_date).reindex(close.index)
         low = _field_on_date(prices, "low", trade_date).reindex(close.index)
+        is_st = _field_on_date(prices, "is_st", trade_date)
         up_probe = high.where(high.notna(), close)
         down_probe = low.where(low.notna(), close)
         for stock in close.index[valid_prev]:
             stock = str(stock)
-            up_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "up")
-            down_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "down")
+            up_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "up", is_st)
+            down_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "down", is_st)
             if pd.notna(up_probe.get(stock)) and float(up_probe.get(stock)) >= float(prev_close.get(stock)) * (1 + up_threshold):
                 buyable.discard(stock)
             if pd.notna(down_probe.get(stock)) and float(down_probe.get(stock)) <= float(prev_close.get(stock)) * (1 - down_threshold):
@@ -712,9 +717,16 @@ def _tradability(
     return {"priced": priced, "buyable": buyable, "sellable": sellable}
 
 
-def _limit_threshold_for_stock(stock: str, prices: pd.DataFrame, trade_date: pd.Timestamp, config: dict, side: str) -> float:
+def _limit_threshold_for_stock(
+    stock: str,
+    prices: pd.DataFrame,
+    trade_date: pd.Timestamp,
+    config: dict,
+    side: str,
+    is_st_values: pd.Series | Mapping[str, float] | None = None,
+) -> float:
     suffix = "up" if side == "up" else "down"
-    if _is_st_on_date(stock, prices, trade_date):
+    if _is_st_on_date(stock, prices, trade_date, is_st_values):
         return float(config.get(f"st_limit_{suffix}_threshold", 0.049))
     lowered = str(stock).lower()
     if lowered.startswith(("688", "689")):
@@ -726,8 +738,16 @@ def _limit_threshold_for_stock(stock: str, prices: pd.DataFrame, trade_date: pd.
     return float(config.get(f"limit_{suffix}_threshold", 0.099))
 
 
-def _is_st_on_date(stock: str, prices: pd.DataFrame, trade_date: pd.Timestamp) -> bool:
-    is_st = _field_on_date(prices, "is_st", trade_date)
+def _is_st_on_date(
+    stock: str,
+    prices: pd.DataFrame,
+    trade_date: pd.Timestamp,
+    is_st_values: pd.Series | Mapping[str, float] | None = None,
+) -> bool:
+    is_st = is_st_values if is_st_values is not None else _field_on_date(prices, "is_st", trade_date)
+    if isinstance(is_st, Mapping):
+        value = is_st.get(stock)
+        return bool(value) if value is not None and pd.notna(value) else False
     if is_st.empty or stock not in is_st.index or pd.isna(is_st.loc[stock]):
         return False
     return bool(is_st.loc[stock])
@@ -1582,7 +1602,7 @@ def _trade_slippage(base_slippage: float, prices: pd.DataFrame, trade_date: pd.T
         return base
     window = int(config.get("capacity_window", 20))
     amount_unit = float(config.get("amount_unit", 1000.0))
-    adv = _prior_adv(prices, trade_date, stock, window, amount_unit)
+    adv = _prior_adv(prices, trade_date, stock, window, amount_unit, _prior_adv_cache(config))
     if adv <= 0:
         return base
     ratio = max(float(abs(notional) / adv), 0.0)
@@ -1601,7 +1621,7 @@ def _capacity(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notion
     window = int(config.get("capacity_window", 20))
     amount_unit = float(config.get("amount_unit", 1000.0))
     warn_threshold = float(config.get("capacity_warning_threshold", 0.05))
-    adv = _prior_adv(prices, trade_date, stock, window, amount_unit)
+    adv = _prior_adv(prices, trade_date, stock, window, amount_unit, _prior_adv_cache(config))
     ratio = float(abs(notional) / adv) if adv > 0 else 0.0
     return {"capacity_ratio": ratio, "capacity_warning": bool(ratio > warn_threshold)}
 
@@ -1623,7 +1643,7 @@ def _apply_capacity_limit(
 
     amount_unit = float(config.get("amount_unit", 1000.0))
     window = int(config.get("capacity_window", 20))
-    max_notional = _prior_adv(prices, trade_date, stock, window, amount_unit) * participation
+    max_notional = _prior_adv(prices, trade_date, stock, window, amount_unit, _prior_adv_cache(config)) * participation
     if not np.isfinite(max_notional) or max_notional <= 0:
         return 0, "blocked", "capacity_limited"
 
@@ -1634,14 +1654,49 @@ def _apply_capacity_limit(
     return requested_shares, "filled", None
 
 
-def _prior_adv(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, window: int, amount_unit: float) -> float:
+def _prior_adv_cache(config: dict) -> _PriorAdvCache | None:
+    cache = config.get(_PRIOR_ADV_CACHE_KEY)
+    return cache if isinstance(cache, dict) else None
+
+
+def _prior_adv(
+    prices: pd.DataFrame,
+    trade_date: pd.Timestamp,
+    stock: str,
+    window: int,
+    amount_unit: float,
+    cache: _PriorAdvCache | None = None,
+) -> float:
     amount = _field(prices, "amount")
     if amount.empty or stock not in amount.columns:
         return 0.0
-    history = amount.loc[amount.index < trade_date, stock].dropna().tail(max(window, 1))
+    window = max(int(window), 1)
+    amount_unit = float(amount_unit)
+    if cache is not None:
+        key = (str(stock), window, amount_unit)
+        cached = cache.get(key)
+        if cached is None:
+            cached = _prior_adv_series(amount[stock], window, amount_unit)
+            cache[key] = cached
+        trade_timestamp = pd.Timestamp(trade_date)
+        if trade_timestamp in cached.index:
+            value = cached.loc[trade_timestamp]
+            return float(value) if pd.notna(value) else 0.0
+
+    history = amount.loc[amount.index < trade_date, stock].dropna().tail(window)
     if history.empty:
         return 0.0
     return float(history.mean() * amount_unit)
+
+
+def _prior_adv_series(amount: pd.Series, window: int, amount_unit: float) -> pd.Series:
+    values = pd.to_numeric(amount, errors="coerce")
+    valid = values.dropna()
+    if valid.empty:
+        return pd.Series(index=values.index, dtype=float)
+    rolling = valid.rolling(window=max(int(window), 1), min_periods=1).mean()
+    prior = rolling.reindex(values.index, method="ffill").shift(1)
+    return prior.astype(float) * float(amount_unit)
 
 
 def _next_price_date(price_dates: pd.Index, signal_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.Timestamp | None:
