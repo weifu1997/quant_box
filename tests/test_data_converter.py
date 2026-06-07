@@ -119,6 +119,76 @@ class DataConverterTests(unittest.TestCase):
             self.assertAlmostEqual(float(adjusted_panel.loc[first_date, ("volume", "000001.sz")]), 4000.0)
             self.assertAlmostEqual(float(qlib_features.loc[0, "close"]), 5.0)
 
+    def test_convert_to_qlib_format_deduplicates_raw_daily_rows(self) -> None:
+        config = {
+            "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},
+            "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
+        }
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            qlib_dir = root / "qlib"
+            raw_dir.mkdir()
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 10.0,
+                        "high": 10.0,
+                        "low": 10.0,
+                        "close": 10.0,
+                        "vol": 1000.0,
+                        "amount": 10000.0,
+                        "adj_factor": 1.0,
+                    },
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-02",
+                        "open": 11.0,
+                        "high": 11.0,
+                        "low": 11.0,
+                        "close": 11.0,
+                        "vol": 1100.0,
+                        "amount": 12100.0,
+                        "adj_factor": 1.0,
+                    },
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-03",
+                        "open": 20.0,
+                        "high": 20.0,
+                        "low": 20.0,
+                        "close": 20.0,
+                        "vol": 1000.0,
+                        "amount": 20000.0,
+                        "adj_factor": 2.0,
+                    },
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+
+            def fake_resolve_path(value: str | Path) -> Path:
+                if str(value) == "data/prices":
+                    return root / "prices"
+                path = Path(value)
+                return path if path.is_absolute() else root / path
+
+            with patch("src.data_converter.load_config", return_value=config), patch(
+                "src.data_converter.resolve_path",
+                side_effect=fake_resolve_path,
+            ):
+                result = convert_to_qlib_format(raw_dir=raw_dir, qlib_dir=qlib_dir)
+
+            raw_panel = pd.read_parquet(result["ohlcv_price_file"])
+            adjusted_features = pd.read_parquet(qlib_dir / "features" / "000001.sz" / "day.parquet")
+            first_date = pd.Timestamp("2024-01-02")
+
+            self.assertTrue(raw_panel.index.is_unique)
+            self.assertAlmostEqual(float(raw_panel.loc[first_date, ("close", "000001.sz")]), 11.0)
+            self.assertEqual(adjusted_features["date"].tolist(), [first_date, pd.Timestamp("2024-01-03")])
+            self.assertAlmostEqual(float(adjusted_features.loc[0, "close"]), 5.5)
+
     def test_convert_to_qlib_format_accepts_compact_calendar_dates(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

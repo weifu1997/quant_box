@@ -257,6 +257,40 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(index[["index_code", "con_code"]].iloc[0].tolist(), ["000300.SH", "600519.SH"])
         self.assertEqual(st_calendar["ts_code"].tolist(), ["000001.SZ"])
 
+    def test_normalize_daily_frame_deduplicates_symbol_date_pairs(self) -> None:
+        daily = normalize_daily_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "20240102",
+                        "open": 10.0,
+                        "high": 10.5,
+                        "low": 9.8,
+                        "close": 10.2,
+                        "vol": 1000,
+                        "amount": 10000,
+                        "adj_factor": 1.0,
+                    },
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "20240102",
+                        "open": 11.0,
+                        "high": 11.5,
+                        "low": 10.8,
+                        "close": 11.2,
+                        "vol": 1200,
+                        "amount": 12000,
+                        "adj_factor": 1.1,
+                    },
+                ]
+            )
+        )
+
+        self.assertEqual(len(daily), 1)
+        self.assertAlmostEqual(float(daily["close"].iloc[0]), 11.2)
+        self.assertAlmostEqual(float(daily["adj_factor"].iloc[0]), 1.1)
+
     def test_fetch_daily_basic_requests_tushare_daily_basic_fields(self) -> None:
         client = DailyBasicClient()
 

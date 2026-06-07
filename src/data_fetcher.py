@@ -974,6 +974,7 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
     renamed["ts_code"] = _normalize_symbol_series(renamed["ts_code"])
     renamed = renamed.dropna(subset=["ts_code", "trade_date", "close"])
     renamed = renamed[renamed["ts_code"] != ""].sort_values(["ts_code", "trade_date"])
+    renamed = renamed.drop_duplicates(["ts_code", "trade_date"], keep="last")
     return renamed.reset_index(drop=True)
 
 
