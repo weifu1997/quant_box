@@ -46,6 +46,37 @@ class UniverseCoverageTests(unittest.TestCase):
         self.assertEqual(coverage["price_panel_symbols"], 2)
         self.assertAlmostEqual(float(coverage["price_target_coverage"]), 2 / 3)
 
+    def test_summarize_universe_coverage_normalizes_symbol_whitespace_and_case(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            (raw_dir / "000001.SZ.csv").write_text("", encoding="utf-8")
+            universe_file = root / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                [
+                    {"ts_code": " 000001.sz ", "name": "PINGAN", "list_date": "19910403", "list_status": "L"},
+                ]
+            ).to_csv(universe_file, index=False)
+            prices = pd.DataFrame({" 000001.sz ": [10.0]})
+            config = {
+                "data": {
+                    "raw_dir": str(raw_dir),
+                    "constituents_file": str(universe_file),
+                    "universe": "mainboard_a",
+                    "end_date": "2024-01-01",
+                    "exclude_st": True,
+                }
+            }
+
+            with patch("src.universe_coverage.resolve_path", side_effect=lambda value: Path(value)):
+                coverage = summarize_universe_coverage(config, price_df=prices)
+
+        self.assertEqual(coverage["target_symbols"], 1)
+        self.assertEqual(coverage["raw_target_symbols"], 1)
+        self.assertEqual(coverage["price_target_symbols"], 1)
+        self.assertEqual(coverage["price_target_coverage"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

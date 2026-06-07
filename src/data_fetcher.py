@@ -88,6 +88,27 @@ def _parse_tushare_dates(series: pd.Series) -> pd.Series:
     return parsed
 
 
+def _normalize_symbol(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _normalize_symbol_series(series: pd.Series) -> pd.Series:
+    return series.astype("string").str.strip().str.upper()
+
+
+def _unique_normalized_symbols(values: Iterable[object]) -> list[str]:
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        symbol = _normalize_symbol(value)
+        if symbol and symbol not in seen:
+            seen.add(symbol)
+            symbols.append(symbol)
+    return symbols
+
+
 def _parse_tushare_frame(data: dict) -> pd.DataFrame:
     payload = data.get("data", data)
     fields = payload.get("fields")
@@ -184,6 +205,7 @@ def fetch_daily_stock(
     retries: int = 5,
     retry_max_wait: float | None = None,
 ) -> pd.DataFrame:
+    ts_code = _normalize_symbol(ts_code)
     client = client or TushareHttpClient.from_config()
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -217,7 +239,7 @@ def fetch_daily_stocks(
     window_days: int | None = None,
     skip_failed: bool = True,
 ) -> pd.DataFrame:
-    codes = [str(code) for code in dict.fromkeys(ts_codes)]
+    codes = _unique_normalized_symbols(ts_codes)
     if not codes:
         return pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
     if len(codes) == 1 or batch_size <= 1:
@@ -721,9 +743,11 @@ def _normalize_adj_factor_frame(adj_factor: pd.DataFrame, default_ts_code: str |
         missing = sorted(required - set(adj.columns))
         raise ValueError(f"Adj factor data is missing columns: {missing}")
     adj = adj[ADJ_FACTOR_FIELDS]
+    adj["ts_code"] = _normalize_symbol_series(adj["ts_code"])
     adj["trade_date"] = _parse_tushare_dates(adj["trade_date"])
     adj["adj_factor"] = pd.to_numeric(adj["adj_factor"], errors="coerce")
-    adj = adj.dropna(subset=["trade_date", "adj_factor"])
+    adj = adj.dropna(subset=["ts_code", "trade_date", "adj_factor"])
+    adj = adj[adj["ts_code"] != ""]
     return adj.drop_duplicates(["ts_code", "trade_date"], keep="last").reset_index(drop=True)
 
 
@@ -770,13 +794,13 @@ def fetch_hs300_stocks(
                 frame = frame[frame["trade_date"] == latest]
             df = frame
             code_col = "con_code"
-        return sorted(df[code_col].dropna().astype(str).unique().tolist())
+        return sorted(_unique_normalized_symbols(df[code_col].dropna()))
 
     client = client or TushareHttpClient.from_config(config)
     df = fetch_index_constituents("000300.SH", start_date=date, end_date=date, client=client)
     if df.empty:
         raise RuntimeError("No HS300 constituents returned. Add data/raw/hs300_constituents.csv or check proxy params.")
-    return sorted(df["con_code"].dropna().astype(str).unique().tolist())
+    return sorted(_unique_normalized_symbols(df["con_code"].dropna()))
 
 
 def fetch_stock_universe(
@@ -841,7 +865,8 @@ def filter_universe_frame(
         return df
     result = df.copy()
     code_col = _code_column(result)
-    result[code_col] = result[code_col].astype(str).str.upper()
+    result[code_col] = _normalize_symbol_series(result[code_col])
+    result = result[result[code_col].notna() & (result[code_col] != "")].copy()
 
     if universe in {"mainboard_a", "a_mainboard", "mainboard"}:
         result = result[result[code_col].map(_is_mainboard_code)]
@@ -855,21 +880,21 @@ def filter_universe_frame(
     if exclude_st and st_calendar is not None and as_of_date is not None:
         result = _exclude_point_in_time_st(result, code_col, as_of_date, st_calendar)
     elif exclude_st and "name" in result.columns:
-        names = result["name"].fillna("").astype(str).str.upper()
+        names = result["name"].fillna("").astype(str).str.strip().str.upper()
         result = result[~names.str.contains("ST", regex=False)]
 
     if as_of_date is not None:
         as_of = pd.Timestamp(as_of_date)
         if "list_date" in result.columns:
-            listed = pd.to_datetime(result["list_date"].astype(str), format="%Y%m%d", errors="coerce")
+            listed = pd.to_datetime(result["list_date"].astype(str).str.strip(), format="%Y%m%d", errors="coerce")
             result = result[listed.isna() | (listed <= as_of)]
         if "delist_date" in result.columns:
-            delisted = pd.to_datetime(result["delist_date"].astype(str), format="%Y%m%d", errors="coerce")
+            delisted = pd.to_datetime(result["delist_date"].astype(str).str.strip(), format="%Y%m%d", errors="coerce")
             result = result[delisted.isna() | (delisted > as_of)]
         if "list_status" in result.columns:
-            status = result["list_status"].fillna("L").astype(str).str.upper()
+            status = result["list_status"].fillna("L").astype(str).str.strip().str.upper()
             if "delist_date" in result.columns:
-                delisted = pd.to_datetime(result["delist_date"].astype(str), format="%Y%m%d", errors="coerce")
+                delisted = pd.to_datetime(result["delist_date"].astype(str).str.strip(), format="%Y%m%d", errors="coerce")
                 result = result[(status == "L") | (delisted.notna() & (delisted > as_of))]
             else:
                 result = result[status == "L"]
@@ -902,16 +927,18 @@ def _exclude_point_in_time_st(
         raise ValueError("ST calendar must contain one of: st_start_date, start_date, begin_date, date.")
 
     as_of = pd.Timestamp(as_of_date)
-    calendar[st_code_col] = calendar[st_code_col].astype(str).str.upper()
+    calendar[st_code_col] = _normalize_symbol_series(calendar[st_code_col])
+    calendar = calendar[calendar[st_code_col].notna() & (calendar[st_code_col] != "")].copy()
     starts = _parse_calendar_dates(calendar[start_col])
     ends = _parse_calendar_dates(calendar[end_col]) if end_col is not None else pd.Series(pd.NaT, index=calendar.index)
     active = (starts <= as_of) & (ends.isna() | (ends >= as_of))
-    st_codes = set(calendar.loc[active, st_code_col].dropna().astype(str).str.upper())
-    return df[~df[code_col].astype(str).str.upper().isin(st_codes)]
+    st_codes = set(calendar.loc[active, st_code_col].dropna())
+    codes = _normalize_symbol_series(df[code_col])
+    return df[~codes.isin(st_codes)]
 
 
 def _parse_calendar_dates(series: pd.Series) -> pd.Series:
-    text = series.astype(str).str.replace("-", "", regex=False)
+    text = series.astype("string").str.strip().str.replace("-", "", regex=False).str.replace("/", "", regex=False)
     return pd.to_datetime(text, format="%Y%m%d", errors="coerce")
 
 
@@ -944,7 +971,9 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
         renamed[col] = pd.to_numeric(renamed[col], errors="coerce")
     if "adj_factor" in df.columns:
         renamed["adj_factor"] = pd.to_numeric(df["adj_factor"], errors="coerce")
-    renamed = renamed.dropna(subset=["trade_date", "close"]).sort_values(["ts_code", "trade_date"])
+    renamed["ts_code"] = _normalize_symbol_series(renamed["ts_code"])
+    renamed = renamed.dropna(subset=["ts_code", "trade_date", "close"])
+    renamed = renamed[renamed["ts_code"] != ""].sort_values(["ts_code", "trade_date"])
     return renamed.reset_index(drop=True)
 
 
@@ -956,13 +985,13 @@ def normalize_daily_basic_frame(df: pd.DataFrame) -> pd.DataFrame:
         if column not in renamed.columns:
             renamed[column] = pd.NA
     renamed = renamed[DAILY_BASIC_FIELDS]
-    renamed["ts_code"] = renamed["ts_code"].astype(str).str.upper()
+    renamed["ts_code"] = _normalize_symbol_series(renamed["ts_code"])
     renamed["trade_date"] = _parse_tushare_dates(renamed["trade_date"])
     for column in DAILY_BASIC_FIELDS:
         if column not in {"ts_code", "trade_date"}:
             renamed[column] = pd.to_numeric(renamed[column], errors="coerce")
     renamed = renamed.dropna(subset=["ts_code", "trade_date"])
-    renamed = renamed[renamed["ts_code"].str.strip() != ""]
+    renamed = renamed[renamed["ts_code"] != ""]
     return renamed.sort_values(["trade_date", "ts_code"]).reset_index(drop=True)
 
 
@@ -976,12 +1005,12 @@ def normalize_index_constituents_frame(df: pd.DataFrame, default_index_code: str
     if missing:
         raise ValueError(f"Index constituent data is missing columns: {missing}")
     renamed = renamed[INDEX_WEIGHT_FIELDS]
-    renamed["index_code"] = renamed["index_code"].astype(str).str.upper()
-    renamed["con_code"] = renamed["con_code"].astype(str).str.upper()
+    renamed["index_code"] = _normalize_symbol_series(renamed["index_code"])
+    renamed["con_code"] = _normalize_symbol_series(renamed["con_code"])
     renamed["trade_date"] = _parse_tushare_dates(renamed["trade_date"]).dt.normalize()
     renamed["weight"] = pd.to_numeric(renamed["weight"], errors="coerce")
     renamed = renamed.dropna(subset=["index_code", "con_code", "trade_date"])
-    renamed = renamed[(renamed["index_code"].str.strip() != "") & (renamed["con_code"].str.strip() != "")]
+    renamed = renamed[(renamed["index_code"] != "") & (renamed["con_code"] != "")]
     return renamed.sort_values(["trade_date", "index_code", "con_code"]).reset_index(drop=True)
 
 
@@ -1002,7 +1031,7 @@ def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
     for column in ["name", "start_date", "end_date", "ann_date", "change_reason"]:
         if column not in renamed.columns:
             renamed[column] = pd.NA
-    renamed["ts_code"] = renamed["ts_code"].astype(str).str.upper()
+    renamed["ts_code"] = _normalize_symbol_series(renamed["ts_code"])
     renamed["name"] = renamed["name"].astype(str)
     renamed["change_reason"] = renamed["change_reason"].astype(str)
     is_st = renamed["name"].str.contains(r"\*?ST", case=False, regex=True) | renamed["change_reason"].str.contains(
@@ -1015,6 +1044,7 @@ def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
     renamed["st_end_date"] = _parse_tushare_dates(renamed["end_date"])
     renamed["ann_date"] = _parse_tushare_dates(renamed["ann_date"])
     renamed = renamed.dropna(subset=["ts_code", "st_start_date"])
+    renamed = renamed[renamed["ts_code"] != ""]
     result = renamed[ST_CALENDAR_FIELDS].copy()
     return result.sort_values(["ts_code", "st_start_date"]).reset_index(drop=True)
 

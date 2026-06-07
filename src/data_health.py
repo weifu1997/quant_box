@@ -153,7 +153,7 @@ def _target_symbols(config: dict) -> set[str]:
     )
     for column in ["ts_code", "con_code", "instrument", "code"]:
         if column in filtered.columns:
-            return set(filtered[column].dropna().astype(str).str.upper())
+            return _normalize_symbols(filtered[column].dropna())
     return set()
 
 
@@ -194,14 +194,19 @@ def _frame_symbols(frame: pd.DataFrame | None) -> set[str]:
     if frame is None or frame.empty:
         return set()
     if isinstance(frame.columns, pd.MultiIndex):
-        return set(frame.columns.get_level_values(-1).astype(str).str.upper())
-    return set(frame.columns.astype(str).str.upper())
+        return _normalize_symbols(frame.columns.get_level_values(-1))
+    return _normalize_symbols(frame.columns)
 
 
 def _factor_symbols(frame: pd.DataFrame | None) -> set[str]:
     if frame is None or frame.empty or not isinstance(frame.index, pd.MultiIndex):
         return set()
-    return set(frame.index.get_level_values(1).astype(str).str.upper())
+    return _normalize_symbols(frame.index.get_level_values(1))
+
+
+def _normalize_symbols(values: Any) -> set[str]:
+    symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
+    return set(symbol for symbol in symbols if symbol)
 
 
 def _factor_latest_date(frame: pd.DataFrame | None) -> pd.Timestamp | None:

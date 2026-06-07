@@ -19,6 +19,7 @@ from src.data_fetcher import (
     fetch_hs300_stocks,
     fetch_stock_universe,
     filter_universe_frame,
+    normalize_daily_frame,
     normalize_daily_basic_frame,
     normalize_index_constituents_frame,
     normalize_st_calendar_frame,
@@ -206,7 +207,7 @@ class DataFetcherTests(unittest.TestCase):
             pd.DataFrame(
                 [
                     {
-                        "ts_code": "000001.sz",
+                        "ts_code": " 000001.sz ",
                         "trade_date": "20240102",
                         "total_mv": "1000.5",
                         "circ_mv": "800.25",
@@ -219,6 +220,42 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(frame["trade_date"].iloc[0], pd.Timestamp("2024-01-02"))
         self.assertAlmostEqual(float(frame["total_mv"].iloc[0]), 1000.5)
         self.assertIn("circ_mv", frame.columns)
+
+    def test_symbol_normalizers_strip_whitespace_and_case(self) -> None:
+        daily = normalize_daily_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": " 000001.sz ",
+                        "trade_date": "20240102",
+                        "open": 10.0,
+                        "high": 10.5,
+                        "low": 9.8,
+                        "close": 10.2,
+                        "vol": 1000,
+                        "amount": 10000,
+                    }
+                ]
+            )
+        )
+        index = normalize_index_constituents_frame(
+            pd.DataFrame(
+                [
+                    {"index_code": " 000300.sh ", "con_code": " 600519.sh ", "trade_date": "20240102", "weight": 1.5},
+                ]
+            )
+        )
+        st_calendar = normalize_st_calendar_frame(
+            pd.DataFrame(
+                [
+                    {"ts_code": " 000001.sz ", "name": "*ST TEST", "start_date": " 20240102 "},
+                ]
+            )
+        )
+
+        self.assertEqual(daily["ts_code"].tolist(), ["000001.SZ"])
+        self.assertEqual(index[["index_code", "con_code"]].iloc[0].tolist(), ["000300.SH", "600519.SH"])
+        self.assertEqual(st_calendar["ts_code"].tolist(), ["000001.SZ"])
 
     def test_fetch_daily_basic_requests_tushare_daily_basic_fields(self) -> None:
         client = DailyBasicClient()
@@ -583,16 +620,27 @@ class DataFetcherTests(unittest.TestCase):
 
         self.assertEqual(filtered["ts_code"].tolist(), ["000001.SZ", "000015.SZ"])
 
+    def test_filter_universe_frame_normalizes_symbol_whitespace_and_case(self) -> None:
+        universe = pd.DataFrame(
+            [
+                {"ts_code": " 000001.sz ", "name": "PINGAN", "list_status": " l ", "list_date": " 19910403 ", "delist_date": ""},
+            ]
+        )
+
+        filtered = filter_universe_frame(universe, universe="mainboard_a", as_of_date="2024-01-01", exclude_st=True)
+
+        self.assertEqual(filtered["ts_code"].tolist(), ["000001.SZ"])
+
     def test_filter_universe_frame_uses_point_in_time_st_calendar(self) -> None:
         universe = pd.DataFrame(
             [
-                {"ts_code": "000001.SZ", "name": "ST_STATIC_NAME", "list_status": "L", "list_date": "19910403", "delist_date": ""},
+                {"ts_code": " 000001.sz ", "name": "ST_STATIC_NAME", "list_status": "L", "list_date": "19910403", "delist_date": ""},
                 {"ts_code": "000002.SZ", "name": "NORMAL", "list_status": "L", "list_date": "19910403", "delist_date": ""},
             ]
         )
         st_calendar = pd.DataFrame(
             [
-                {"ts_code": "000001.SZ", "st_start_date": "20240601", "st_end_date": ""},
+                {"ts_code": " 000001.sz ", "st_start_date": "20240601", "st_end_date": ""},
             ]
         )
 

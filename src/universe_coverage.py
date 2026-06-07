@@ -59,7 +59,7 @@ def _load_target_symbols(config: dict, universe_file: Path) -> set[str]:
     )
     for col in ["ts_code", "con_code", "instrument", "code"]:
         if col in filtered.columns:
-            return set(filtered[col].dropna().astype(str).str.upper())
+            return _normalize_symbols(filtered[col].dropna())
     return set()
 
 
@@ -72,8 +72,8 @@ def _price_symbols(price_df: pd.DataFrame | None, price_file: str | Path | None)
     if prices is None:
         return set()
     if isinstance(prices.columns, pd.MultiIndex):
-        return set(prices.columns.get_level_values(-1).astype(str).str.upper())
-    return set(prices.columns.astype(str).str.upper())
+        return _normalize_symbols(prices.columns.get_level_values(-1))
+    return _normalize_symbols(prices.columns)
 
 
 def _is_stock_csv(path: Path) -> bool:
@@ -82,3 +82,8 @@ def _is_stock_csv(path: Path) -> bool:
 
 def _ratio(part: int, whole: int) -> float:
     return float(part / whole) if whole else 0.0
+
+
+def _normalize_symbols(values: object) -> set[str]:
+    symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
+    return set(symbol for symbol in symbols if symbol)

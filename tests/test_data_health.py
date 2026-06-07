@@ -95,6 +95,32 @@ class DataHealthTests(unittest.TestCase):
             self.assertEqual(report.raw_latest_target_symbols, 1)
             self.assertEqual(report.raw_latest_target_coverage, 0.5)
 
+    def test_build_data_health_report_normalizes_symbol_whitespace_and_case(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": [" 000001.sz "],
+                    "name": ["A"],
+                    "list_status": ["L"],
+                    "list_date": ["20200101"],
+                }
+            ).to_csv(universe_file, index=False)
+            _raw(raw_dir / "000001.SZ.csv", "000001.SZ", "2024-01-03")
+
+            config = _config(raw_dir, universe_file)
+            prices = _prices("2024-01-03", [" 000001.sz "])
+            factors = _factors("2024-01-03", [" 000001.sz "])
+
+            report = build_data_health_report(config, price_df=prices, factor_df=factors)
+
+            self.assertTrue(report.is_healthy)
+            self.assertEqual(report.price_target_symbols, 1)
+            self.assertEqual(report.factor_target_symbols, 1)
+
 
 def _config(raw_dir: Path, universe_file: Path) -> dict:
     return {
