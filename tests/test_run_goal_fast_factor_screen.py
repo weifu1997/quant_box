@@ -108,6 +108,16 @@ class RunGoalFastFactorScreenTests(unittest.TestCase):
         self.assertEqual(_select_screen_columns(columns, 2, 2), ["B", "C"])
         self.assertEqual(_select_screen_columns(columns, 0, 0), columns)
 
+    def test_select_screen_columns_supports_explicit_columns(self) -> None:
+        columns = ["A", "B", "C", "D"]
+
+        self.assertEqual(_select_screen_columns(columns, 1, 0, "c,a,c"), ["C", "A"])
+        self.assertEqual(_select_screen_columns(columns, 1, 1, "c,a"), ["C"])
+
+    def test_select_screen_columns_rejects_unknown_explicit_columns(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unknown factor columns: Z"):
+            _select_screen_columns(["A", "B"], 1, 0, "A,Z")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--top-n", default="7,10,15,20")
     parser.add_argument("--liquidity-modes", default="none,low:0.20,low:0.35,high:0.20")
+    parser.add_argument("--columns", default="", help="Comma-separated factor columns to screen; overrides start-column-index when set.")
     parser.add_argument("--start-column-index", type=int, default=1, help="1-based factor column index to start screening from.")
     parser.add_argument("--limit-columns", type=int, default=0)
     args = parser.parse_args()
@@ -32,7 +33,7 @@ def main() -> None:
     start_date = config["data"]["start_date"]
     end_date = resolve_target_date_value(config["data"]["end_date"], config=config)
     columns = factor_cache_columns(config["factors"]["cache_file"])
-    columns = _select_screen_columns(columns, args.start_column_index, args.limit_columns)
+    columns = _select_screen_columns(columns, args.start_column_index, args.limit_columns, args.columns)
     use_direct_scores = not _requires_full_score_pipeline(config)
     component_columns = [] if use_direct_scores else _score_component_columns(config, factor_cache_columns(config["factors"]["cache_file"]))
     top_ns = [int(value.strip()) for value in args.top_n.split(",") if value.strip()]
@@ -329,9 +330,26 @@ def _read_factor_subset(path_value: str | Path, columns: list[str], start_date: 
     return factors.loc[mask, [column for column in columns if column in factors.columns]].sort_index()
 
 
-def _select_screen_columns(columns: list[str], start_column_index: int, limit_columns: int) -> list[str]:
-    start = max(int(start_column_index), 1) - 1
-    selected = columns[start:]
+def _select_screen_columns(columns: list[str], start_column_index: int, limit_columns: int, column_names: str = "") -> list[str]:
+    requested = [value.strip() for value in str(column_names or "").split(",") if value.strip()]
+    if requested:
+        lookup = {column.upper(): column for column in columns}
+        selected = []
+        missing = []
+        seen = set()
+        for name in requested:
+            column = lookup.get(name.upper())
+            if column is None:
+                missing.append(name)
+                continue
+            if column not in seen:
+                selected.append(column)
+                seen.add(column)
+        if missing:
+            raise ValueError(f"Unknown factor columns: {', '.join(missing)}")
+    else:
+        start = max(int(start_column_index), 1) - 1
+        selected = columns[start:]
     if limit_columns:
         selected = selected[: max(int(limit_columns), 0)]
     return selected
