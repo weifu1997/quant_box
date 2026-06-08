@@ -266,6 +266,11 @@ def main() -> None:
                 total_combinations *= len(values)
             logger.info("Automatic validation grid has %s combinations: %s", total_combinations, grid)
             logger.info("Running automatic walk-forward grid validation.")
+            _stage(status, out_dir, "optimize_params", "running", f"0 results; {total_combinations} combinations per validation window")
+
+            def on_validation_result(row: dict[str, object], frame: pd.DataFrame) -> None:
+                _stage(status, out_dir, "optimize_params", "running", _validation_progress_message(row, len(frame)))
+
             base_bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
             base_bt_config = apply_selection_constraints_to_backtest_config(
                 base_bt_config,
@@ -300,6 +305,7 @@ def main() -> None:
                 ic_weight_smoothing=float(config.get("ic", {}).get("weight_smoothing", 0.0)),
                 ic_max_weight_turnover=config.get("ic", {}).get("max_weight_turnover"),
                 scoring_config=config,
+                on_result=on_validation_result,
             )
             validation_path = out_dir / "auto_validation_windows.csv"
             validation.to_csv(validation_path, index=False, encoding="utf-8-sig")
@@ -339,15 +345,18 @@ def main() -> None:
                 metrics={"backtest_skipped": True},
             )
         else:
-            _stage(status, out_dir, "backtest", "running")
+            _stage(status, out_dir, "backtest", "running", "building strategy scores")
             scores = build_strategy_scores(factors, selected_config, price_df=prices)
+            _stage(status, out_dir, "backtest", "running", "resampling signals")
             scores = resample_signals(scores, selected_config["strategy"].get("rebalance_freq", "daily"))
+            _stage(status, out_dir, "backtest", "running", "preparing backtest config")
             bt_config = apply_defensive_timing_to_backtest_config(
                 {**selected_config["backtest"], **selected_config["strategy"]},
                 prices,
                 selected_config,
             )
             bt_config = apply_selection_constraints_to_backtest_config(bt_config, selected_config)
+            _stage(status, out_dir, "backtest", "running", "running historical backtest")
             result = run_backtest(
                 scores,
                 prices,
@@ -589,6 +598,24 @@ def _stage(status: dict[str, Any], out_dir: Path, name: str, state: str, message
         }
     )
     _write_status(out_dir, status)
+
+
+def _validation_progress_message(row: dict[str, object], completed: int) -> str:
+    test_start = _date_message_value(row.get("test_start"))
+    test_end = _date_message_value(row.get("test_end"))
+    factor_group = row.get("factor_group", "")
+    top_n = row.get("top_n", "")
+    rebalance_freq = row.get("rebalance_freq", "")
+    return f"{completed} results; latest={test_start}..{test_end} factor_group={factor_group} top_n={top_n} rebalance={rebalance_freq}"
+
+
+def _date_message_value(value: object) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        return pd.Timestamp(value).date().isoformat()
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _write_status(out_dir: Path, status: dict[str, Any]) -> None:

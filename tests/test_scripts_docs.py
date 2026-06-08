@@ -49,6 +49,24 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("刷新缺失和过期股票", readme)
         self.assertIn("data health", readme)
 
+    def test_supervised_auto_signal_entrypoint_is_documented(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("scripts\\run_auto_signal_supervised.py start", readme)
+        self.assertIn("scripts\\run_auto_signal_supervised.py status", readme)
+        self.assertIn("outputs/logs/auto_signal_*.log", readme)
+
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "run_auto_signal_supervised.py"), "--help"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Start and inspect long-running auto signal jobs", proc.stdout)
+
     def test_convert_data_help_does_not_start_conversion(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "run_convert_data.py"), "--help"],

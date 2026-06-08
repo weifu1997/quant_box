@@ -14,6 +14,24 @@ import pandas as pd
 
 
 class RunAutoSignalTests(unittest.TestCase):
+    def test_validation_progress_message_includes_window_and_params(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+
+        message = module._validation_progress_message(
+            {
+                "test_start": pd.Timestamp("2024-01-01"),
+                "test_end": pd.Timestamp("2024-12-31"),
+                "factor_group": "momentum",
+                "top_n": 7,
+                "rebalance_freq": "monthly",
+            },
+            3,
+        )
+
+        self.assertIn("3 results", message)
+        self.assertIn("2024-01-01..2024-12-31", message)
+        self.assertIn("factor_group=momentum", message)
+
     def test_signal_output_date_infers_latest_factor_date_for_empty_signal(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")
         index = pd.MultiIndex.from_product(
@@ -292,6 +310,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertEqual(kwargs["ic_horizon"], 3)
             self.assertEqual(kwargs["ic_method"], "pearson")
             self.assertEqual(kwargs["ic_min_obs"], 4)
+            self.assertTrue(callable(kwargs["on_result"]))
             self.assertTrue((root / "candidate_signal_2024-01-03.csv").exists())
             self.assertFalse((root / "signal_2024-01-03.csv").exists())
             self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")

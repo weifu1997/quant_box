@@ -213,6 +213,16 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 
 `02_快速更新并生成信号.bat` 会覆盖脚本默认值，使用 `--chunk-size 300 --sleep-seconds 0`；`scripts/run_auto_signal.py` 自身默认值仍来自配置文件。
 
+长时间带 walk-forward 的全流程建议用后台监督入口启动，避免终端或外层工具 1 小时超时中断观察窗口：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_auto_signal_supervised.py start -- --chunk-size 300 --sleep-seconds 0
+.\.venv\Scripts\python.exe scripts\run_auto_signal_supervised.py status
+.\.venv\Scripts\python.exe scripts\run_auto_signal_supervised.py tail -n 80
+```
+
+后台入口会把日志写到 `outputs/logs/auto_signal_*.log`，并持续复用 `outputs/auto_run_status.json` 作为阶段状态文件。若只想做日常信号，不需要重调参，继续用 `02_快速更新并生成信号.bat` 或 `run_all.bat`。
+
 自动流程会先判断信号是否可执行：
 
 - 数据覆盖率、价格面板和因子缓存必须通过健康检查
@@ -319,6 +329,8 @@ outputs/auto_selected_params.json      自动选中的策略参数
 outputs/auto_parameter_quality.json    自动选参质量门槛判断
 outputs/auto_backtest_metrics.json     自动选参后的回测指标
 outputs/auto_signal_report.json        自动信号报告
+outputs/auto_signal_job.json           后台自动流程任务信息
+outputs/logs/auto_signal_*.log         后台自动流程日志
 outputs/data_governance_report.json    点时数据治理检查
 outputs/auto_research_diagnostics.json 研究诊断汇总
 outputs/auto_research_benchmark_curve.csv 基准对比净值
