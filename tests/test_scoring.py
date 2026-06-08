@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -217,6 +218,33 @@ class ScoringTests(unittest.TestCase):
 
         self.assertGreater(int(scores.isna().sum()), 0)
         self.assertGreater(int(scores.notna().sum()), 0)
+
+    def test_build_strategy_scores_warns_when_liquidity_filter_removes_all_scores(self) -> None:
+        date = pd.Timestamp("2024-01-02")
+        index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": [1.0, 2.0]}, index=index)
+        amount = pd.DataFrame({"A": [1.0], "B": [2.0]}, index=[date])
+        close = pd.DataFrame(10.0, index=[date], columns=["A", "B"])
+        prices = pd.concat({"close": close, "amount": amount}, axis=1)
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        config = {
+            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
+            "liquidity_filter": {
+                "enabled": True,
+                "field": "amount",
+                "window": 1,
+                "min_periods": 1,
+                "quantile": 1.0,
+                "side": "low",
+            },
+        }
+
+        with self.assertLogs("src.scoring", level="WARNING") as logs:
+            scores = build_strategy_scores(factors, config, price_df=prices)
+
+        self.assertTrue(scores.isna().all())
+        self.assertIn("liquidity filter removed all scores", "\n".join(logs.output))
+        self.assertEqual(scores.attrs["liquidity_filter"], {"rows_before": 2, "rows_after": 0, "rows_removed": 2})
 
     def test_build_strategy_scores_applies_regime_score_blend_to_real_data(self) -> None:
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
@@ -455,6 +483,41 @@ class ScoringTests(unittest.TestCase):
                 build_strategy_scores(factors, config, price_df=prices)
 
         make_weights.assert_called_once()
+
+    def test_build_strategy_scores_invalidates_legacy_weight_cache_without_version_source(self) -> None:
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cache_path = tmp_path / "weights.pkl"
+            meta_path = cache_path.with_name(f"{cache_path.name}.meta.json")
+            index = pd.MultiIndex.from_product(
+                [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+                names=["datetime", "instrument"],
+            )
+            factors = pd.DataFrame({"F1": range(5)}, index=index)
+            prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+            config = {
+                "strategy": {"factor_group": "ic_weighted"},
+                "ic": {
+                    "weights_cache_file": str(cache_path),
+                    "top_k": 1,
+                    "min_abs_ic": 0.0,
+                    "min_periods": 1,
+                    "corr_threshold": 0.7,
+                },
+            }
+
+            with patch("src.scoring.calculate_rolling_ic", return_value=pd.DataFrame()), patch(
+                "src.scoring.make_rolling_ic_weights",
+                return_value={pd.Timestamp("2024-01-02"): pd.Series({"F1": 1.0})},
+            ) as make_weights:
+                build_strategy_scores(factors, config, price_df=prices)
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                meta.pop("cache_version", None)
+                meta.pop("cache_source", None)
+                meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
+                build_strategy_scores(factors, config, price_df=prices)
+
+        self.assertEqual(make_weights.call_count, 2)
 
     def test_build_strategy_scores_invalidates_weight_cache_when_params_change(self) -> None:
         with TemporaryDirectory() as tmp:

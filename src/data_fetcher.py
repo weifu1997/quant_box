@@ -13,6 +13,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from src.common import coverage_ratio as _coverage_ratio
 from src.config_loader import load_config, resolve_path
 from src.data_fetcher_frames import (
     normalize_daily_basic_frame,
@@ -1304,10 +1305,6 @@ def _parse_trade_date_value(value: object) -> pd.Timestamp | None:
     if pd.isna(parsed):
         return None
     return pd.Timestamp(parsed).normalize()
-
-
-def _coverage_ratio(part: int, whole: int) -> float:
-    return float(part / whole) if whole else 0.0
 
 
 def _write_update_progress(path: Path, payload: dict[str, object]) -> None:

@@ -17,8 +17,8 @@ from src.trading_calendar import resolve_target_date_value
 logger = logging.getLogger(__name__)
 
 
-def read_previous_holdings(path: str | Path | None = None) -> list[str]:
-    config = load_config()
+def read_previous_holdings(path: str | Path | None = None, config: dict | None = None) -> list[str]:
+    config = config or load_config()
     holdings_path = resolve_path(path or config["outputs"]["holdings_file"])
     if not holdings_path.exists():
         return []
@@ -64,7 +64,9 @@ def generate_signal(
         prices = price_df if price_df is not None else _load_price_frame(price_file, config)
         latest_scores = filter_scores_by_selection_risk(latest_scores, prices, latest_date, config)
     latest_scores = _normalize_score_index(latest_scores)
-    previous_holdings = _normalize_instruments(previous_holdings if previous_holdings is not None else read_previous_holdings())
+    previous_holdings = _normalize_instruments(
+        previous_holdings if previous_holdings is not None else read_previous_holdings(config=config)
+    )
     max_industry_weight = strategy_cfg.get("max_industry_weight")
     industry_map = load_industry_group_map(config) if max_industry_weight is not None else None
     holdings = select_stocks(

@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.common import normalize_instrument as _normalize_instrument
+from src.common import normalize_instrument as _normalize_instrument, parse_datetime_values as _parse_datetime_values
 from src.config_loader import resolve_path
 
 
@@ -149,14 +149,6 @@ def _normalize_score_index(scores: pd.Series) -> pd.Series:
     index = pd.MultiIndex.from_arrays([frame["date"], frame["label"]], names=scores.index.names)
     result = pd.Series(frame["score"].to_numpy(), index=index, name=scores.name)
     return result.sort_index()
-
-
-def _parse_datetime_values(values: object) -> pd.Series:
-    parsed = pd.to_datetime(values, errors="coerce")
-    if pd.Series(parsed).isna().any():
-        mixed = pd.to_datetime(values, errors="coerce", format="mixed")
-        parsed = pd.Series(parsed).where(pd.Series(parsed).notna(), pd.Series(mixed))
-    return pd.Series(parsed)
 
 
 def _market_cap_residual(scores: pd.Series, market_cap: pd.Series, min_obs: int) -> pd.Series | None:

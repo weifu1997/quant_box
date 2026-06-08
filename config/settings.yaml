@@ -201,8 +201,8 @@ liquidity_filter:
   field: "amount"
   window: 10
   min_periods: 5
-  quantile: 0.35
-  side: "low"
+  quantile: 0.65
+  side: "high"
 
 selection_risk_filter:
   enabled: true

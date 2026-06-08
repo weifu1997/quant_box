@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.common import PRICE_FIELD_COLUMNS, normalize_instrument as _normalize_instrument
+from src.common import PRICE_FIELD_COLUMNS, normalize_instrument as _normalize_instrument, parse_datetime_values as _parse_datetime_values
 from src.config_loader import resolve_path
 from src.market_regime import detect_reporting_regime
 
@@ -311,29 +311,19 @@ def _drawdown_episodes(equity: pd.Series, benchmark: pd.Series | None, trades: p
     series = equity.sort_index().astype(float)
     running_peak = series.cummax()
     drawdown = series / running_peak - 1.0
-    peak_dates = pd.Series(index=series.index, dtype="datetime64[ns]")
-    last_peak = series.index[0]
-    for date, value in series.items():
-        if value >= running_peak.loc[date]:
-            last_peak = date
-        peak_dates.loc[date] = last_peak
+    peak_dates = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    peak_mask = series.ge(running_peak)
+    peak_dates.loc[peak_mask] = pd.DatetimeIndex(series.index[peak_mask])
+    peak_dates = peak_dates.ffill()
 
     rows: list[dict[str, Any]] = []
-    in_drawdown = False
-    segment_start: pd.Timestamp | None = None
-    drawdown_dates = list(series.index)
-    for date in drawdown_dates:
-        is_down = bool(drawdown.loc[date] < 0)
-        if is_down and not in_drawdown:
-            segment_start = pd.Timestamp(date)
-            in_drawdown = True
-        recovered = in_drawdown and not is_down
-        if recovered and segment_start is not None:
-            rows.append(_drawdown_episode_row(series, drawdown, peak_dates, benchmark, trades, segment_start, pd.Timestamp(date)))
-            in_drawdown = False
-            segment_start = None
-    if in_drawdown and segment_start is not None:
-        rows.append(_drawdown_episode_row(series, drawdown, peak_dates, benchmark, trades, segment_start, None))
+    in_drawdown = drawdown.lt(0)
+    starts = series.index[in_drawdown & ~in_drawdown.shift(fill_value=False)]
+    recoveries = series.index[~in_drawdown & in_drawdown.shift(fill_value=False)]
+    for start_date in starts:
+        later_recoveries = recoveries[recoveries > start_date]
+        recovery_date = pd.Timestamp(later_recoveries[0]) if len(later_recoveries) else None
+        rows.append(_drawdown_episode_row(series, drawdown, peak_dates, benchmark, trades, pd.Timestamp(start_date), recovery_date))
     return pd.DataFrame(rows)
 
 
@@ -773,35 +763,32 @@ def _holding_return_attribution(
         return {"enabled": False, "issues": ["holdings_missing_required_columns"]}, {}
     returns = close.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
     price_dates = pd.DatetimeIndex(close.index)
-    rows: list[dict[str, Any]] = []
-    for date, daily in frame.groupby("date", sort=True):
-        next_dates = price_dates[price_dates > pd.Timestamp(date)]
-        if next_dates.empty:
-            continue
-        next_date = next_dates[0]
-        total_value = float(daily["value"].sum())
-        if total_value <= 0 or next_date not in returns.index:
-            continue
-        daily_ret = returns.loc[next_date]
-        for _, row in daily.iterrows():
-            instrument = row["instrument"]
-            if instrument not in daily_ret.index or pd.isna(daily_ret.loc[instrument]):
-                continue
-            weight = float(row["value"] / total_value)
-            stock_return = float(daily_ret.loc[instrument])
-            rows.append(
-                {
-                    "date": date,
-                    "next_date": next_date,
-                    "instrument": instrument,
-                    "weight": weight,
-                    "stock_return": stock_return,
-                    "gross_contribution": weight * stock_return,
-                }
-            )
-    contribution = pd.DataFrame(rows)
+
+    next_positions = price_dates.searchsorted(pd.DatetimeIndex(frame["date"]).to_numpy(), side="right")
+    frame = frame.loc[next_positions < len(price_dates)].copy()
+    if frame.empty:
+        return {"enabled": False, "issues": ["holding_contributions_unavailable"]}, {}
+    frame["next_date"] = price_dates[next_positions[next_positions < len(price_dates)]]
+    frame = frame[frame["next_date"].isin(returns.index)].copy()
+    if frame.empty:
+        return {"enabled": False, "issues": ["holding_contributions_unavailable"]}, {}
+
+    total_value = frame.groupby("date")["value"].transform("sum")
+    frame = frame[total_value > 0].copy()
+    if frame.empty:
+        return {"enabled": False, "issues": ["holding_contributions_unavailable"]}, {}
+    total_value = total_value.loc[frame.index]
+
+    returns_stack = returns.stack(future_stack=True).rename("stock_return")
+    returns_stack.index = returns_stack.index.set_names(["next_date", "instrument"])
+    lookup_index = pd.MultiIndex.from_frame(frame[["next_date", "instrument"]])
+    frame["stock_return"] = returns_stack.reindex(lookup_index).to_numpy()
+    contribution = frame.dropna(subset=["stock_return"]).copy()
     if contribution.empty:
         return {"enabled": False, "issues": ["holding_contributions_unavailable"]}, {}
+    contribution["weight"] = contribution["value"] / total_value.loc[contribution.index]
+    contribution["gross_contribution"] = contribution["weight"] * contribution["stock_return"]
+    contribution = contribution[["date", "next_date", "instrument", "weight", "stock_return", "gross_contribution"]]
 
     industry = _load_industry_map(config)
     if not industry.empty:
@@ -1086,15 +1073,6 @@ def _numeric_column_sum(frame: pd.DataFrame, column: str) -> float:
     if column not in frame.columns:
         return 0.0
     return float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
-
-
-def _parse_datetime_values(values: Any) -> pd.Series:
-    parsed = pd.to_datetime(values, errors="coerce")
-    parsed_series = pd.Series(parsed)
-    if parsed_series.isna().any():
-        mixed = pd.to_datetime(values, errors="coerce", format="mixed")
-        parsed_series = parsed_series.where(parsed_series.notna(), pd.Series(mixed))
-    return parsed_series
 
 
 def _normalize_holdings(holdings: pd.DataFrame) -> pd.DataFrame:

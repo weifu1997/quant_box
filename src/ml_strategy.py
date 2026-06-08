@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from src.common import PRICE_FIELD_COLUMNS, normalize_instrument as _normalize_instrument
+from src.common import close_price_frame as _common_close_price_frame, normalize_instrument as _normalize_instrument, parse_datetime_values as _parse_datetime_values
 from src.factor_ic import calculate_factor_ic, make_ic_weights
 
 
@@ -303,35 +303,7 @@ def _feature_columns(numeric: pd.DataFrame, cfg: dict[str, Any]) -> list[str]:
 
 
 def _close_frame(prices: pd.DataFrame) -> pd.DataFrame:
-    if prices.empty:
-        return pd.DataFrame()
-    if isinstance(prices.columns, pd.MultiIndex):
-        fields = prices.columns.get_level_values(0).astype(str).str.strip().str.lower()
-        if "close" not in set(fields):
-            return pd.DataFrame(index=prices.index)
-        close = prices.loc[:, fields == "close"].copy()
-        close.columns = [_normalize_instrument(value) for value in close.columns.get_level_values(-1)]
-    else:
-        column_names = {str(column).strip().lower() for column in prices.columns}
-        if len(prices.columns) > 1 and column_names & PRICE_FIELD_COLUMNS:
-            raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
-        close = prices.copy()
-        close.columns = [_normalize_instrument(value) for value in close.columns]
-    raw_dates = pd.DatetimeIndex(pd.to_datetime(close.index, errors="coerce"))
-    valid_dates = ~raw_dates.isna()
-    close = close.loc[valid_dates].copy()
-    raw_dates = raw_dates[valid_dates]
-    if not close.empty:
-        order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
-        close = close.iloc[order].copy()
-        raw_dates = raw_dates[order]
-    close.index = raw_dates.normalize()
-    close.columns = [_normalize_instrument(value) for value in close.columns]
-    close = close.loc[:, close.columns != ""]
-    if close.columns.has_duplicates:
-        close = close.loc[:, ~close.columns.duplicated(keep="last")]
-    close = close[~close.index.duplicated(keep="last")].sort_index()
-    return close.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    return _common_close_price_frame(prices, normalize_symbols=True)
 
 
 def _price_history_counts(close: pd.DataFrame, target_index: pd.MultiIndex, min_sessions: int) -> pd.Series | None:
@@ -634,14 +606,6 @@ def _normalize_daily_basic_frame(
     return result.sort_index()
 
 
-def _parse_datetime_values(values: object) -> pd.Series:
-    parsed = pd.to_datetime(values, errors="coerce")
-    if pd.Series(parsed).isna().any():
-        mixed = pd.to_datetime(values, errors="coerce", format="mixed")
-        parsed = pd.Series(parsed).where(pd.Series(parsed).notna(), pd.Series(mixed))
-    return pd.Series(parsed)
-
-
 def _residualize_row_by_market_cap(row: pd.Series, cap: pd.Series, min_obs: int) -> pd.Series | None:
     y = pd.to_numeric(row, errors="coerce").astype(float)
     x = np.log1p(pd.to_numeric(cap, errors="coerce").astype(float))
@@ -746,6 +710,7 @@ def _precompute_feature_ic_weights(
     min_obs = max(1, int(cfg.get("feature_ic_min_obs", 20)))
     min_abs_ic = float(cfg.get("feature_ic_min_abs_ic", 0.02))
     method = str(cfg.get("feature_ic_method", "spearman"))
+    rebalance_sessions = max(1, int(cfg.get("feature_ic_rebalance_sessions", 1)))
 
     try:
         daily_ic = calculate_factor_ic(numeric[base_feature_columns], close, horizon=horizon, method=method, min_obs=min_obs)
@@ -759,6 +724,7 @@ def _precompute_feature_ic_weights(
     rolling_count = source.rolling(window=window, min_periods=min_periods).count()
 
     weights_by_date: dict[pd.Timestamp, pd.Series] = {}
+    eligible_weight_dates = 0
     for date in rolling_mean.index:
         mean_ic = rolling_mean.loc[date]
         count = rolling_count.loc[date]
@@ -775,6 +741,10 @@ def _precompute_feature_ic_weights(
         summary = summary.loc[summary["count"] >= min_periods]
         if summary.empty:
             continue
+        if eligible_weight_dates % rebalance_sessions != 0:
+            eligible_weight_dates += 1
+            continue
+        eligible_weight_dates += 1
         weights = make_ic_weights(summary, top_k=top_k, min_abs_ic=min_abs_ic)
         weights = weights.reindex([column for column in weights.index if column in base_feature_columns]).dropna()
         if not weights.empty:

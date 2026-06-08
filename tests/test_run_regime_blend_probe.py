@@ -21,8 +21,8 @@ class RunRegimeBlendProbeTests(unittest.TestCase):
 
         result = _with_probe_overrides(
             config,
-            liquidity_side="low",
-            liquidity_quantile=0.35,
+            liquidity_side="high",
+            liquidity_quantile=0.65,
             bear_drawdown_threshold=0.08,
             bull_defensive_weight=0.1,
             sideways_defensive_weight=0.6,
@@ -30,8 +30,8 @@ class RunRegimeBlendProbeTests(unittest.TestCase):
         )
 
         self.assertTrue(result["liquidity_filter"]["enabled"])
-        self.assertEqual(result["liquidity_filter"]["side"], "low")
-        self.assertEqual(result["liquidity_filter"]["quantile"], 0.35)
+        self.assertEqual(result["liquidity_filter"]["side"], "high")
+        self.assertEqual(result["liquidity_filter"]["quantile"], 0.65)
         self.assertEqual(result["market_regime"]["bear_drawdown_threshold"], 0.08)
         self.assertTrue(result["regime_score_blend"]["enabled"])
         self.assertEqual(result["regime_score_blend"]["bull_defensive_weight"], 0.1)

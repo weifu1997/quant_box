@@ -300,6 +300,25 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(index[["index_code", "con_code"]].iloc[0].tolist(), ["000300.SH", "600519.SH"])
         self.assertEqual(st_calendar["ts_code"].tolist(), ["000001.SZ"])
 
+    def test_normalize_st_calendar_frame_resolves_start_date_alias_conflicts(self) -> None:
+        frame = normalize_st_calendar_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "name": "*ST TEST",
+                        "start_date": "20240104",
+                        "start": "20240103",
+                        "date": "20240102",
+                        "ann_date": "20240101",
+                    }
+                ]
+            )
+        )
+
+        self.assertEqual(frame.columns.tolist(), list(dict.fromkeys(frame.columns)))
+        self.assertEqual(frame["st_start_date"].tolist(), [pd.Timestamp("2024-01-04")])
+
     def test_normalize_daily_frame_deduplicates_symbol_date_pairs(self) -> None:
         daily = normalize_daily_frame(
             pd.DataFrame(

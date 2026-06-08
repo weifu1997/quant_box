@@ -83,13 +83,30 @@ class StrategyTests(unittest.TestCase):
         self.assertLessEqual(len(set(selected) - set(previous)), 1)
         self.assertLessEqual(sum(1 for code in selected if groups[code] == "bank"), 2)
 
-    def test_select_stocks_fills_when_group_cap_cannot_be_satisfied(self) -> None:
+    def test_select_stocks_does_not_overfill_group_when_group_cap_cannot_be_satisfied(self) -> None:
         scores = pd.Series([10, 9, 8], index=["A", "B", "C"])
         groups = {"A": "bank", "B": "bank", "C": "bank"}
 
         selected = select_stocks(scores, top_n=3, group_map=groups, max_group_weight=0.34)
 
-        self.assertEqual(selected, ["A", "B", "C"])
+        self.assertEqual(selected, ["A"])
+        self.assertLessEqual(sum(1 for code in selected if groups[code] == "bank"), 1)
+
+    def test_select_stocks_does_not_overfill_group_from_previous_holdings_fallback(self) -> None:
+        scores = pd.Series([10, 9, 8, 7], index=["A", "B", "C", "D"])
+        groups = {"A": "bank", "B": "bank", "C": "bank", "D": "tech"}
+
+        selected = select_stocks(
+            scores,
+            top_n=3,
+            previous_holdings=["A", "B", "C"],
+            max_turnover=0,
+            group_map=groups,
+            max_group_weight=0.34,
+        )
+
+        self.assertEqual(selected, ["A"])
+        self.assertLessEqual(sum(1 for code in selected if groups[code] == "bank"), 1)
 
     def test_generate_holdings_by_day_returns_empty_frame_when_no_scores_are_selectable(self) -> None:
         index = pd.MultiIndex.from_product(

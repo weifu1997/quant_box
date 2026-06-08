@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from src.config_loader import DEFAULT_CONFIG, DEFAULT_CONFIG_PATH, _expand_env_values, load_config
@@ -52,9 +54,31 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(config["strategy"]["factor_group"], "dynamic_ic_selector")
         self.assertIsNone(config["strategy"]["circuit_breaker_drawdown"])
         self.assertEqual(config["strategy"]["take_profit_pct"], 0.35)
-        self.assertEqual(config["liquidity_filter"]["quantile"], 0.35)
+        self.assertEqual(config["liquidity_filter"]["quantile"], 0.65)
         self.assertTrue(config["selection_risk_filter"]["enabled"])
         self.assertEqual(config["selection_risk_filter"]["lookback_sessions"], 3)
+
+    def test_load_config_warns_for_unknown_keys_without_rejecting_them(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.yaml"
+            path.write_text(
+                """
+strategy:
+  typo_top_n: 3
+unknown_section:
+  enabled: true
+""",
+                encoding="utf-8",
+            )
+
+            with self.assertLogs("src.config_loader", level="WARNING") as logs:
+                config = load_config(path)
+
+        self.assertEqual(config["strategy"]["typo_top_n"], 3)
+        self.assertTrue(config["unknown_section"]["enabled"])
+        output = "\n".join(logs.output)
+        self.assertIn("strategy.typo_top_n", output)
+        self.assertIn("unknown_section", output)
 
     def test_default_data_config_includes_daily_basic_cache(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["data"]["history_start_date"], "2012-01-01")
@@ -64,6 +88,7 @@ class ConfigLoaderTests(unittest.TestCase):
     def test_default_scoring_excludes_low_liquidity_bucket_and_uses_stable_dynamic_ic(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "low")
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["quantile"], 0.20)
+        self.assertEqual(DEFAULT_CONFIG["ic"]["correlation_rebalance_sessions"], 1)
         self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["top_k"], 3)
         self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["metric"], "ic_ir")
         self.assertIn("factor:VMA60", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
@@ -128,6 +153,7 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(ml["model_objective"], "regression")
         self.assertEqual(ml["class_weight"], "balanced")
         self.assertEqual(ml["training_start_date"], "auto")
+        self.assertEqual(ml["feature_ic_rebalance_sessions"], 1)
         self.assertEqual(ml["label_horizon_sessions"], 20)
         self.assertEqual(ml["label_mode"], "cross_sectional_top_quantile")
         self.assertEqual(ml["label_return_adjustment"], "raw")

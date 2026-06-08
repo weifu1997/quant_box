@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
 import os
 from pathlib import Path
 import re
@@ -8,6 +9,8 @@ from typing import Any
 
 import yaml
 
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "settings.yaml"
@@ -67,6 +70,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "feature_ic_min_obs": 20,
         "feature_ic_min_abs_ic": 0.02,
         "feature_ic_method": "spearman",
+        "feature_ic_rebalance_sessions": 1,
         "min_price_history_sessions": 240,
         "min_feature_fraction": 0.5,
         "min_train_rows": 20_000,
@@ -169,6 +173,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_periods": 60,
         "min_abs_ic": 0.02,
         "corr_threshold": 0.7,
+        "correlation_rebalance_sessions": 1,
         "top_k": 30,
         "weight_smoothing": 0.6,
         "max_weight_turnover": 0.5,
@@ -330,7 +335,9 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
         path = PROJECT_ROOT / path
     if path.exists():
         with path.open("r", encoding="utf-8") as f:
-            config = _deep_merge(DEFAULT_CONFIG, yaml.safe_load(f) or {})
+            file_config = yaml.safe_load(f) or {}
+        _warn_unknown_config_keys(file_config)
+        config = _deep_merge(DEFAULT_CONFIG, file_config)
     elif config_path is None:
         config = deepcopy(DEFAULT_CONFIG)
     else:
@@ -338,6 +345,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     if config_path is None and LOCAL_CONFIG_PATH.exists():
         with LOCAL_CONFIG_PATH.open("r", encoding="utf-8") as f:
             local_config = yaml.safe_load(f) or {}
+        _warn_unknown_config_keys(local_config)
         config = _deep_merge(config, local_config)
     return _expand_env_values(config)
 
@@ -357,6 +365,18 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             result[key] = deepcopy(value)
     return result
+
+
+def _warn_unknown_config_keys(override: dict[str, Any], schema: dict[str, Any] | None = None, prefix: str = "") -> None:
+    schema = DEFAULT_CONFIG if schema is None else schema
+    for key, value in override.items():
+        key_path = f"{prefix}.{key}" if prefix else str(key)
+        if key not in schema:
+            logger.warning("Unknown config key: %s", key_path)
+            continue
+        schema_value = schema[key]
+        if isinstance(value, dict) and isinstance(schema_value, dict):
+            _warn_unknown_config_keys(value, schema_value, key_path)
 
 
 def _expand_env_values(value: Any) -> Any:

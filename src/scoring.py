@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 from pathlib import Path
 
@@ -14,6 +15,11 @@ from src.ml_strategy import build_ml_scores, ml_strategy_enabled
 from src.score_blending import apply_regime_score_blend, apply_regime_score_filter
 from src.strategy import composite_factor, factor_columns_for_method
 
+
+logger = logging.getLogger(__name__)
+
+WEIGHTS_CACHE_VERSION = 2
+WEIGHTS_CACHE_SOURCE = "quant_box.scoring.rolling_ic_weights"
 
 DYNAMIC_IC_SELECTOR_GROUPS = {"dynamic_ic_selector", "dynamic_ic"}
 DEFAULT_DYNAMIC_IC_CANDIDATES = [
@@ -357,7 +363,18 @@ def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg:
         reject_values = aligned_adv >= thresholds
     has_liquidity = pd.notna(aligned_adv) & pd.notna(thresholds)
     mask = pd.Series(has_liquidity & ~reject_values, index=scores.index)
-    return scores.where(mask).sort_index().rename(scores.name)
+    rows_before = int(scores.notna().sum())
+    result = scores.where(mask).sort_index().rename(scores.name)
+    result.attrs = dict(getattr(scores, "attrs", {}))
+    rows_after = int(result.notna().sum())
+    result.attrs["liquidity_filter"] = {
+        "rows_before": rows_before,
+        "rows_after": rows_after,
+        "rows_removed": max(0, rows_before - rows_after),
+    }
+    if rows_before > 0 and rows_after == 0:
+        logger.warning("liquidity filter removed all scores")
+    return result
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
@@ -426,6 +443,7 @@ def _load_or_compute_dynamic_weights(factors: pd.DataFrame, prices: pd.DataFrame
         min_abs_ic=float(ic_cfg.get("min_abs_ic", 0.02)),
         min_periods=int(ic_cfg.get("min_periods", 60)),
         correlation_threshold=float(ic_cfg.get("corr_threshold", 0.7)),
+        correlation_rebalance_sessions=int(ic_cfg.get("correlation_rebalance_sessions", ic_cfg.get("corr_rebalance_sessions", 1))),
         weight_smoothing=float(ic_cfg.get("weight_smoothing", 0.0)),
         max_weight_turnover=_optional_float(ic_cfg.get("max_weight_turnover")),
     )
@@ -564,6 +582,8 @@ def _slice_price_history(prices: pd.DataFrame, target_date: pd.Timestamp, sessio
 
 def _weights_cache_meta(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dict) -> dict[str, object]:
     return {
+        "cache_version": WEIGHTS_CACHE_VERSION,
+        "cache_source": WEIGHTS_CACHE_SOURCE,
         "params": {
             "horizon": int(ic_cfg.get("horizon", 1)),
             "method": str(ic_cfg.get("method", "spearman")),
@@ -573,6 +593,7 @@ def _weights_cache_meta(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dic
             "top_k": int(ic_cfg.get("top_k", 30)),
             "min_abs_ic": float(ic_cfg.get("min_abs_ic", 0.02)),
             "corr_threshold": float(ic_cfg.get("corr_threshold", 0.7)),
+            "correlation_rebalance_sessions": int(ic_cfg.get("correlation_rebalance_sessions", ic_cfg.get("corr_rebalance_sessions", 1))),
             "weight_smoothing": float(ic_cfg.get("weight_smoothing", 0.0)),
             "max_weight_turnover": _optional_float(ic_cfg.get("max_weight_turnover")),
         },

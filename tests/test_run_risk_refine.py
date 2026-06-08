@@ -34,8 +34,8 @@ class RunRiskRefineTests(unittest.TestCase):
             pd.DataFrame(
                 [
                     {
-                        "liquidity_side": "low",
-                        "liquidity_quantile": 0.35,
+                        "liquidity_side": "high",
+                        "liquidity_quantile": 0.65,
                         "top_n": 15,
                         "rank_buffer": 20,
                         "max_industry_weight": 0.25,
@@ -59,7 +59,7 @@ class RunRiskRefineTests(unittest.TestCase):
 
             keys = _completed_keys(path)
 
-        expected = _combo_key("low", 0.35, 15, 20, 0.25, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
+        expected = _combo_key("high", 0.65, 15, 20, 0.25, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
         self.assertIn(expected, keys)
 
     def test_with_timing_overrides_applies_exposure_and_market_drawdown_trigger(self) -> None:

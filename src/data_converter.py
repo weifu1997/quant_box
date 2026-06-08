@@ -36,14 +36,17 @@ def convert_to_qlib_format(
 
     universe_file = Path(data_cfg.get("constituents_file", "")).name
     hs300_universe_file = Path(data_cfg.get("hs300_constituents_file", "")).name
+    st_calendar_file = Path(data_cfg.get("st_calendar_file", "")).name
     csv_files = sorted(source_dir.glob("*.csv"))
     metadata_files = {
         name
         for name in [
             universe_file,
             hs300_universe_file,
+            st_calendar_file,
             "hs300_constituents.csv",
             "mainboard_a_stocks.csv",
+            "st_calendar.csv",
             "failed_fetches.csv",
         ]
         if name

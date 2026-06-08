@@ -117,6 +117,7 @@ def make_rolling_ic_weights(
     min_abs_ic: float = 0.02,
     min_periods: int = 60,
     correlation_threshold: float = 0.7,
+    correlation_rebalance_sessions: int = 1,
     weight_smoothing: float = 0.0,
     max_weight_turnover: float | None = None,
 ) -> dict[pd.Timestamp, pd.Series]:
@@ -134,6 +135,10 @@ def make_rolling_ic_weights(
 
     weights_by_date: dict[pd.Timestamp, pd.Series] = {}
     previous_weights: pd.Series | None = None
+    cluster_map: dict[str, list[str]] | None = None
+    cluster_factors: set[str] = set()
+    cluster_eligible_dates = 0
+    cluster_rebalance = max(1, int(correlation_rebalance_sessions))
     for date, mean_ic in rolling_ic_df.iterrows():
         count = rolling_count.loc[date].reindex(mean_ic.index).fillna(0)
         std_ic = rolling_std.loc[date].reindex(mean_ic.index)
@@ -143,8 +148,17 @@ def make_rolling_ic_weights(
             continue
 
         candidates = ic_ir[valid]
-        history = source.loc[source.index <= date, candidates.index].tail(window).dropna(how="all")
-        cluster_map = cluster_correlated_factors(history, threshold=correlation_threshold)
+        candidate_factors = set(candidates.index)
+        should_recluster = (
+            cluster_map is None
+            or cluster_eligible_dates % cluster_rebalance == 0
+            or not candidate_factors.issubset(cluster_factors)
+        )
+        if should_recluster:
+            history = source.loc[source.index <= date, candidates.index].tail(window).dropna(how="all")
+            cluster_map = cluster_correlated_factors(history, threshold=correlation_threshold)
+            cluster_factors = candidate_factors
+        cluster_eligible_dates += 1
         keep = [factor for factor in candidates.index if factor in cluster_map]
         scores = candidates.loc[keep].reindex(candidates.loc[keep].abs().sort_values(ascending=False).index).head(top_k)
         denom = scores.abs().sum()

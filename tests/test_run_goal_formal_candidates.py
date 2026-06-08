@@ -95,7 +95,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
     def test_score_key_includes_regime_score_filter(self) -> None:
         base = {
             "strategy": {"factor_group": "momentum"},
-            "liquidity_filter": {"enabled": True, "side": "low", "quantile": 0.35},
+            "liquidity_filter": {"enabled": True, "side": "high", "quantile": 0.65},
         }
         filtered = {
             **base,

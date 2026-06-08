@@ -549,7 +549,8 @@ def _sorted_results(rows: list[dict[str, object]]) -> pd.DataFrame:
     sort_columns = [column for column in ["optimization_score", "sharpe", "annual_return", "max_drawdown"] if column in result_df.columns]
     if not sort_columns:
         return result_df
-    return result_df.sort_values(sort_columns, ascending=[False] * len(sort_columns)).reset_index(drop=True)
+    ascending = [column == "max_drawdown" for column in sort_columns]
+    return result_df.sort_values(sort_columns, ascending=ascending).reset_index(drop=True)
 
 
 def _metric_float(metrics: dict, key: str) -> float:

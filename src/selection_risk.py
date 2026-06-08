@@ -50,10 +50,9 @@ def selection_risk_eligible_instruments(
     normalized_prices = _normalize_price_frame(prices)
     signal_ts = pd.Timestamp(signal_date).normalize()
 
-    close = _price_field(normalized_prices, "close")
-    if close.empty:
+    if not _has_price_field(normalized_prices, "close"):
         raise ValueError("selection_risk_filter requires a close field in the price panel.")
-    eligible_dates = pd.DatetimeIndex(close.index[close.index <= signal_ts]).unique().sort_values()
+    eligible_dates = pd.DatetimeIndex(normalized_prices.index[normalized_prices.index <= signal_ts]).unique().sort_values()
     if eligible_dates.empty:
         return set()
     lookback = max(1, int(cfg.get("lookback_sessions", 5)))
@@ -111,10 +110,10 @@ def _missing_field_sessions(
     instruments: pd.Index,
     lookback_dates: pd.DatetimeIndex,
 ) -> pd.DataFrame:
-    frame = _price_field(prices, field)
+    frame = _price_field_slice(prices, field, lookback_dates, instruments)
     if frame.empty:
         return pd.DataFrame(True, index=lookback_dates, columns=instruments)
-    values = _numeric_frame(frame.reindex(lookback_dates).reindex(columns=instruments))
+    values = _numeric_frame(frame)
     return values.isna() | (values <= 0)
 
 
@@ -125,10 +124,11 @@ def _recent_limit_down_day_counts(
     config: dict[str, Any],
     filter_cfg: dict[str, Any],
 ) -> pd.Series:
-    close = _price_field(prices, "close")
+    needed_dates = _lookback_with_previous_dates(prices, lookback_dates)
+    close = _price_field_slice(prices, "close", needed_dates, instruments)
     if close.empty:
         return pd.Series(0, index=instruments, dtype="int64")
-    low = _price_field(prices, "low")
+    low = _price_field_slice(prices, "low", lookback_dates, instruments)
     probe_frame = low if not low.empty else close
     previous_close = _numeric_frame(close.shift(1).reindex(lookback_dates).reindex(columns=instruments))
     probe = _numeric_frame(probe_frame.reindex(lookback_dates).reindex(columns=instruments))
@@ -156,10 +156,10 @@ def _limit_down_threshold_frame(
         index=lookback_dates,
         columns=instruments,
     )
-    is_st = _price_field(prices, "is_st")
+    is_st = _price_field_slice(prices, "is_st", lookback_dates, instruments)
     if is_st.empty:
         return frame
-    st_flags = is_st.reindex(lookback_dates).reindex(columns=instruments).fillna(False).astype(bool)
+    st_flags = is_st.fillna(False).astype(bool)
     return frame.where(~st_flags, float(_config_value(config, "st_limit_down_threshold", 0.049)))
 
 
@@ -193,7 +193,7 @@ def _base_limit_down_threshold_for_stock(stock: str, config: dict[str, Any]) -> 
 
 
 def _is_st_on_date(stock: str, prices: pd.DataFrame, date: pd.Timestamp) -> bool:
-    is_st = _price_field(prices, "is_st")
+    is_st = _price_field_slice(prices, "is_st", pd.DatetimeIndex([pd.Timestamp(date).normalize()]), pd.Index([stock]))
     if is_st.empty or stock not in is_st.columns or date not in is_st.index:
         return False
     value = is_st.loc[date, stock]
@@ -271,6 +271,49 @@ def _normalize_price_field(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().lower()
+
+
+def _has_price_field(prices: pd.DataFrame, field: str) -> bool:
+    if not isinstance(prices.columns, pd.MultiIndex):
+        return False
+    field = _normalize_price_field(field)
+    return field in set(_normalize_price_field(value) for value in prices.columns.get_level_values("field"))
+
+
+def _price_field_slice(
+    prices: pd.DataFrame,
+    field: str,
+    dates: pd.DatetimeIndex,
+    instruments: pd.Index,
+) -> pd.DataFrame:
+    field = _normalize_price_field(field)
+    dates = pd.DatetimeIndex(pd.to_datetime(dates, errors="coerce")).dropna().normalize().unique().sort_values()
+    instruments = pd.Index([_normalize_instrument(value) for value in instruments]).drop_duplicates()
+    instruments = instruments[instruments != ""]
+    if dates.empty or instruments.empty or not _has_price_field(prices, field):
+        return pd.DataFrame(index=dates)
+
+    row_slice = prices.reindex(dates)
+    fields = pd.Index([_normalize_price_field(value) for value in row_slice.columns.get_level_values("field")])
+    symbols = pd.Index(row_slice.columns.get_level_values("instrument").astype(str))
+    columns = (fields == field) & symbols.isin(instruments)
+    if not bool(columns.any()):
+        return pd.DataFrame(index=dates, columns=instruments)
+    frame = row_slice.loc[:, columns].copy(deep=False)
+    frame.columns = frame.columns.get_level_values("instrument").astype(str)
+    if frame.columns.has_duplicates:
+        frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
+    return frame.reindex(columns=instruments)
+
+
+def _lookback_with_previous_dates(prices: pd.DataFrame, lookback_dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    price_dates = pd.DatetimeIndex(prices.index).unique().sort_values()
+    lookback_dates = pd.DatetimeIndex(lookback_dates).unique().sort_values()
+    if price_dates.empty or lookback_dates.empty:
+        return lookback_dates
+    positions = price_dates.searchsorted(lookback_dates)
+    previous = [price_dates[position - 1] for position in positions if position > 0]
+    return pd.DatetimeIndex([*previous, *lookback_dates]).unique().sort_values()
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:

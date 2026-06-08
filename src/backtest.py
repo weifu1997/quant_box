@@ -157,9 +157,8 @@ def run_backtest(
         else:
             if circuit_breaker_until is not None:
                 circuit_breaker_until = None
-                peak_equity = total_before_signal
             peak_equity = max(peak_equity, total_before_signal)
-            risk_off = _drawdown_breached(total_before_signal, peak_equity, config)
+            risk_off = bool(holdings) and _drawdown_breached(total_before_signal, peak_equity, config)
             if risk_off and circuit_breaker_cooldown_days is not None:
                 circuit_breaker_until = _cooldown_until(price_dates, date_pos, circuit_breaker_cooldown_days)
         if risk_off:

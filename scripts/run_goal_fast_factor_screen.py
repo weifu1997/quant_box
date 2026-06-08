@@ -24,7 +24,7 @@ def main() -> None:
     parser.add_argument("--output", default=dated_output_path("goal_fast_factor_screen"))
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--top-n", default="7,10,15,20")
-    parser.add_argument("--liquidity-modes", default="none,low:0.20,low:0.35,high:0.20")
+    parser.add_argument("--liquidity-modes", default="none,high:0.80,high:0.65,high:0.80")
     parser.add_argument("--limit-columns", type=int, default=0)
     args = parser.parse_args()
 

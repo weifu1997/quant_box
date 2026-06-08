@@ -64,8 +64,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -129,8 +129,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -150,8 +150,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -171,8 +171,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -192,8 +192,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -213,8 +213,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": true,
     "backtest": {
@@ -234,8 +234,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -258,8 +258,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -283,8 +283,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -306,8 +306,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -329,8 +329,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -351,8 +351,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -373,8 +373,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -395,8 +395,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -417,8 +417,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.2
+      "side": "high",
+      "quantile": 0.8
     },
     "defensive_timing": false,
     "backtest": {
@@ -439,7 +439,7 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
+      "side": "high",
       "quantile": 0.5
     },
     "defensive_timing": false,
@@ -461,7 +461,7 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
+      "side": "high",
       "quantile": 0.5
     },
     "defensive_timing": false,
@@ -484,8 +484,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -507,8 +507,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": false,
     "backtest": {
@@ -529,8 +529,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_filter": {
       "enabled": true,
@@ -566,8 +566,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_filter": {
       "enabled": true,
@@ -611,8 +611,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": true,
     "market_regime": {
@@ -644,8 +644,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": true,
     "market_regime": {
@@ -677,8 +677,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": true,
     "market_regime": {
@@ -710,8 +710,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "defensive_timing": true,
     "market_regime": {
@@ -743,8 +743,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.2
+      "side": "high",
+      "quantile": 0.8
     },
     "defensive_timing": false,
     "backtest": {
@@ -770,8 +770,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.2
+      "side": "high",
+      "quantile": 0.8
     },
     "defensive_timing": false,
     "backtest": {
@@ -792,8 +792,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.2
+      "side": "high",
+      "quantile": 0.8
     },
     "defensive_timing": false,
     "backtest": {
@@ -819,8 +819,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.2
+      "side": "high",
+      "quantile": 0.8
     },
     "defensive_timing": false,
     "backtest": {
@@ -846,8 +846,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.2
+      "side": "high",
+      "quantile": 0.8
     },
     "defensive_timing": false,
     "backtest": {
@@ -873,8 +873,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.2
+      "side": "high",
+      "quantile": 0.8
     },
     "regime_score_blend": {
       "enabled": false
@@ -898,8 +898,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -923,8 +923,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -948,8 +948,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -973,8 +973,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1000,8 +1000,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1028,8 +1028,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1053,8 +1053,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1087,8 +1087,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1126,8 +1126,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1160,8 +1160,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1185,8 +1185,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1210,8 +1210,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1235,8 +1235,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1277,8 +1277,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1319,8 +1319,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1357,8 +1357,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1395,8 +1395,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1433,8 +1433,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1472,8 +1472,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1511,8 +1511,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1549,8 +1549,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1603,8 +1603,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1657,8 +1657,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1711,8 +1711,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1765,8 +1765,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1820,8 +1820,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1875,8 +1875,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1930,8 +1930,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -1968,8 +1968,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2006,8 +2006,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2046,8 +2046,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2086,8 +2086,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2129,8 +2129,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2173,8 +2173,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2212,8 +2212,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2251,8 +2251,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2290,8 +2290,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2328,7 +2328,7 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
+      "side": "high",
       "quantile": 0.5
     },
     "regime_score_blend": {
@@ -2366,7 +2366,7 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
+      "side": "high",
       "quantile": 0.5
     },
     "regime_score_blend": {
@@ -2404,8 +2404,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2442,8 +2442,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2480,8 +2480,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2518,8 +2518,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2580,8 +2580,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2642,8 +2642,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2723,8 +2723,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2781,8 +2781,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2832,8 +2832,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2895,8 +2895,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -2958,8 +2958,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3009,8 +3009,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3053,8 +3053,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3097,8 +3097,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3151,8 +3151,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3205,8 +3205,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": true,
@@ -3260,8 +3260,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": true,
@@ -3315,8 +3315,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": true,
@@ -3370,8 +3370,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3421,8 +3421,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3472,8 +3472,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3523,8 +3523,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3574,8 +3574,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3625,8 +3625,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3678,8 +3678,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3731,8 +3731,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3784,8 +3784,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3837,8 +3837,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3893,8 +3893,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -3949,8 +3949,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -4005,8 +4005,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -4061,8 +4061,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -4118,8 +4118,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -4175,8 +4175,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false
@@ -4232,8 +4232,8 @@
     },
     "liquidity_filter": {
       "enabled": true,
-      "side": "low",
-      "quantile": 0.35
+      "side": "high",
+      "quantile": 0.65
     },
     "regime_score_blend": {
       "enabled": false

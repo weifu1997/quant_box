@@ -10,6 +10,7 @@ from src.optimizer import (
     BASELINE_GRID,
     DEFAULT_GRID,
     _optimization_score,
+    _sorted_results,
     _slice_factor_dates,
     _slice_score_dates,
     run_walk_forward_grid_validation,
@@ -40,6 +41,16 @@ class OptimizerTests(unittest.TestCase):
 
     def test_optimization_score_treats_missing_metrics_as_zero(self) -> None:
         self.assertEqual(_optimization_score({"sharpe": float("nan")}), 0.0)
+
+    def test_sorted_results_prefers_smaller_max_drawdown_when_core_metrics_tie(self) -> None:
+        rows = [
+            {"name": "deep", "optimization_score": 1.0, "sharpe": 2.0, "annual_return": 0.3, "max_drawdown": 0.30},
+            {"name": "shallow", "optimization_score": 1.0, "sharpe": 2.0, "annual_return": 0.3, "max_drawdown": 0.10},
+        ]
+
+        result = _sorted_results(rows)
+
+        self.assertEqual(result["name"].tolist(), ["shallow", "deep"])
 
     def test_baseline_grid_is_smaller_than_full_grid(self) -> None:
         self.assertLess(_grid_size(BASELINE_GRID), _grid_size(DEFAULT_GRID))

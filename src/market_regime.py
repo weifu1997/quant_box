@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
+from src.common import close_price_frame as _common_close_price_frame
 from src.config_loader import resolve_path
 
 
@@ -316,43 +316,7 @@ def _load_benchmark_file(path_value: str | Path) -> pd.Series:
 
 
 def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
-    if price_df.empty:
-        return pd.DataFrame()
-    if isinstance(price_df.columns, pd.MultiIndex):
-        fields = price_df.columns.get_level_values(0).astype(str).str.strip().str.lower()
-        if "close" not in set(fields):
-            return pd.DataFrame(index=price_df.index)
-        close = price_df.loc[:, fields == "close"].copy()
-        close.columns = close.columns.get_level_values(-1).astype(str)
-        return _normalize_close_frame(close)
-    if _looks_like_field_table(price_df.columns):
-        raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
-    return _normalize_close_frame(price_df.copy())
-
-
-def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
-    if close.empty:
-        return close
-    raw_dates = pd.DatetimeIndex(pd.to_datetime(close.index, errors="coerce"))
-    valid_dates = ~pd.isna(raw_dates)
-    if not valid_dates.all():
-        close = close.loc[valid_dates].copy()
-        raw_dates = raw_dates[valid_dates]
-    if close.empty:
-        return close
-
-    order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
-    if not np.array_equal(order, np.arange(len(raw_dates))):
-        close = close.iloc[order].copy()
-        raw_dates = raw_dates[order]
-    close.index = raw_dates.normalize()
-    close.columns = [_normalize_instrument(value) for value in close.columns]
-    close = close.loc[:, close.columns != ""]
-    if close.columns.has_duplicates:
-        close = close.loc[:, ~close.columns.duplicated(keep="last")]
-    if close.index.has_duplicates:
-        close = close.loc[~close.index.duplicated(keep="last")]
-    return close.sort_index()
+    return _common_close_price_frame(price_df, normalize_symbols=True)
 
 
 def _load_hs300_symbols(path_value: str | Path | None) -> set[str]:

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -183,6 +186,39 @@ class SignalGeneratorTests(unittest.TestCase):
         _signal, holdings = generate_signal("latest", previous_holdings=[], config=config, factors=factors, price_df=prices)
 
         self.assertEqual(holdings, ["B"])
+
+    def test_generate_signal_reads_previous_holdings_from_passed_config(self) -> None:
+        date = pd.Timestamp("2024-01-02")
+        index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"ROC5": [2.0, 1.0]}, index=index)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            passed_holdings = root / "passed_holdings.csv"
+            default_holdings = root / "default_holdings.csv"
+            pd.DataFrame({"instrument": ["B"]}).to_csv(passed_holdings, index=False)
+            pd.DataFrame({"instrument": ["A"]}).to_csv(default_holdings, index=False)
+            config = {
+                "data": {"start_date": "2024-01-01", "end_date": "2024-01-02"},
+                "strategy": {
+                    "factor_group": "momentum",
+                    "top_n": 1,
+                    "max_turnover": 0,
+                    "rank_buffer": 0,
+                    "min_cross_section_obs": 1,
+                },
+                "factors": {"cache_file": "unused.parquet"},
+                "outputs": {"holdings_file": str(passed_holdings)},
+            }
+            default_config = {
+                **config,
+                "outputs": {"holdings_file": str(default_holdings)},
+            }
+
+            with patch("src.signal_generator.load_config", return_value=default_config):
+                signal, holdings = generate_signal("latest", config=config, factors=factors)
+
+        self.assertEqual(holdings, ["B"])
+        self.assertEqual(signal[["instrument", "action"]].to_dict("records"), [{"instrument": "B", "action": "HOLD"}])
 
 
 def _signal_config(

@@ -12,9 +12,13 @@ from src.data_converter import _apply_adjustment
 
 
 class DataConverterTests(unittest.TestCase):
-    def test_convert_to_qlib_format_ignores_failed_fetches_manifest(self) -> None:
+    def test_convert_to_qlib_format_ignores_metadata_csv_files(self) -> None:
         config = {
-            "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},
+            "data": {
+                "raw_dir": "unused",
+                "constituents_file": "data/raw/mainboard_a_stocks.csv",
+                "st_calendar_file": "data/raw/st_calendar.csv",
+            },
             "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
         }
 
@@ -40,6 +44,10 @@ class DataConverterTests(unittest.TestCase):
             ).to_csv(raw_dir / "000001.SZ.csv", index=False)
             pd.DataFrame([{"ts_code": "000982.SZ", "reason": "empty_or_failed_fetch"}]).to_csv(
                 raw_dir / "failed_fetches.csv",
+                index=False,
+            )
+            pd.DataFrame([{"ts_code": "000001.SZ", "name": "*ST TEST", "st_start_date": "2024-01-02"}]).to_csv(
+                raw_dir / "st_calendar.csv",
                 index=False,
             )
 

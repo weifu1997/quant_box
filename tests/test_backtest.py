@@ -772,6 +772,46 @@ class BacktestTests(unittest.TestCase):
         ]
         self.assertFalse(later_buys.empty)
 
+    def test_circuit_breaker_cooldown_keeps_historical_peak_for_second_drawdown(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10"])
+        index = pd.MultiIndex.from_product([[dates[0], dates[4]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series(10, index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 12.0, 11.3, 12.0, 12.0, 11.55]}, index=dates),
+                "open": pd.DataFrame({"A": [10.0, 10.0, 12.0, 11.3, 12.0, 12.0, 11.55]}, index=dates),
+                "volume": pd.DataFrame({"A": [100000.0] * len(dates)}, index=dates),
+                "amount": pd.DataFrame({"A": [1000000.0] * len(dates)}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-10",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "circuit_breaker_drawdown": 0.05,
+                "circuit_breaker_cooldown_days": 1,
+                "circuit_breaker_target_exposure": 0.5,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+            },
+        )
+
+        circuit_sells = result.trades[
+            (result.trades["side"] == "SELL") & (result.trades["reason"] == "circuit_breaker")
+        ]
+        self.assertEqual(
+            pd.to_datetime(circuit_sells["date"]).dt.strftime("%Y-%m-%d").tolist(),
+            ["2024-01-05", "2024-01-08", "2024-01-10"],
+        )
+
     def test_circuit_breaker_target_exposure_reduces_instead_of_liquidates(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])

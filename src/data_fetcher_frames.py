@@ -78,14 +78,13 @@ def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
     renamed = df.rename(
         columns={
             "code": "ts_code",
-            "start": "start_date",
             "end": "end_date",
-            "date": "start_date",
             "reason": "change_reason",
         }
     ).copy()
     if "ts_code" not in renamed.columns:
         raise ValueError("ST calendar source is missing ts_code column.")
+    renamed["start_date"] = _coalesce_st_start_date(renamed)
     for column in ["name", "start_date", "end_date", "ann_date", "change_reason"]:
         if column not in renamed.columns:
             renamed[column] = pd.NA
@@ -98,10 +97,20 @@ def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
     renamed = renamed[is_st].copy()
     if renamed.empty:
         return pd.DataFrame(columns=ST_CALENDAR_FIELDS)
-    renamed["st_start_date"] = _parse_tushare_dates(renamed["start_date"].where(renamed["start_date"].notna(), renamed["ann_date"]))
+    renamed["st_start_date"] = _parse_tushare_dates(renamed["start_date"])
     renamed["st_end_date"] = _parse_tushare_dates(renamed["end_date"])
     renamed["ann_date"] = _parse_tushare_dates(renamed["ann_date"])
     renamed = renamed.dropna(subset=["ts_code", "st_start_date"])
     renamed = renamed[renamed["ts_code"] != ""]
     result = renamed[ST_CALENDAR_FIELDS].copy()
     return result.sort_values(["ts_code", "st_start_date"]).reset_index(drop=True)
+
+
+def _coalesce_st_start_date(frame: pd.DataFrame) -> pd.Series:
+    result = pd.Series(pd.NA, index=frame.index, dtype="object")
+    for column in ["start_date", "start", "date", "ann_date"]:
+        if column not in frame.columns:
+            continue
+        values = frame[column].replace(r"^\s*$", pd.NA, regex=True)
+        result = result.where(result.notna(), values)
+    return result

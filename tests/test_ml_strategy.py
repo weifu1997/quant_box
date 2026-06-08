@@ -9,8 +9,10 @@ import pandas as pd
 from src.ml_strategy import (
     _adjust_label_returns,
     _close_frame,
+    _evolve_features,
     _feature_columns,
     _neutralize_label_frame,
+    _precompute_feature_ic_weights,
     _prepare_training_matrix,
     _transform_label_frame,
     build_ml_scores,
@@ -603,14 +605,85 @@ class MLStrategyTests(unittest.TestCase):
                 "feature_ic_min_periods": 3,
                 "feature_ic_min_obs": 2,
                 "feature_ic_min_abs_ic": 0.0,
+                "feature_ic_rebalance_sessions": 5,
             }
         }
 
         result = build_ml_scores(factors, prices, config, signal_dates=[dates[-1]])
 
+        self.assertFalse(result.scores.dropna().empty)
         row = result.diagnostics.iloc[0]
         self.assertTrue(bool(row["feature_ic_evolved"]))
         self.assertEqual(int(row["feature_count"]), 1)
+
+    def test_precompute_feature_ic_weights_defaults_to_daily_recalculation(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=10)
+        numeric, close = _feature_ic_precompute_frames(dates)
+        daily_ic = pd.DataFrame({"F1": np.linspace(0.01, 0.10, len(dates)), "F2": np.linspace(0.10, 0.01, len(dates))}, index=dates)
+
+        with patch("src.ml_strategy.calculate_factor_ic", return_value=daily_ic), patch(
+            "src.ml_strategy.make_ic_weights",
+            return_value=pd.Series({"F1": 1.0}),
+        ) as make_weights:
+            weights = _precompute_feature_ic_weights(
+                numeric,
+                close,
+                ["F1", "F2"],
+                horizon=1,
+                cfg={"feature_ic_window": 3, "feature_ic_min_periods": 1, "feature_ic_min_obs": 1, "feature_ic_min_abs_ic": 0.0},
+                enabled=True,
+            )
+
+        self.assertEqual(make_weights.call_count, len(dates) - 1)
+        self.assertEqual(len(weights), len(dates) - 1)
+
+    def test_precompute_feature_ic_weights_rebalances_on_configured_sessions(self) -> None:
+        dates = pd.bdate_range("2024-01-02", periods=10)
+        numeric, close = _feature_ic_precompute_frames(dates)
+        daily_ic = pd.DataFrame({"F1": np.linspace(0.01, 0.10, len(dates)), "F2": np.linspace(0.10, 0.01, len(dates))}, index=dates)
+
+        with patch("src.ml_strategy.calculate_factor_ic", return_value=daily_ic), patch(
+            "src.ml_strategy.make_ic_weights",
+            side_effect=[pd.Series({"F1": 1.0}), pd.Series({"F2": 1.0})],
+        ) as make_weights:
+            weights = _precompute_feature_ic_weights(
+                numeric,
+                close,
+                ["F1", "F2"],
+                horizon=1,
+                cfg={
+                    "feature_ic_window": 3,
+                    "feature_ic_min_periods": 1,
+                    "feature_ic_min_obs": 1,
+                    "feature_ic_min_abs_ic": 0.0,
+                    "feature_ic_rebalance_sessions": 5,
+                },
+                enabled=True,
+            )
+
+        self.assertEqual(make_weights.call_count, 2)
+        self.assertEqual(list(weights), [pd.Timestamp(dates[1]), pd.Timestamp(dates[6])])
+        selected, feature_weights, evolved = _evolve_features(["F1", "F2"], pd.Timestamp(dates[5]), weights)
+        self.assertTrue(evolved)
+        self.assertEqual(selected, ["F1"])
+        self.assertEqual(feature_weights.to_dict(), {"F1": 1.0})
+        selected, feature_weights, evolved = _evolve_features(["F1", "F2"], pd.Timestamp(dates[6]), weights)
+        self.assertTrue(evolved)
+        self.assertEqual(selected, ["F2"])
+        self.assertEqual(feature_weights.to_dict(), {"F2": 1.0})
+
+def _feature_ic_precompute_frames(dates: pd.DatetimeIndex) -> tuple[pd.DataFrame, pd.DataFrame]:
+    instruments = ["A", "B"]
+    index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+    numeric = pd.DataFrame(
+        {
+            "F1": np.tile([1.0, 2.0], len(dates)),
+            "F2": np.tile([2.0, 1.0], len(dates)),
+        },
+        index=index,
+    )
+    close = pd.DataFrame(10.0, index=dates, columns=instruments)
+    return numeric, close
 
 
 if __name__ == "__main__":

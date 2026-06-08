@@ -231,20 +231,25 @@ def _price_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[s
     if close.empty:
         return {}
 
-    latest_dates: dict[str, pd.Timestamp] = {}
-    for position, raw_symbol in enumerate(close.columns):
-        symbol = _normalize_symbol(raw_symbol)
-        if not symbol or (symbols and symbol not in symbols):
-            continue
-        series = close.iloc[:, position]
-        valid_dates = close.index[series.notna()]
-        if valid_dates.empty:
-            continue
-        latest = pd.Timestamp(valid_dates.max()).normalize()
-        current = latest_dates.get(symbol)
-        if current is None or latest > current:
-            latest_dates[symbol] = latest
-    return latest_dates
+    normalized = pd.Index([_normalize_symbol(column) for column in close.columns])
+    keep = normalized != ""
+    if symbols:
+        keep &= normalized.isin(symbols)
+    if not bool(keep.any()):
+        return {}
+    close = close.loc[:, keep].copy()
+    close.columns = normalized[keep]
+
+    date_values = close.index.to_numpy(dtype="datetime64[ns]")
+    valid_dates = pd.DataFrame(
+        np.where(close.notna().to_numpy(), date_values[:, None], np.datetime64("NaT")),
+        columns=close.columns,
+    )
+    latest = pd.to_datetime(valid_dates.max(axis=0), errors="coerce").dropna()
+    if latest.empty:
+        return {}
+    latest = latest.groupby(level=0).max()
+    return {str(symbol): pd.Timestamp(date).normalize() for symbol, date in latest.items()}
 
 
 def _close_price_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
@@ -279,15 +284,13 @@ def _factor_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[
         return {}
     dates = pd.to_datetime(frame.index.get_level_values(0), errors="coerce")
     instruments = pd.Index(frame.index.get_level_values(1)).astype(str).str.strip().str.upper()
-    latest_dates: dict[str, pd.Timestamp] = {}
-    for date_value, symbol in zip(dates, instruments):
-        if pd.isna(date_value) or not symbol or (symbols and symbol not in symbols):
-            continue
-        latest = pd.Timestamp(date_value).normalize()
-        current = latest_dates.get(symbol)
-        if current is None or latest > current:
-            latest_dates[symbol] = latest
-    return latest_dates
+    valid = dates.notna() & (instruments != "")
+    if symbols:
+        valid &= instruments.isin(symbols)
+    if not bool(valid.any()):
+        return {}
+    latest = pd.Series(pd.DatetimeIndex(dates[valid]).normalize(), index=instruments[valid]).groupby(level=0).max()
+    return {str(symbol): pd.Timestamp(date).normalize() for symbol, date in latest.items()}
 
 
 def _normalize_symbols(values: Any) -> set[str]:

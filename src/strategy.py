@@ -242,7 +242,15 @@ def _apply_group_cap(
         selected.append(code)
         _bump_group(code, group_counts, groups)
     if len(selected) < top_n:
-        selected.extend([code for code in ranked if code not in selected][: top_n - len(selected)])
+        for code in ranked:
+            if len(selected) >= top_n:
+                break
+            if code in selected:
+                continue
+            if not _group_slot_available(code, group_counts, group_limit, groups):
+                continue
+            selected.append(code)
+            _bump_group(code, group_counts, groups)
     return _dedupe_preserve(selected)[:top_n]
 
 
@@ -303,7 +311,10 @@ def _enforce_group_cap(
             is_new = code not in previous_set
             if is_new and new_count >= effective_allowed_new:
                 continue
+            if not _group_slot_available(code, group_counts, group_limit, groups):
+                continue
             selected.append(code)
+            _bump_group(code, group_counts, groups)
             if is_new:
                 new_count += 1
     return _dedupe_preserve(selected)

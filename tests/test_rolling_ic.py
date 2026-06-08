@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -145,6 +146,32 @@ class RollingICTests(unittest.TestCase):
         )
 
         self.assertLess(_max_weight_delta(stable), _max_weight_delta(raw))
+
+    def test_rolling_weights_reuses_correlation_clusters_between_rebalance_sessions(self) -> None:
+        dates = pd.date_range("2024-01-01", periods=9, freq="D")
+        daily_ic = pd.DataFrame(
+            {
+                "F1": [0.06, 0.07, 0.08, 0.07, 0.08, 0.09, 0.08, 0.07, 0.08],
+                "F2": [0.061, 0.071, 0.081, 0.071, 0.081, 0.091, 0.081, 0.071, 0.081],
+            },
+            index=dates,
+        )
+        rolling_ic = daily_ic.shift(1).rolling(window=2, min_periods=1).mean()
+        rolling_ic.attrs["daily_ic"] = daily_ic
+        rolling_ic.attrs["window"] = 2
+
+        with patch("src.factor_ic.cluster_correlated_factors", wraps=cluster_correlated_factors) as cluster:
+            weights = make_rolling_ic_weights(
+                rolling_ic,
+                top_k=2,
+                min_abs_ic=0.0,
+                min_periods=1,
+                correlation_threshold=0.7,
+                correlation_rebalance_sessions=3,
+        )
+
+        self.assertEqual(cluster.call_count, 3)
+        self.assertEqual(len(weights), len(dates) - 2)
 
     def test_composite_factor_accepts_dynamic_weights(self) -> None:
         dates = pd.date_range("2024-01-01", periods=2, freq="D")

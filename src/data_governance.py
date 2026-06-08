@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.common import is_stock_csv as _is_stock_csv
+from src.common import coverage_ratio as _coverage_ratio, is_stock_csv as _is_stock_csv
 from src.config_loader import load_config, resolve_path
 
 
@@ -534,10 +534,6 @@ def _month_range_texts(start: str, end: str) -> set[str]:
         return set()
     periods = pd.period_range(pd.Timestamp(start_date).to_period("M"), pd.Timestamp(end_date).to_period("M"), freq="M")
     return {str(period) for period in periods}
-
-
-def _coverage_ratio(observed: int, expected: int) -> float:
-    return float(observed / expected) if expected else 0.0
 
 
 def _coerce_dates(values: Any) -> pd.Series:
