@@ -4,6 +4,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.common import normalize_instrument as _normalize_instrument
 from src.market_regime import REGIME_BEAR, REGIME_BULL, REGIME_SIDEWAYS, normalize_regime, regime_for_date
 
 
@@ -238,12 +239,6 @@ def _normalize_daily_scores(daily_scores: pd.Series) -> pd.Series:
     if daily.index.has_duplicates:
         daily = daily[~daily.index.duplicated(keep="first")]
     return daily
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _defensive_score(factors: pd.DataFrame, components: list[dict[str, object]]) -> pd.Series:

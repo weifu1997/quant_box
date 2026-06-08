@@ -12,12 +12,12 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.run_rebalance_drift_probe import (
-    _probe_factor_columns,
-    _probe_symbols,
-    _read_factor_subset,
-    _read_price_subset,
-    _read_selected_params,
+from scripts._shared import (
+    probe_factor_columns,
+    probe_symbols,
+    read_factor_subset,
+    read_price_subset,
+    read_selected_params,
 )
 from src.auto_tuning import apply_strategy_params
 from src.config_loader import load_config, resolve_path
@@ -60,14 +60,14 @@ def main() -> None:
     args = parser.parse_args()
 
     end_date = resolve_target_date_value(args.end_date, config=config)
-    selected = _read_selected_params(args.selected_params)
+    selected = read_selected_params(args.selected_params)
     if selected:
         config = apply_strategy_params(config, selected)
 
-    symbols = _probe_symbols(args.symbol_source, args.max_symbols)
-    factor_columns = _probe_factor_columns(args.factor_file, config)
+    symbols = probe_symbols(args.symbol_source, args.max_symbols)
+    factor_columns = probe_factor_columns(args.factor_file, config)
     logger.info("Loading factor columns: %s", factor_columns or "all")
-    factors = _read_factor_subset(args.factor_file, factor_columns, args.start_date, end_date, symbols)
+    factors = read_factor_subset(args.factor_file, factor_columns, args.start_date, end_date, symbols)
     if symbols:
         symbols = sorted(set(factors.index.get_level_values(1).astype(str)))
     logger.info("Probe factor shape: %s over %s symbols.", factors.shape, len(symbols) if symbols else "all")
@@ -75,7 +75,7 @@ def main() -> None:
     fields = ["close"]
     if bool(config.get("liquidity_filter", {}).get("enabled", False)):
         fields.append(str(config.get("liquidity_filter", {}).get("field", "amount")).lower())
-    prices = _read_price_subset(args.price_file, fields, symbols, args.start_date, end_date)
+    prices = read_price_subset(args.price_file, fields, symbols, args.start_date, end_date)
     logger.info("Probe price shape: %s.", prices.shape)
 
     rows: list[dict[str, Any]] = []

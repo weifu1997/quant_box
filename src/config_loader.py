@@ -365,5 +365,13 @@ def _expand_env_values(value: Any) -> Any:
     if isinstance(value, list):
         return [_expand_env_values(item) for item in value]
     if isinstance(value, str):
-        return re.sub(r"\$\{([^}]+)\}", lambda match: os.getenv(match.group(1), ""), value)
+        return re.sub(r"\$\{([^}]+)\}", _env_replacement, value)
+    return value
+
+
+def _env_replacement(match: re.Match[str]) -> str:
+    name = match.group(1)
+    value = os.getenv(name)
+    if value is None:
+        raise ValueError(f"Environment variable {name} is required by config but is not set.")
     return value

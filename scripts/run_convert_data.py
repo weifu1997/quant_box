@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from pathlib import Path
@@ -14,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Convert raw stock CSV files to Qlib data and local price panels.")
+    parser.parse_args()
+
     result = convert_to_qlib_format()
     logger.info("Conversion finished.")
     for key, value in result.items():

@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from src.config_loader import DEFAULT_CONFIG, _expand_env_values
+from src.config_loader import DEFAULT_CONFIG, DEFAULT_CONFIG_PATH, _expand_env_values, load_config
 
 
 class ConfigLoaderTests(unittest.TestCase):
@@ -26,9 +26,10 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(expanded["url"], "http://127.0.0.1:8020/api")
         self.assertEqual(expanded["items"], ["127.0.0.1", "plain"])
 
-    def test_expand_env_values_missing_variable_becomes_empty_string(self) -> None:
+    def test_expand_env_values_missing_variable_raises(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(_expand_env_values("http://${MISSING_HOST}:8020/"), "http://:8020/")
+            with self.assertRaisesRegex(ValueError, "MISSING_HOST"):
+                _expand_env_values("http://${MISSING_HOST}:8020/")
 
     def test_default_strategy_includes_portfolio_circuit_breaker(self) -> None:
         strategy = DEFAULT_CONFIG["strategy"]
@@ -41,6 +42,19 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertIsNone(strategy["take_profit_pct"])
         self.assertIsNone(strategy["max_industry_weight"])
         self.assertEqual(strategy["rebalance_drift_threshold"], 0.0)
+
+    def test_settings_yaml_loads_current_strategy_overrides(self) -> None:
+        config = load_config(DEFAULT_CONFIG_PATH)
+
+        self.assertEqual(config["tushare"]["http_url"], "http://your-proxy-server:8020/")
+        self.assertEqual(config["tushare"]["token"], "your_token")
+        self.assertEqual(config["strategy"]["rank_buffer"], 0)
+        self.assertEqual(config["strategy"]["factor_group"], "dynamic_ic_selector")
+        self.assertIsNone(config["strategy"]["circuit_breaker_drawdown"])
+        self.assertEqual(config["strategy"]["take_profit_pct"], 0.35)
+        self.assertEqual(config["liquidity_filter"]["quantile"], 0.35)
+        self.assertTrue(config["selection_risk_filter"]["enabled"])
+        self.assertEqual(config["selection_risk_filter"]["lookback_sessions"], 3)
 
     def test_default_data_config_includes_daily_basic_cache(self) -> None:
         self.assertEqual(DEFAULT_CONFIG["data"]["history_start_date"], "2012-01-01")

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.common import is_stock_csv as _is_stock_csv
 from src.config_loader import load_config, resolve_path
 
 
@@ -156,8 +157,3 @@ def _normalize_date(value: object) -> tuple[str, str]:
     if len(compact) != 8 or not compact.isdigit():
         return "", ""
     return compact, f"{compact[:4]}-{compact[4:6]}-{compact[6:]}"
-
-
-def _is_stock_csv(path: Path) -> bool:
-    name = path.name.upper()
-    return len(name) == len("000001.SZ.CSV") and name[:6].isdigit() and name[6:] in {".SZ.CSV", ".SH.CSV"}

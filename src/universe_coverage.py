@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 
 import pandas as pd
 
+from src.common import PRICE_FIELD_COLUMNS, is_stock_csv as _is_stock_csv, looks_like_field_table as _looks_like_field_table
 from src.config_loader import load_config, resolve_path
 from src.data_fetcher import filter_universe_frame
 from src.trading_calendar import resolve_target_date_value
-
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 def summarize_universe_coverage(
@@ -80,10 +78,6 @@ def _price_symbols(price_df: pd.DataFrame | None, price_file: str | Path | None)
     return _normalize_symbols(prices.columns)
 
 
-def _is_stock_csv(path: Path) -> bool:
-    return bool(re.match(r"^\d{6}\.(SZ|SH)\.CSV$", path.name.upper()))
-
-
 def _ratio(part: int, whole: int) -> float:
     return float(part / whole) if whole else 0.0
 
@@ -91,8 +85,3 @@ def _ratio(part: int, whole: int) -> float:
 def _normalize_symbols(values: object) -> set[str]:
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
-
-
-def _looks_like_field_table(columns: pd.Index) -> bool:
-    labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)

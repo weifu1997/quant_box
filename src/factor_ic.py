@@ -3,6 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 
+from src.common import normalize_instrument as _normalize_instrument
+
 
 def make_forward_returns(price_df: pd.DataFrame, horizon: int = 1) -> pd.Series:
     prices = _close_prices(price_df)
@@ -356,9 +358,3 @@ def _normalize_instrument_series(series: pd.Series) -> pd.Series:
     if result.index.has_duplicates:
         result = result[~result.index.duplicated(keep="last")]
     return result
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()

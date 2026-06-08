@@ -16,11 +16,12 @@ from src.fast_monthly_backtest import prepare_fast_period_data, run_fast_prepare
 from src.scoring import _apply_liquidity_filter, build_strategy_scores
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
+from scripts._shared import dated_output_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fast screen exact single-factor candidates for the active goal.")
-    parser.add_argument("--output", default="outputs/goal_fast_factor_screen_20260607.csv")
+    parser.add_argument("--output", default=dated_output_path("goal_fast_factor_screen"))
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--top-n", default="7,10,15,20")
     parser.add_argument("--liquidity-modes", default="none,low:0.20,low:0.35,high:0.20")

@@ -10,10 +10,9 @@ import numpy as np
 import pandas as pd
 
 from src.config_loader import load_config, resolve_path
+from src.common import PRICE_FIELD_COLUMNS, is_stock_csv as _is_stock_csv, looks_like_field_table as _looks_like_field_table
 from src.data_fetcher import _raw_latest_date, filter_universe_frame
 from src.trading_calendar import resolve_target_date_value
-
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 @dataclass
@@ -300,16 +299,6 @@ def _normalize_symbol(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
-
-
-def _looks_like_field_table(columns: pd.Index) -> bool:
-    labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
-
-
-def _is_stock_csv(path: Path) -> bool:
-    name = path.name.upper()
-    return len(name) == len("000001.SZ.CSV") and name[:6].isdigit() and name[6:] in {".SZ.CSV", ".SH.CSV"}
 
 
 def _ratio(part: int, whole: int) -> float:

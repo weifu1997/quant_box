@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from src.fast_monthly_backtest import run_fast_period_backtest
+from src.fast_monthly_backtest import _period_returns, run_fast_period_backtest
 
 
 class FastMonthlyBacktestTests(unittest.TestCase):
@@ -370,6 +370,36 @@ class FastMonthlyBacktestTests(unittest.TestCase):
 
         latest = result.weights[result.weights["date"] == dates[3]]
         self.assertEqual(latest["instrument"].tolist(), ["B", "C"])
+
+    def test_period_returns_uses_available_prices_when_boundaries_are_missing(self) -> None:
+        close = pd.DataFrame(
+            {"A": [10.0, 12.0]},
+            index=pd.to_datetime(["2024-01-03", "2024-01-05"]),
+        )
+
+        returns = _period_returns(
+            close,
+            pd.Timestamp("2024-01-02"),
+            pd.Timestamp("2024-01-06"),
+            pd.Index(["A"]),
+        )
+
+        self.assertAlmostEqual(float(returns.loc["A"]), 0.2)
+
+    def test_period_returns_empty_when_no_valid_price_window_exists(self) -> None:
+        close = pd.DataFrame(
+            {"A": [10.0]},
+            index=pd.to_datetime(["2024-01-03"]),
+        )
+
+        returns = _period_returns(
+            close,
+            pd.Timestamp("2024-01-04"),
+            pd.Timestamp("2024-01-05"),
+            pd.Index(["A"]),
+        )
+
+        self.assertTrue(returns.empty)
 
 
 if __name__ == "__main__":

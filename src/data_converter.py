@@ -260,6 +260,12 @@ def _write_qlib_bin_features(
     if indexed.empty:
         return
 
+    missing_dates = sorted(set(indexed.index) - set(calendar_index))
+    if missing_dates:
+        preview = ", ".join(missing_dates[:5])
+        suffix = "" if len(missing_dates) <= 5 else f", ... ({len(missing_dates)} total)"
+        raise ValueError(f"Feature dates are missing from the configured trading calendar: {preview}{suffix}")
+
     start_idx = calendar_index[indexed.index.min()]
     end_idx = calendar_index[indexed.index.max()]
     date_slice = calendar[start_idx : end_idx + 1]

@@ -7,11 +7,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common import PRICE_FIELD_COLUMNS, normalize_instrument as _normalize_instrument
 from src.config_loader import resolve_path
 from src.market_regime import detect_reporting_regime
-
-
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 def build_research_diagnostics(
@@ -1226,12 +1224,6 @@ def _top_records(frame: pd.DataFrame, column: str, ascending: bool) -> list[dict
     if frame.empty or column not in frame.columns:
         return []
     return frame.sort_values(column, ascending=ascending).head(5).to_dict(orient="records")
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _normalize_trade_side(values: pd.Series) -> pd.Series:

@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.common import is_stock_csv as _is_stock_csv
 from src.config_loader import load_config, resolve_path
 
 
@@ -690,11 +691,6 @@ def _build_repair_actions(
             action["missing_symbols"] = missing_symbols
         actions.append(action)
     return actions
-
-
-def _is_stock_csv(path: Path) -> bool:
-    name = path.name.upper()
-    return len(name) == len("000001.SZ.CSV") and name[:6].isdigit() and name[6:] in {".SZ.CSV", ".SH.CSV"}
 
 
 def _valid_symbol(value: str) -> bool:

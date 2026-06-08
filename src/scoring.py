@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.common import normalize_instrument as _normalize_instrument
 from src.config_loader import resolve_path
 from src.factor_ic import calculate_factor_ic, calculate_rolling_ic, make_ic_weights, make_rolling_ic_weights, summarize_ic
 from src.market_regime import detect_market_regime
@@ -393,12 +394,6 @@ def _normalize_price_field_index(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.index.has_duplicates:
         frame = frame.loc[~frame.index.duplicated(keep="last")]
     return frame.sort_index()
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _optional_float(value: object) -> float | None:

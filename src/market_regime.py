@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
 from src.config_loader import resolve_path
 
 
@@ -13,7 +14,6 @@ REGIME_BULL = "bull"
 REGIME_BEAR = "bear"
 REGIME_SIDEWAYS = "sideways"
 REGIME_STATES = {REGIME_BULL, REGIME_BEAR, REGIME_SIDEWAYS}
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 def market_regime_enabled(config: dict[str, Any]) -> bool:
@@ -355,11 +355,6 @@ def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
     return close.sort_index()
 
 
-def _looks_like_field_table(columns: pd.Index) -> bool:
-    labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
-
-
 def _load_hs300_symbols(path_value: str | Path | None) -> set[str]:
     if not path_value:
         return set()
@@ -391,12 +386,6 @@ def _match_column(columns: pd.Index, symbol: str) -> str | None:
         if _normalize_symbol(str(column)) == target:
             return str(column)
     return None
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _normalize_symbol(value: str) -> str:

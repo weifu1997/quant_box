@@ -8,11 +8,9 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
 from src.config_loader import load_config, resolve_path
 from src.market_regime import defensive_exposure_for_date
-
-
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 @dataclass
@@ -716,11 +714,6 @@ def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
     return frame.loc[~frame.index.duplicated(keep="last")]
 
 
-def _looks_like_field_table(columns: pd.Index) -> bool:
-    labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
-
-
 def _is_limit_up(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict) -> bool:
     return _limit_state(price_df, date, instrument, config, side="up")
 
@@ -807,12 +800,6 @@ def _sizing_warning(
 
 def _valid_instrument(instrument: str) -> bool:
     return bool(re.match(r"^\d{6}\.(SH|SZ|BJ)$", instrument))
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _normalize_instruments(values: list[str]) -> list[str]:

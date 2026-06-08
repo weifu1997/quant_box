@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.common import normalize_instrument as _normalize_instrument
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.scoring import build_latest_strategy_scores
@@ -158,12 +159,6 @@ def _normalize_score_index(scores: pd.Series) -> pd.Series:
         result = result[~result.index.duplicated(keep="first")]
     result.attrs = dict(getattr(scores, "attrs", {}))
     return result
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _normalize_instruments(values: list[str] | pd.Series) -> list[str]:

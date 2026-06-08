@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 
@@ -10,20 +12,16 @@ MOJIBAKE_MARKERS = ("鍙傛暟", "蹇", "鑷", "璋", "鐢", "淇")
 
 
 class ScriptsDocsTests(unittest.TestCase):
-    def test_quick_signal_bat_and_legacy_wrapper_are_documented(self) -> None:
+    def test_quick_signal_bat_is_documented(self) -> None:
         quick = (ROOT / "02_快速更新并生成信号.bat").read_text(encoding="utf-8")
-        legacy = (ROOT / "02_自动调参并生成信号.bat").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("--skip-optimize --skip-backtest", quick)
         self.assertIn("CHUNK_SIZE=300", quick)
         self.assertIn("SLEEP_SECONDS=0", quick)
         self.assertIn("chcp 65001 >nul", quick)
-        self.assertIn("chcp 65001 >nul", legacy)
-        self.assertIn("02_快速更新并生成信号.bat", legacy)
-        self.assertIn("--skip-optimize --skip-backtest", legacy)
         self.assertIn("02_快速更新并生成信号.bat", readme)
-        self.assertIn("直接运行同一套快速流程", readme)
+        self.assertNotIn("02_自动调参并生成信号.bat", readme)
         self.assertIn("data/raw/failed_fetches.csv", readme)
 
     def test_all_bat_files_are_documented(self) -> None:
@@ -36,9 +34,8 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("04 -> 06 -> 07 -> 08 -> 09 -> 10", readme)
         self.assertIn("不含 walk-forward 参数优化", readme)
 
-    def test_legacy_run_all_bat_is_explicit_about_optimization(self) -> None:
+    def test_run_all_bat_is_explicit_about_optimization(self) -> None:
         run_all = (ROOT / "run_all.bat").read_text(encoding="utf-8")
-        legacy = (ROOT / "11_旧版全流程_补数据到信号.bat").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("scripts\\run_auto_signal.py", run_all)
@@ -48,9 +45,21 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("refresh missing and stale raw data", run_all)
         self.assertIn("check data health", run_all)
         self.assertIn("latest candidate signal", run_all)
-        self.assertIn("without walk-forward optimization", legacy)
+        self.assertNotIn("11_旧版全流程_补数据到信号.bat", readme)
         self.assertIn("刷新缺失和过期股票", readme)
         self.assertIn("data health", readme)
+
+    def test_convert_data_help_does_not_start_conversion(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "run_convert_data.py"), "--help"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Convert raw stock CSV files", proc.stdout)
 
     def test_bat_files_are_utf8_and_use_crlf_line_endings(self) -> None:
         for path in BAT_FILES:

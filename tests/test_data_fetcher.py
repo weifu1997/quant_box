@@ -23,6 +23,7 @@ from src.data_fetcher import (
     normalize_daily_basic_frame,
     normalize_index_constituents_frame,
     normalize_st_calendar_frame,
+    _fetch_daily_stock_batch,
     _raw_latest_date,
     update_daily_basic_data,
     update_daily_data,
@@ -796,6 +797,21 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(df["ts_code"].unique().tolist(), ["000001.SZ"])
         self.assertIn("adj_factor", df.columns)
         self.assertFalse(df["adj_factor"].isna().any())
+
+    def test_fetch_daily_stock_batch_sets_empty_failed_codes_when_not_skipping(self) -> None:
+        client = FakeTushareClient()
+
+        df = _fetch_daily_stock_batch(
+            ["000001.SZ", "600519.SH"],
+            "2024-01-01",
+            "2024-01-03",
+            client=client,
+            retries=1,
+            skip_failed=False,
+        )
+
+        self.assertEqual(df.attrs["failed_codes"], [])
+        self.assertEqual(sorted(df["ts_code"].unique().tolist()), ["000001.SZ", "600519.SH"])
 
     def test_fetch_daily_stock_drops_rows_with_missing_adj_factor(self) -> None:
         client = MissingAdjFactorClient()

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-import json
 import logging
 from pathlib import Path
 import sys
@@ -13,10 +12,15 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.run_backtest import _requested_factor_columns
+from scripts._shared import (
+    probe_factor_columns,
+    probe_symbols,
+    read_factor_subset,
+    read_price_subset,
+    read_selected_params,
+)
 from src.auto_tuning import apply_strategy_params
 from src.config_loader import load_config, resolve_path
-from src.factor_calculator import factor_cache_columns
 from src.fast_monthly_backtest import prepare_fast_period_data, run_fast_prepared_backtest
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.scoring import build_strategy_scores
@@ -48,13 +52,13 @@ def main() -> None:
     args = parser.parse_args()
 
     end_date = resolve_target_date_value(args.end_date, config=config)
-    selected = _read_selected_params(args.selected_params)
+    selected = read_selected_params(args.selected_params)
     if selected:
         config = apply_strategy_params(config, selected)
-    symbols = _probe_symbols(args.symbol_source, args.max_symbols)
-    factor_columns = _probe_factor_columns(args.factor_file, config)
+    symbols = probe_symbols(args.symbol_source, args.max_symbols)
+    factor_columns = probe_factor_columns(args.factor_file, config)
     logger.info("Loading factor columns: %s", factor_columns or "all")
-    factors = _read_factor_subset(args.factor_file, factor_columns, args.start_date, end_date, symbols)
+    factors = read_factor_subset(args.factor_file, factor_columns, args.start_date, end_date, symbols)
     if symbols:
         symbols = sorted(set(factors.index.get_level_values(1).astype(str)))
     logger.info("Probe factor shape: %s over %s symbols.", factors.shape, len(symbols) if symbols else "all")
@@ -62,7 +66,7 @@ def main() -> None:
     fields = ["close"]
     if bool(config.get("liquidity_filter", {}).get("enabled", False)):
         fields.append(str(config.get("liquidity_filter", {}).get("field", "amount")).lower())
-    prices = _read_price_subset(args.price_file, fields, symbols, args.start_date, end_date)
+    prices = read_price_subset(args.price_file, fields, symbols, args.start_date, end_date)
     logger.info("Probe price shape: %s.", prices.shape)
 
     scores = build_strategy_scores(factors, config, price_df=prices)
@@ -102,49 +106,15 @@ def main() -> None:
 
 
 def _read_selected_params(path_value: str | Path) -> dict[str, object]:
-    path = resolve_path(path_value)
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
+    return read_selected_params(path_value)
 
 
 def _probe_symbols(source: str, max_symbols: int) -> list[str]:
-    if source == "all":
-        return []
-    paths = [resolve_path("outputs/auto_backtest_trades.csv"), resolve_path("outputs/auto_backtest_holdings.csv")]
-    symbols: set[str] = set()
-    for path in paths:
-        if not path.exists():
-            continue
-        frame = pd.read_csv(path, usecols=lambda column: column == "instrument")
-        if "instrument" in frame.columns:
-            symbols.update(_normalize_symbol(value) for value in frame["instrument"].dropna().astype(str))
-    clean = sorted(symbol for symbol in symbols if symbol)
-    if max_symbols > 0:
-        clean = clean[:max_symbols]
-    return clean
+    return probe_symbols(source, max_symbols)
 
 
 def _probe_factor_columns(factor_file: str | Path, config: dict) -> list[str] | None:
-    requested = _requested_factor_columns(
-        str(factor_file),
-        config.get("strategy", {}),
-        config.get("dynamic_ic_selector", {}),
-        config.get("ml_strategy", {}),
-        config.get("regime_score_blend", {}),
-        config.get("regime_score_filter", {}),
-    )
-    columns = set(requested or [])
-    if bool(config.get("regime_score_blend", {}).get("enabled", False)):
-        available = set(factor_cache_columns(factor_file))
-        for item in config.get("regime_score_blend", {}).get("defensive_components", []):
-            column = str(item.get("column", ""))
-            if column in available:
-                columns.add(column)
-    return sorted(columns) if columns else requested
+    return probe_factor_columns(factor_file, config)
 
 
 def _read_factor_subset(
@@ -154,18 +124,7 @@ def _read_factor_subset(
     end_date: str,
     symbols: list[str],
 ) -> pd.DataFrame:
-    path = resolve_path(factor_file)
-    columns = [*(factor_columns or []), "datetime", "instrument"] if factor_columns else None
-    factors = pd.read_parquet(path, columns=columns)
-    if not isinstance(factors.index, pd.MultiIndex):
-        factors = factors.set_index(["datetime", "instrument"])
-    dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
-    mask = (dates >= pd.Timestamp(start_date).normalize()) & (dates <= pd.Timestamp(end_date).normalize())
-    if symbols:
-        wanted = set(_normalize_symbol(symbol) for symbol in symbols)
-        instruments = factors.index.get_level_values(1).map(_normalize_symbol)
-        mask &= instruments.isin(wanted)
-    return factors[mask].sort_index()
+    return read_factor_subset(factor_file, factor_columns, start_date, end_date, symbols)
 
 
 def _read_price_subset(
@@ -175,37 +134,11 @@ def _read_price_subset(
     start_date: str,
     end_date: str,
 ) -> pd.DataFrame:
-    path = resolve_path(price_file)
-    columns = None
-    if symbols:
-        columns = _price_column_names(path, fields, symbols)
-    prices = pd.read_parquet(path, columns=columns)
-    prices.index = pd.to_datetime(prices.index).normalize()
-    prices = prices[(prices.index >= pd.Timestamp(start_date).normalize()) & (prices.index <= pd.Timestamp(end_date).normalize())]
-    return prices.sort_index()
-
-
-def _price_column_names(path: Path, fields: Iterable[str], symbols: list[str]) -> list[str]:
-    import pyarrow.parquet as pq
-
-    available = set(pq.ParquetFile(path).schema.names)
-    result: list[str] = []
-    for field in fields:
-        for symbol in symbols:
-            name = str((str(field).lower(), _normalize_symbol(symbol)))
-            if name in available:
-                result.append(name)
-    if not result:
-        raise ValueError("No matching price columns found for the requested fields/symbols.")
-    return result
+    return read_price_subset(price_file, fields, symbols, start_date, end_date)
 
 
 def _csv_floats(value: str) -> list[float]:
     return [float(item.strip()) for item in str(value).split(",") if item.strip()]
-
-
-def _normalize_symbol(value: object) -> str:
-    return str(value).strip().lower()
 
 
 if __name__ == "__main__":

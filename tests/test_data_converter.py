@@ -294,6 +294,51 @@ class DataConverterTests(unittest.TestCase):
             self.assertEqual(result["calendar_days"], 1)
             self.assertEqual((qlib_dir / "calendars" / "day.txt").read_text(encoding="utf-8").splitlines(), ["2024-01-02"])
 
+    def test_convert_to_qlib_format_rejects_dates_missing_from_calendar(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            qlib_dir = root / "qlib"
+            calendar_file = root / "calendar.csv"
+            raw_dir.mkdir()
+            calendar_file.write_text("20240102\n", encoding="utf-8")
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "2024-01-03",
+                        "open": 10.0,
+                        "high": 10.0,
+                        "low": 10.0,
+                        "close": 10.0,
+                        "vol": 1000.0,
+                        "amount": 10000.0,
+                        "adj_factor": 1.0,
+                    },
+                ]
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+            config = {
+                "data": {
+                    "raw_dir": "unused",
+                    "calendar_file": str(calendar_file),
+                    "constituents_file": "data/raw/mainboard_a_stocks.csv",
+                },
+                "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
+            }
+
+            def fake_resolve_path(value: str | Path) -> Path:
+                if str(value) == "data/prices":
+                    return root / "prices"
+                path = Path(value)
+                return path if path.is_absolute() else root / path
+
+            with patch("src.data_converter.load_config", return_value=config), patch(
+                "src.data_converter.resolve_path",
+                side_effect=fake_resolve_path,
+            ):
+                with self.assertRaisesRegex(ValueError, "missing from the configured trading calendar"):
+                    convert_to_qlib_format(raw_dir=raw_dir, qlib_dir=qlib_dir)
+
     def test_convert_to_qlib_format_sanitizes_nonpositive_market_values(self) -> None:
         config = {
             "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},

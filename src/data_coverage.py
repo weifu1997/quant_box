@@ -5,10 +5,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common import looks_like_field_table as _looks_like_field_table
+
 
 PRICE_GAP_COLUMNS = ["date", "total_symbols", "priced_symbols", "missing_symbols", "coverage", "missing_instruments"]
 YEAR_COVERAGE_COLUMNS = ["year", "start", "end", "days", "has_equity", "passes_min_days"]
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 def price_coverage_summary(price_df: pd.DataFrame, start_date: str, end_date: str) -> dict[str, Any]:
@@ -132,11 +133,6 @@ def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
     close.index = raw_dates.normalize()
     close = close[~close.index.duplicated(keep="last")].sort_index()
     return close.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
-
-
-def _looks_like_field_table(columns: pd.Index) -> bool:
-    labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _slice_dates(frame: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:

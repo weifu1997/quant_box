@@ -5,6 +5,8 @@ from collections.abc import Iterable, Mapping
 import numpy as np
 import pandas as pd
 
+from src.common import normalize_instrument as _normalize_instrument
+
 
 FACTOR_GROUP_KEYWORDS = {
     "momentum": ("roc", "mom", "rsi", "bias"),
@@ -331,12 +333,6 @@ def _normalize_score_series(score_series: pd.Series) -> pd.Series:
         result = result[~result.index.duplicated(keep="first")]
     result.attrs = dict(getattr(score_series, "attrs", {}))
     return result
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _normalize_instruments(values: Iterable[object]) -> list[str]:

@@ -14,7 +14,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.run_backtest import _requested_factor_columns
+from scripts._shared import requested_factor_columns
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
@@ -72,7 +72,7 @@ def main() -> None:
     start_time = time.monotonic()
     end_date = resolve_target_date_value(args.end_date, config=config)
     prices = pd.read_parquet(resolve_path(args.price_file))
-    factor_columns = _requested_factor_columns(
+    factor_columns = requested_factor_columns(
         args.factor_file,
         config.get("strategy", {}),
         config.get("dynamic_ic_selector", {}),

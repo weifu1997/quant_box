@@ -20,7 +20,7 @@ from src.fast_monthly_backtest import run_fast_prepared_backtest
 from src.market_regime import defensive_exposure_schedule, detect_market_regime
 from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.trading_calendar import resolve_target_date_value
-from scripts.run_ml_strategy import _yearly_quality_gate, _yearly_stats
+from scripts._shared import yearly_quality_gate, yearly_stats
 
 
 def main() -> None:
@@ -155,7 +155,7 @@ def main() -> None:
             yearly = _fast_yearly_stats(result.equity_curve)
         else:
             result = run_backtest(experiment_scores, prices, args.start_date, end_date, bt_config)
-            yearly = _yearly_stats(result.equity_curve, bt_config)
+            yearly = yearly_stats(result.equity_curve, bt_config)
         quality = _quality(result.metrics, yearly, run_config)
         row = {
             "combo_id": idx,
@@ -235,7 +235,7 @@ def _quality(metrics: dict[str, float], yearly: pd.DataFrame, config: dict) -> d
     drawdown_limit = float(ml_cfg.get("max_drawdown_limit", -0.20))
     annual_return = float(metrics.get("annual_return", 0.0))
     max_drawdown = float(metrics.get("max_drawdown", 0.0))
-    yearly_gate = _yearly_quality_gate(yearly, config)
+    yearly_gate = yearly_quality_gate(yearly, config)
     issues = []
     if annual_return < target_return:
         issues.append(f"annual_return_below_target:{annual_return:.4f}<{target_return:.4f}")

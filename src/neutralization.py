@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common import normalize_instrument as _normalize_instrument
 from src.config_loader import resolve_path
 
 
@@ -148,12 +149,6 @@ def _normalize_score_index(scores: pd.Series) -> pd.Series:
     index = pd.MultiIndex.from_arrays([frame["date"], frame["label"]], names=scores.index.names)
     result = pd.Series(frame["score"].to_numpy(), index=index, name=scores.name)
     return result.sort_index()
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _parse_datetime_values(values: object) -> pd.Series:

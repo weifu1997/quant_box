@@ -5,6 +5,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common import normalize_instrument as _normalize_instrument
+
 
 DEFAULT_DAILY_BASIC_FEATURES = [
     "turnover_rate",
@@ -280,12 +282,6 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
 def _looks_like_field_table(columns: pd.Index) -> bool:
     labels = {str(column).strip().lower() for column in columns}
     return len(labels) > 1 and bool(labels & PRICE_FIELD_NAMES)
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _feature_window(field: str, prefix: str) -> int:

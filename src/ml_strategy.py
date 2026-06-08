@@ -7,10 +7,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from src.common import PRICE_FIELD_COLUMNS, normalize_instrument as _normalize_instrument
 from src.factor_ic import calculate_factor_ic, make_ic_weights
-
-
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 @dataclass
@@ -350,12 +348,6 @@ def _price_history_counts(close: pd.DataFrame, target_index: pd.MultiIndex, min_
         names=["datetime", "instrument"],
     )
     return stacked.reindex(normalized_index).fillna(0.0)
-
-
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
 
 
 def _resolve_signal_dates(

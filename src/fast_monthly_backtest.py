@@ -6,10 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
 from src.strategy import select_stocks
-
-
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 @dataclass
@@ -255,17 +253,6 @@ def _price_frame(price_df: pd.DataFrame, field: str = "close") -> pd.DataFrame:
     return selected.apply(pd.to_numeric, errors="coerce")
 
 
-def _normalize_instrument(value: object) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip().upper()
-
-
-def _looks_like_field_table(columns: pd.Index) -> bool:
-    labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
-
-
 def _next_price_date(price_dates: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp | None:
     pos = price_dates.searchsorted(pd.Timestamp(date).normalize(), side="right")
     if pos >= len(price_dates):
@@ -349,10 +336,30 @@ def _score_weights(scores: pd.Series, holdings: list[str]) -> pd.Series:
 
 
 def _period_returns(close: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, instruments: pd.Index) -> pd.Series:
-    start_prices = close.loc[start].reindex(instruments)
-    end_prices = close.loc[end].reindex(instruments)
+    start_date = _first_index_on_or_after(close.index, start)
+    end_date = _last_index_on_or_before(close.index, end)
+    if start_date is None or end_date is None or end_date <= start_date:
+        return pd.Series(dtype=float)
+    start_prices = close.loc[start_date].reindex(instruments)
+    end_prices = close.loc[end_date].reindex(instruments)
     returns = end_prices.divide(start_prices).sub(1.0)
     return returns.replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def _first_index_on_or_after(index: pd.Index, value: pd.Timestamp) -> pd.Timestamp | None:
+    dates = pd.DatetimeIndex(index).sort_values()
+    pos = dates.searchsorted(pd.Timestamp(value), side="left")
+    if pos >= len(dates):
+        return None
+    return pd.Timestamp(dates[pos])
+
+
+def _last_index_on_or_before(index: pd.Index, value: pd.Timestamp) -> pd.Timestamp | None:
+    dates = pd.DatetimeIndex(index).sort_values()
+    pos = dates.searchsorted(pd.Timestamp(value), side="right") - 1
+    if pos < 0:
+        return None
+    return pd.Timestamp(dates[pos])
 
 
 def _round_trip_cost_rate(config: dict[str, Any]) -> float:

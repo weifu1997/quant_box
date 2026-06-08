@@ -808,6 +808,68 @@ class BacktestTests(unittest.TestCase):
         final_holding = result.holdings[result.holdings["date"] == dates[-1]].iloc[0]
         self.assertEqual(int(final_holding["shares"]), 3000)
 
+    def test_circuit_breaker_allows_null_cooldown_days(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series(10, index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 9.0]}, index=dates),
+                "open": pd.DataFrame({"A": [10.0, 10.0, 9.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "circuit_breaker_drawdown": 0.05,
+                "circuit_breaker_cooldown_days": None,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+            },
+        )
+
+        self.assertFalse(result.trades.empty)
+
+    def test_circuit_breaker_rejects_invalid_cooldown_days(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        scores = pd.Series(
+            [10],
+            index=pd.MultiIndex.from_tuples([(dates[0], "A")], names=["datetime", "instrument"]),
+            name="score",
+        )
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        with self.assertRaisesRegex(ValueError, "circuit_breaker_cooldown_days"):
+            run_backtest(
+                scores,
+                prices,
+                "2024-01-02",
+                "2024-01-03",
+                {
+                    "initial_capital": 100000,
+                    "top_n": 1,
+                    "circuit_breaker_cooldown_days": "bad",
+                },
+            )
+
     def test_annual_drawdown_guard_resets_next_year(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2025-01-02", "2025-01-03"])
         index = pd.MultiIndex.from_product([[dates[0], dates[3]], ["A"]], names=["datetime", "instrument"])

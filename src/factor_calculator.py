@@ -8,12 +8,12 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from src.common import looks_like_field_table as _looks_like_field_table
 from src.config_loader import load_config, resolve_path
 from src.trading_calendar import resolve_target_date_value
 
 logger = logging.getLogger(__name__)
 _QLIB_INIT_STATE: tuple[str, str] | None = None
-PRICE_FIELD_COLUMNS = {"open", "high", "low", "close", "volume", "vol", "amount", "vwap", "adj_factor", "is_st"}
 
 
 def compute_alpha158_factors(
@@ -279,11 +279,6 @@ def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, en
 def _normalize_symbols(values: object) -> set[str]:
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
-
-
-def _looks_like_field_table(columns: pd.Index) -> bool:
-    labels = {str(column).strip().lower() for column in columns}
-    return len(labels) > 1 and bool(labels & PRICE_FIELD_COLUMNS)
 
 
 def _should_write_factor_cache(path: Path, start_date: str, end_date: str, config: dict) -> bool:

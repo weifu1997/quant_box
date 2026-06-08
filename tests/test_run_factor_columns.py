@@ -9,7 +9,7 @@ from scripts.run_optimize import _requested_factor_columns as optimize_factor_co
 
 class RunFactorColumnTests(unittest.TestCase):
     def test_backtest_requested_columns_include_regime_score_blend_components(self) -> None:
-        with patch("scripts.run_backtest.factor_cache_columns", return_value=["LOW0", "STD20", "BETA20", "ROC20"]):
+        with patch("scripts._shared.factor_cache_columns", return_value=["LOW0", "STD20", "BETA20", "ROC20"]):
             columns = backtest_factor_columns(
                 "unused.parquet",
                 {"factor_group": "dynamic_ic_selector"},
@@ -28,7 +28,7 @@ class RunFactorColumnTests(unittest.TestCase):
         self.assertEqual(columns, ["BETA20", "LOW0", "STD20"])
 
     def test_optimize_requested_columns_include_regime_score_blend_components(self) -> None:
-        with patch("scripts.run_optimize.factor_cache_columns", return_value=["LOW0", "STD20", "BETA20", "ROC20"]):
+        with patch("scripts._shared.factor_cache_columns", return_value=["LOW0", "STD20", "BETA20", "ROC20"]):
             columns = optimize_factor_columns(
                 "unused.parquet",
                 ["dynamic_ic_selector"],
@@ -46,7 +46,7 @@ class RunFactorColumnTests(unittest.TestCase):
         self.assertEqual(columns, ["BETA20", "LOW0", "STD20"])
 
     def test_backtest_requested_columns_include_regime_score_filter_components(self) -> None:
-        with patch("scripts.run_backtest.factor_cache_columns", return_value=["LOW0", "ROC20", "STD20"]):
+        with patch("scripts._shared.factor_cache_columns", return_value=["LOW0", "ROC20", "STD20"]):
             columns = backtest_factor_columns(
                 "unused.parquet",
                 {"factor_group": "dynamic_ic_selector"},
