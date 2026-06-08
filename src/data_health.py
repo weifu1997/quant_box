@@ -11,7 +11,7 @@ import pandas as pd
 
 from src.config_loader import load_config, resolve_path
 from src.common import PRICE_FIELD_COLUMNS, is_stock_csv as _is_stock_csv, looks_like_field_table as _looks_like_field_table
-from src.data_fetcher import _raw_latest_date, filter_universe_frame
+from src.data_fetcher import _load_st_calendar, _raw_latest_date, filter_universe_frame
 from src.trading_calendar import resolve_target_date_value
 
 
@@ -165,11 +165,14 @@ def _target_symbols(config: dict) -> set[str]:
     if not universe_file.exists():
         return set()
     df = pd.read_csv(universe_file)
+    exclude_st = bool(data_cfg.get("exclude_st", True))
+    st_calendar = _load_st_calendar(data_cfg.get("st_calendar_file")) if exclude_st else None
     filtered = filter_universe_frame(
         df,
         universe=str(data_cfg.get("universe", "mainboard_a")),
         as_of_date=resolve_target_date_value(data_cfg.get("end_date"), config=config),
-        exclude_st=bool(data_cfg.get("exclude_st", True)),
+        exclude_st=exclude_st,
+        st_calendar=st_calendar,
     )
     for column in ["ts_code", "con_code", "instrument", "code"]:
         if column in filtered.columns:

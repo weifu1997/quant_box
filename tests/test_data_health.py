@@ -234,6 +234,42 @@ class DataHealthTests(unittest.TestCase):
             self.assertEqual(report.price_target_symbols, 1)
             self.assertEqual(report.factor_target_symbols, 1)
 
+    def test_build_data_health_report_uses_point_in_time_st_calendar_for_target_universe(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            st_calendar_file = raw_dir / "st_calendar.csv"
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "000002.SZ"],
+                    "name": ["A", "B"],
+                    "list_status": ["L", "L"],
+                    "list_date": ["20200101", "20200101"],
+                }
+            ).to_csv(universe_file, index=False)
+            pd.DataFrame(
+                {
+                    "ts_code": ["000002.SZ"],
+                    "st_start_date": ["20240101"],
+                    "st_end_date": [""],
+                }
+            ).to_csv(st_calendar_file, index=False)
+            _raw(raw_dir / "000001.SZ.csv", "000001.SZ", "2024-01-03")
+
+            config = _config(raw_dir, universe_file)
+            config["data"]["exclude_st"] = True
+            config["data"]["st_calendar_file"] = str(st_calendar_file)
+            prices = _prices("2024-01-03", ["000001.SZ"])
+            factors = _factors("2024-01-03", ["000001.SZ"])
+
+            report = build_data_health_report(config, price_df=prices, factor_df=factors)
+
+            self.assertTrue(report.is_healthy)
+            self.assertEqual(report.target_symbols, 1)
+            self.assertEqual(report.raw_latest_target_symbols, 1)
+
     def test_build_data_health_report_rejects_flat_ohlcv_price_frame(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
