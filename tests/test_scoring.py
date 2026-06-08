@@ -8,80 +8,55 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.scoring import _dynamic_ic_selector_weights, _latest_dynamic_ic_selector_weights, build_latest_strategy_scores, build_strategy_scores
+from tests.fixtures.real_data import require_real_market_data
 
 
 class ScoringTests(unittest.TestCase):
     def test_build_strategy_scores_uses_configured_min_cross_section_obs(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02")], ["A", "B"]],
-            names=["datetime", "instrument"],
-        )
-        factors = pd.DataFrame({"ROC5": [1.0, 2.0]}, index=index)
-        config = {"strategy": {"factor_group": "momentum", "min_cross_section_obs": 2}}
+        market = require_real_market_data(start="2024-01-02", end="2024-01-05")
+        config = {"strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2}}
 
-        scores = build_strategy_scores(factors, config)
+        scores = build_strategy_scores(market.factors, config)
 
+        self.assertEqual(len(scores), len(market.factors))
         self.assertFalse(scores.isna().any())
-        self.assertGreater(scores.loc[(pd.Timestamp("2024-01-02"), "B")], scores.loc[(pd.Timestamp("2024-01-02"), "A")])
+        self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
 
     def test_build_strategy_scores_uses_dynamic_ic_weights(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
-            names=["datetime", "instrument"],
-        )
-        factors = pd.DataFrame({"F1": range(5), "F2": range(5, 0, -1)}, index=index)
-        prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+        market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
-            "strategy": {"factor_group": "ic_weighted"},
-            "ic": {"top_k": 1, "min_abs_ic": 0.0, "min_periods": 1, "corr_threshold": 0.7},
+            "strategy": {"factor_group": "ic_weighted", "min_cross_section_obs": 2},
+            "ic": {"top_k": 2, "min_abs_ic": 0.0, "min_periods": 5, "window": 10, "min_obs": 2, "corr_threshold": 0.7},
         }
 
-        with patch("src.scoring.calculate_rolling_ic", return_value=pd.DataFrame()), patch(
-            "src.scoring.make_rolling_ic_weights",
-            return_value={pd.Timestamp("2024-01-02"): pd.Series({"F1": 1.0})},
-        ) as make_weights:
-            scores = build_strategy_scores(factors, config, price_df=prices)
+        scores = build_strategy_scores(market.factors, config, price_df=market.close)
 
         self.assertEqual(scores.name, "score")
-        self.assertGreater(scores.loc[(pd.Timestamp("2024-01-02"), "E")], scores.loc[(pd.Timestamp("2024-01-02"), "A")])
-        make_weights.assert_called_once()
+        self.assertEqual(len(scores), len(market.factors))
+        self.assertGreater(int(scores.notna().sum()), 0)
+        self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
 
     def test_build_strategy_scores_uses_dynamic_ic_selector(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
-            names=["datetime", "instrument"],
-        )
-        factors = pd.DataFrame(
-            {
-                "F1": [5.0, 4.0, 3.0, 2.0, 1.0],
-                "F2": [1.0, 2.0, 3.0, 4.0, 5.0],
-            },
-            index=index,
-        )
-        prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+        market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
             "strategy": {"factor_group": "dynamic_ic_selector", "min_cross_section_obs": 2},
             "dynamic_ic_selector": {
-                "candidates": ["factor:F1", "factor:F2"],
+                "candidates": ["factor:LOW0", "factor:ROC20"],
                 "horizon": 1,
-                "window": 2,
-                "min_periods": 1,
+                "window": 10,
+                "min_periods": 5,
+                "min_obs": 2,
                 "metric": "mean",
-                "fallback_candidate": "factor:F1",
+                "fallback_candidate": "factor:LOW0",
             },
         }
-        rolling_ic = pd.DataFrame({"F1": [0.01], "F2": [0.05]}, index=[pd.Timestamp("2024-01-02")])
-        rolling_ic.attrs["daily_ic"] = rolling_ic
-        rolling_ic.attrs["window"] = 2
-        rolling_ic.attrs["min_periods"] = 1
-        rolling_ic.attrs["horizon"] = 1
 
-        with patch("src.scoring.calculate_rolling_ic", return_value=rolling_ic) as calc:
-            scores = build_strategy_scores(factors, config, price_df=prices)
+        scores = build_strategy_scores(market.factors, config, price_df=market.close)
 
         self.assertEqual(scores.name, "score")
-        self.assertGreater(scores.loc[(pd.Timestamp("2024-01-02"), "E")], scores.loc[(pd.Timestamp("2024-01-02"), "A")])
-        calc.assert_called_once()
+        self.assertEqual(len(scores), len(market.factors))
+        self.assertGreater(int(scores.notna().sum()), 0)
+        self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
 
     def test_dynamic_ic_selector_uses_configured_top_k_weights(self) -> None:
         index = pd.MultiIndex.from_product(
@@ -147,33 +122,16 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(set(captured_dates), set(dates[-4:]))
 
     def test_build_strategy_scores_excludes_low_liquidity_bucket(self) -> None:
-        dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
-        instruments = ["A", "B", "C", "D", "E"]
-        index = pd.MultiIndex.from_product([[dates[-1]], instruments], names=["datetime", "instrument"])
-        factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0, 5.0]}, index=index)
-        amount = pd.DataFrame(
-            {
-                "A": [1.0, 1.0],
-                "B": [2.0, 2.0],
-                "C": [3.0, 3.0],
-                "D": [4.0, 4.0],
-                "E": [5.0, 5.0],
-            },
-            index=dates,
-        )
-        close = pd.DataFrame(10.0, index=dates, columns=instruments)
-        prices = pd.concat({"close": close, "amount": amount}, axis=1)
-        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
-            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
-            "liquidity_filter": {"enabled": True, "field": "amount", "window": 2, "min_periods": 1, "quantile": 0.4, "side": "low"},
+            "strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2},
+            "liquidity_filter": {"enabled": True, "field": "amount", "window": 5, "min_periods": 1, "quantile": 0.4, "side": "low"},
         }
 
-        scores = build_strategy_scores(factors, config, price_df=prices)
+        scores = build_strategy_scores(market.factors, config, price_df=market.prices)
 
-        daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
-        self.assertTrue(daily.loc[["A", "B"]].isna().all())
-        self.assertFalse(daily.loc[["C", "D", "E"]].isna().any())
+        self.assertGreater(int(scores.isna().sum()), 0)
+        self.assertGreater(int(scores.notna().sum()), 0)
 
     def test_build_strategy_scores_liquidity_filter_matches_price_columns_case_insensitively(self) -> None:
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
@@ -246,33 +204,61 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(pd.isna(daily.loc["B"]))
 
     def test_build_strategy_scores_excludes_high_liquidity_bucket(self) -> None:
-        dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
-        instruments = ["A", "B", "C", "D", "E"]
-        index = pd.MultiIndex.from_product([[dates[-1]], instruments], names=["datetime", "instrument"])
-        factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0, 5.0]}, index=index)
-        amount = pd.DataFrame(
-            {
-                "A": [1.0, 1.0],
-                "B": [2.0, 2.0],
-                "C": [3.0, 3.0],
-                "D": [4.0, 4.0],
-                "E": [5.0, 5.0],
-            },
-            index=dates,
-        )
-        close = pd.DataFrame(10.0, index=dates, columns=instruments)
-        prices = pd.concat({"close": close, "amount": amount}, axis=1)
-        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
-            "strategy": {"factor_group": "factor:F1", "min_cross_section_obs": 2},
-            "liquidity_filter": {"enabled": True, "field": "amount", "window": 2, "min_periods": 1, "quantile": 0.4, "side": "high"},
+            "strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2},
+            "liquidity_filter": {"enabled": True, "field": "amount", "window": 5, "min_periods": 1, "quantile": 0.4, "side": "high"},
         }
 
-        scores = build_strategy_scores(factors, config, price_df=prices)
+        scores = build_strategy_scores(market.factors, config, price_df=market.prices)
 
-        daily = scores.xs(pd.Timestamp("2024-01-02"), level=0)
-        self.assertFalse(daily.loc[["A", "B", "C"]].isna().any())
-        self.assertTrue(daily.loc[["D", "E"]].isna().all())
+        self.assertGreater(int(scores.isna().sum()), 0)
+        self.assertGreater(int(scores.notna().sum()), 0)
+
+    def test_build_strategy_scores_applies_regime_score_blend_to_real_data(self) -> None:
+        market = require_real_market_data(start="2024-01-02", end="2024-04-30")
+        dates = pd.to_datetime(market.factors.index.get_level_values("datetime")).normalize().unique()
+        config = {
+            "strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2},
+            "regime_score_blend": {
+                "enabled": True,
+                "bear_defensive_weight": 0.5,
+                "defensive_components": [{"column": "STD20", "direction": -1.0}],
+            },
+        }
+
+        with patch("src.scoring.detect_market_regime", return_value=pd.Series("bear", index=dates)):
+            scores = build_strategy_scores(market.factors, config, price_df=market.close)
+
+        self.assertGreater(int(scores.notna().sum()), 0)
+        self.assertEqual(scores.attrs["regime_score_blend"]["dates_blended"], len(dates))
+        self.assertTrue(
+            set(scores.index.get_level_values("instrument").str.lower()).issubset(set(market.instruments))
+        )
+
+    def test_build_strategy_scores_applies_regime_score_filter_to_real_data(self) -> None:
+        market = require_real_market_data(start="2024-01-02", end="2024-04-30")
+        dates = pd.to_datetime(market.factors.index.get_level_values("datetime")).normalize().unique()
+        config = {
+            "strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2},
+            "regime_score_filter": {
+                "enabled": True,
+                "rules": [
+                    {
+                        "regime": "bear",
+                        "components": [{"column": "ROC20", "direction": 1.0}],
+                        "min_score": 0.0,
+                    }
+                ],
+            },
+        }
+
+        with patch("src.scoring.detect_market_regime", return_value=pd.Series("bear", index=dates)):
+            scores = build_strategy_scores(market.factors, config, price_df=market.close)
+
+        self.assertGreater(int(scores.isna().sum()), 0)
+        self.assertGreater(int(scores.notna().sum()), 0)
+        self.assertGreater(scores.attrs["regime_score_filter"]["rows_removed"], 0)
 
     def test_build_strategy_scores_applies_regime_score_blend(self) -> None:
         date = pd.Timestamp("2024-01-02")

@@ -1,0 +1,37 @@
+{
+  "source": "local real A-share cache",
+  "start": "2015-01-05",
+  "end": "2024-04-30",
+  "instruments": [
+    "000001.sz",
+    "000002.sz",
+    "000006.sz",
+    "000007.sz",
+    "000008.sz",
+    "000009.sz",
+    "000011.sz",
+    "000012.sz",
+    "600519.sh"
+  ],
+  "factor_columns": [
+    "LOW0",
+    "ROC5",
+    "ROC20",
+    "STD20",
+    "BETA20"
+  ],
+  "price_fields": [
+    "open",
+    "close",
+    "low",
+    "high",
+    "volume",
+    "amount"
+  ],
+  "rows": {
+    "close": 2267,
+    "prices": 2267,
+    "factors": 20401,
+    "daily_basic": 509
+  }
+}

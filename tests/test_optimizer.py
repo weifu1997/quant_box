@@ -14,6 +14,7 @@ from src.optimizer import (
     run_walk_forward_grid_validation,
     run_walk_forward_optimization,
 )
+from tests.fixtures.real_data import require_real_market_data
 
 
 class OptimizerTests(unittest.TestCase):
@@ -282,22 +283,12 @@ class OptimizerTests(unittest.TestCase):
 
 
 def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    dates = pd.date_range("2023-01-02", periods=300, freq="B")
-    instruments = ["A", "B", "C", "D", "E"]
-    index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
-    values = []
-    for day_idx, _date in enumerate(dates):
-        for inst_idx, _instrument in enumerate(instruments):
-            values.append(day_idx * 0.01 + inst_idx)
-    factors = pd.DataFrame({"ROC5": values}, index=index)
-    prices = pd.DataFrame(
-        {
-            instrument: [10.0 + inst_idx + day_idx * 0.01 for day_idx in range(len(dates))]
-            for inst_idx, instrument in enumerate(instruments)
-        },
-        index=dates,
+    market = require_real_market_data(
+        start="2023-01-03",
+        end="2024-03-29",
+        factor_columns=("ROC5", "LOW0", "ROC20"),
     )
-    return factors, prices
+    return market.factors, market.close
 
 
 def _small_grid() -> dict[str, list]:

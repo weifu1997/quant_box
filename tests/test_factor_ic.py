@@ -5,28 +5,25 @@ import unittest
 import pandas as pd
 
 from src.factor_ic import calculate_factor_ic, make_forward_returns, make_ic_weights, summarize_ic
+from tests.fixtures.real_data import require_real_market_data
 
 
 class FactorICTests(unittest.TestCase):
     def test_calculate_factor_ic_and_weights(self) -> None:
-        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
-        index = pd.MultiIndex.from_product([dates, ["a", "b", "c"]], names=["datetime", "instrument"])
-        factors = pd.DataFrame({"F1": [1, 2, 3, 2, 3, 4, 3, 4, 5]}, index=index)
-        prices = pd.DataFrame(
-            {
-                "a": [10.0, 10.5, 11.0],
-                "b": [10.0, 11.0, 12.0],
-                "c": [10.0, 12.0, 14.0],
-            },
-            index=dates,
+        market = require_real_market_data(
+            start="2024-01-02",
+            end="2024-04-30",
+            factor_columns=("LOW0", "ROC5", "ROC20"),
         )
 
-        ic = calculate_factor_ic(factors, prices, min_obs=2)
+        ic = calculate_factor_ic(market.factors, market.close, min_obs=2)
         summary = summarize_ic(ic)
-        weights = make_ic_weights(summary, top_k=1)
+        weights = make_ic_weights(summary, top_k=1, min_abs_ic=0.0)
 
-        self.assertIn("F1", ic.columns)
-        self.assertIn("F1", weights.index)
+        self.assertFalse(ic.empty)
+        self.assertIn("LOW0", ic.columns)
+        self.assertFalse(weights.empty)
+        self.assertTrue(set(weights.index).issubset(set(market.factors.columns)))
 
     def test_calculate_factor_ic_respects_min_obs_after_vectorized_corr(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])

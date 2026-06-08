@@ -12,9 +12,10 @@ from src.factor_ic import (
     make_rolling_ic_weights,
 )
 from src.strategy import composite_factor
+from tests.fixtures.real_data import require_real_market_data
 
 
-def _factor_price_fixture(days: int = 12, instruments: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _math_factor_price_fixture(days: int = 12, instruments: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
     dates = pd.date_range("2024-01-01", periods=days, freq="D")
     names = [f"S{i}" for i in range(instruments)]
     factors = []
@@ -32,8 +33,21 @@ def _factor_price_fixture(days: int = 12, instruments: int = 5) -> tuple[pd.Data
 
 
 class RollingICTests(unittest.TestCase):
+    def test_calculate_rolling_ic_with_real_market_data(self) -> None:
+        market = require_real_market_data(
+            start="2024-01-02",
+            end="2024-04-30",
+            factor_columns=("LOW0", "ROC5", "ROC20"),
+        )
+
+        rolling_ic = calculate_rolling_ic(market.factors, market.close, window=10, min_periods=5, min_obs=2)
+
+        self.assertFalse(rolling_ic.empty)
+        self.assertTrue({"LOW0", "ROC5", "ROC20"}.issubset(set(rolling_ic.columns)))
+        self.assertGreater(int(rolling_ic.notna().sum().sum()), 0)
+
     def test_rolling_ic_uses_prior_window(self) -> None:
-        factors, prices = _factor_price_fixture()
+        factors, prices = _math_factor_price_fixture()
         daily_ic = calculate_factor_ic(factors, prices, min_obs=3)
         rolling_ic = calculate_rolling_ic(factors, prices, window=5, min_periods=3, min_obs=3)
 
@@ -42,7 +56,7 @@ class RollingICTests(unittest.TestCase):
         self.assertAlmostEqual(float(rolling_ic.iloc[5]["F1"]), float(expected))
 
     def test_rolling_ic_does_not_use_same_day_ic(self) -> None:
-        factors, prices = _factor_price_fixture()
+        factors, prices = _math_factor_price_fixture()
         changed = factors.copy()
         date = pd.Timestamp("2024-01-06")
         changed.loc[(date, slice(None)), "F1"] = list(reversed(changed.loc[(date, slice(None)), "F1"].to_list()))
@@ -53,7 +67,7 @@ class RollingICTests(unittest.TestCase):
         self.assertAlmostEqual(float(original.loc[date, "F1"]), float(mutated.loc[date, "F1"]))
 
     def test_rolling_ic_lags_by_forward_horizon(self) -> None:
-        factors, prices = _factor_price_fixture(days=14)
+        factors, prices = _math_factor_price_fixture(days=14)
         daily_ic = calculate_factor_ic(factors, prices, horizon=3, min_obs=3)
         rolling_ic = calculate_rolling_ic(factors, prices, horizon=3, window=5, min_periods=3, min_obs=3)
 

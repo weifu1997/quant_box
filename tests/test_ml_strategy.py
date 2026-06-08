@@ -15,9 +15,40 @@ from src.ml_strategy import (
     _transform_label_frame,
     build_ml_scores,
 )
+from tests.fixtures.real_data import require_real_market_data
 
 
 class MLStrategyTests(unittest.TestCase):
+    def test_build_ml_scores_with_real_market_data_end_to_end(self) -> None:
+        market = require_real_market_data(
+            start="2024-01-02",
+            end="2024-04-30",
+            factor_columns=("LOW0", "ROC5", "ROC20"),
+        )
+        signal_date = pd.to_datetime(market.factors.index.get_level_values("datetime")).normalize().max()
+        config = {
+            "ml_strategy": {
+                "enabled": True,
+                "model_type": "ridge_numpy",
+                "train_years": 1,
+                "label_horizon_sessions": 2,
+                "min_train_rows": 20,
+                "max_train_rows": 300,
+                "feature_limit": None,
+                "min_feature_fraction": 0.5,
+            }
+        }
+
+        result = build_ml_scores(market.factors, market.prices, config, signal_dates=[signal_date])
+
+        self.assertFalse(result.scores.dropna().empty)
+        self.assertEqual(set(result.scores.index.get_level_values("datetime")), {signal_date})
+        self.assertTrue(set(result.scores.index.get_level_values("instrument").str.lower()).issubset(set(market.instruments)))
+        row = result.diagnostics.iloc[0]
+        self.assertTrue(bool(row["no_lookahead"]))
+        self.assertLess(pd.Timestamp(row["max_label_end"]), pd.Timestamp(row["signal_date"]))
+        self.assertEqual(row["model_used"], "ridge_numpy")
+
     def test_cross_sectional_rank_label_mode_maps_returns_to_relative_ranks(self) -> None:
         returns = pd.DataFrame(
             {"A": [0.03, 0.01], "B": [0.01, 0.02], "C": [0.02, 0.03]},

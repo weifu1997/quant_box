@@ -10,6 +10,7 @@ import pandas as pd
 
 import src.factor_calculator as factor_calculator
 from src.factor_calculator import _ensure_qlib_initialized, load_or_compute_factors
+from tests.fixtures.real_data import require_real_market_data
 
 
 class FakeQlib:
@@ -38,44 +39,43 @@ class FactorCalculatorTests(unittest.TestCase):
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
             price_path = root / "ohlcv.parquet"
-            dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
-            cached_index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
-            pd.DataFrame({"F1": [1.0, 2.0]}, index=cached_index).to_parquet(cache_path)
-            prices = pd.concat(
-                {
-                    "close": pd.DataFrame({"A": [10.0, 10.1], "B": [20.0, 20.1]}, index=dates),
-                },
-                axis=1,
+            cached_market = require_real_market_data(
+                instruments=["000001.sz"],
+                start="2024-01-02",
+                end="2024-01-05",
+                factor_columns=("LOW0",),
             )
-            prices.to_parquet(price_path)
-            recomputed_index = pd.MultiIndex.from_product([dates, ["A", "B"]], names=["datetime", "instrument"])
-            recomputed = pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0]}, index=recomputed_index)
+            full_market = require_real_market_data(
+                instruments=["000001.sz", "000002.sz"],
+                start="2024-01-02",
+                end="2024-01-05",
+                factor_columns=("LOW0",),
+            )
+            cached_market.factors.to_parquet(cache_path)
+            full_market.prices.to_parquet(price_path)
             config = {"factors": {"cache_file": str(cache_path)}, "ic": {"price_file": str(price_path)}}
 
             with patch("src.factor_calculator.load_config", return_value=config), patch(
                 "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
-            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=recomputed) as compute:
+            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=full_market.factors) as compute:
                 factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path)
 
         compute.assert_called_once()
-        self.assertEqual(set(factors.index.get_level_values("instrument")), {"A", "B"})
+        self.assertEqual(set(factors.index.get_level_values("instrument")), set(full_market.instruments))
 
     def test_load_or_compute_factors_reuses_matching_cache(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
             price_path = root / "ohlcv.parquet"
-            dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
-            index = pd.MultiIndex.from_product([dates, ["A", "B"]], names=["datetime", "instrument"])
-            cached = pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0]}, index=index)
-            cached.to_parquet(cache_path)
-            prices = pd.concat(
-                {
-                    "close": pd.DataFrame({"A": [10.0, 10.1], "B": [20.0, 20.1]}, index=dates),
-                },
-                axis=1,
+            market = require_real_market_data(
+                instruments=["000001.sz", "000002.sz"],
+                start="2024-01-02",
+                end="2024-01-05",
+                factor_columns=("LOW0",),
             )
-            prices.to_parquet(price_path)
+            market.factors.to_parquet(cache_path)
+            market.prices.to_parquet(price_path)
             config = {"factors": {"cache_file": str(cache_path)}, "ic": {"price_file": str(price_path)}}
 
             with patch("src.factor_calculator.load_config", return_value=config), patch(
@@ -84,7 +84,9 @@ class FactorCalculatorTests(unittest.TestCase):
                 factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path)
 
         compute.assert_not_called()
-        self.assertEqual(len(factors), len(cached))
+        expected_dates = {pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")}
+        self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).normalize()), expected_dates)
+        self.assertEqual(set(factors.index.get_level_values("instrument")), set(market.instruments))
 
     def test_load_or_compute_factors_normalizes_cache_symbol_coverage(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -143,29 +145,29 @@ class FactorCalculatorTests(unittest.TestCase):
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
             price_path = root / "ohlcv.parquet"
-            dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
-            index = pd.MultiIndex.from_product([dates, ["A", "B"]], names=["datetime", "instrument"])
-            pd.DataFrame({"F1": [1.0, 2.0, 3.0, 4.0]}, index=index).to_parquet(cache_path)
-            prices = pd.concat(
-                {
-                    "close": pd.DataFrame({"A": [10.0, 10.1], "B": [20.0, 20.1]}, index=dates),
-                },
-                axis=1,
+            cached_market = require_real_market_data(
+                instruments=["000001.sz", "000002.sz"],
+                start="2024-01-02",
+                end="2024-01-05",
+                factor_columns=("LOW0",),
             )
-            prices.to_parquet(price_path)
-            recomputed = pd.DataFrame(
-                {"F1": [1.0, 2.0, 3.0, 4.0], "F2": [5.0, 6.0, 7.0, 8.0]},
-                index=index,
+            recomputed_market = require_real_market_data(
+                instruments=["000001.sz", "000002.sz"],
+                start="2024-01-02",
+                end="2024-01-05",
+                factor_columns=("LOW0", "ROC5"),
             )
+            cached_market.factors.to_parquet(cache_path)
+            recomputed_market.prices.to_parquet(price_path)
             config = {"factors": {"cache_file": str(cache_path)}, "ic": {"price_file": str(price_path)}}
 
             with patch("src.factor_calculator.load_config", return_value=config), patch(
                 "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
-            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=recomputed) as compute:
-                factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path, columns=["F1", "F2"])
+            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=recomputed_market.factors) as compute:
+                factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path, columns=["LOW0", "ROC5"])
 
         compute.assert_called_once()
-        self.assertEqual(factors.columns.tolist(), ["F1", "F2"])
+        self.assertEqual(factors.columns.tolist(), ["LOW0", "ROC5"])
 
     def test_load_or_compute_factors_reuses_cache_when_request_starts_before_first_trading_day(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -216,26 +218,23 @@ class FactorCalculatorTests(unittest.TestCase):
             cache_path = root / "alpha158.parquet"
             price_path = root / "ohlcv.parquet"
             provider = root / "qlib"
-            cached_dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"])
             requested_dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
-            index = pd.MultiIndex.from_product([cached_dates, ["A", "B"]], names=["datetime", "instrument"])
-            cached = pd.DataFrame({"F1": range(len(index))}, index=index)
-            cached.to_parquet(cache_path)
-            prices = pd.concat(
-                {
-                    "close": pd.DataFrame({"A": [10.0, 10.1], "B": [20.0, 20.1]}, index=requested_dates),
-                },
-                axis=1,
+            market = require_real_market_data(
+                instruments=["000001.sz", "000002.sz"],
+                start="2024-01-02",
+                end="2024-01-05",
+                factor_columns=("LOW0",),
             )
-            prices.to_parquet(price_path)
+            market.factors.to_parquet(cache_path)
+            market.prices.loc[requested_dates].to_parquet(price_path)
             (cache_path.with_name(f"{cache_path.name}.meta.json")).write_text(
                 json.dumps(
                     {
                         "provider_uri": str(provider),
                         "region": "cn",
                         "instruments": "mainboard_a",
-                        "start_date": "2024-01-01",
-                        "end_date": "2024-01-04",
+                        "start_date": "2024-01-02",
+                        "end_date": "2024-01-05",
                     }
                 ),
                 encoding="utf-8",
@@ -253,7 +252,7 @@ class FactorCalculatorTests(unittest.TestCase):
 
         compute.assert_not_called()
         self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).date), set(requested_dates.date))
-        self.assertEqual(len(factors), 4)
+        self.assertEqual(set(factors.index.get_level_values("instrument")), set(market.instruments))
 
     def test_load_or_compute_factors_does_not_overwrite_default_cache_for_partial_range(self) -> None:
         with TemporaryDirectory() as tmp:

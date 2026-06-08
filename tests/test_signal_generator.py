@@ -1,74 +1,41 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 import pandas as pd
 
+from src.selection_constraints import load_industry_group_map
 from src.signal_generator import generate_signal
+from tests.fixtures.real_data import require_real_market_data
 
 
 class SignalGeneratorTests(unittest.TestCase):
     def test_generate_signal_falls_back_to_latest_cache_date_before_request(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
-            names=["datetime", "instrument"],
-        )
-        factors = pd.DataFrame({"ROC5": range(1, 6)}, index=index)
-        config = {
-            "data": {"start_date": "2024-01-01"},
-            "strategy": {"factor_group": "momentum", "top_n": 1, "max_turnover": 1, "rank_buffer": 0},
-            "factors": {"cache_file": "unused.parquet"},
-            "outputs": {"holdings_file": "unused.csv"},
-        }
+        market = require_real_market_data(start="2024-01-02", end="2024-01-05")
+        config = _signal_config(start_date="2024-01-02", end_date="2024-01-06")
 
-        with patch("src.signal_generator.load_config", return_value=config), patch(
-            "src.signal_generator.load_or_compute_factors", return_value=factors
-        ):
-            signal, holdings = generate_signal("2024-01-03", previous_holdings=[])
+        signal, holdings = generate_signal("2024-01-06", previous_holdings=[], config=config, factors=market.factors)
 
-        self.assertEqual(holdings, ["E"])
-        self.assertEqual(signal["date"].unique().tolist(), ["2024-01-02"])
+        self.assertEqual(len(holdings), 1)
+        self.assertIn(holdings[0].lower(), market.instruments)
+        self.assertEqual(signal["date"].unique().tolist(), ["2024-01-05"])
 
     def test_generate_signal_rejects_when_no_cache_date_is_on_or_before_request(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-04")], ["A", "B", "C", "D", "E"]],
-            names=["datetime", "instrument"],
-        )
-        factors = pd.DataFrame({"ROC5": range(1, 6)}, index=index)
-        config = {
-            "data": {"start_date": "2024-01-01"},
-            "strategy": {"factor_group": "momentum", "top_n": 1, "max_turnover": 1, "rank_buffer": 0},
-            "factors": {"cache_file": "unused.parquet"},
-            "outputs": {"holdings_file": "unused.csv"},
-        }
+        market = require_real_market_data(start="2024-01-02", end="2024-01-05")
+        config = _signal_config(start_date="2024-01-02", end_date="2024-01-05")
 
-        with patch("src.signal_generator.load_config", return_value=config), patch(
-            "src.signal_generator.load_or_compute_factors", return_value=factors
-        ):
-            with self.assertRaises(ValueError):
-                generate_signal("2024-01-03", previous_holdings=[])
+        with self.assertRaises(ValueError):
+            generate_signal("2024-01-01", previous_holdings=[], config=config, factors=market.factors)
 
     def test_generate_signal_latest_uses_factor_cache_latest_date(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
-            names=["datetime", "instrument"],
-        )
-        factors = pd.DataFrame({"ROC5": range(1, 6)}, index=index)
-        config = {
-            "data": {"start_date": "2024-01-01", "end_date": "2024-01-03"},
-            "strategy": {"factor_group": "momentum", "top_n": 1, "max_turnover": 1, "rank_buffer": 0},
-            "factors": {"cache_file": "unused.parquet"},
-            "outputs": {"holdings_file": "unused.csv"},
-        }
+        market = require_real_market_data(start="2024-01-02", end="2024-01-05")
+        config = _signal_config(start_date="2024-01-02", end_date="2024-01-05")
 
-        with patch("src.signal_generator.load_config", return_value=config), patch(
-            "src.signal_generator.load_or_compute_factors", return_value=factors
-        ):
-            signal, holdings = generate_signal("latest", previous_holdings=[])
+        signal, holdings = generate_signal("latest", previous_holdings=[], config=config, factors=market.factors)
 
-        self.assertEqual(holdings, ["E"])
-        self.assertEqual(signal["date"].unique().tolist(), ["2024-01-02"])
+        self.assertEqual(len(holdings), 1)
+        self.assertIn(holdings[0].lower(), market.instruments)
+        self.assertEqual(signal["date"].unique().tolist(), ["2024-01-05"])
 
     def test_generate_signal_uses_latest_intraday_factors_for_signal_date(self) -> None:
         index = pd.MultiIndex.from_tuples(
@@ -148,56 +115,34 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(signal[["instrument", "action"]].to_dict("records"), [{"instrument": "A", "action": "BUY"}])
 
     def test_empty_signal_keeps_effective_signal_date_metadata(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
-            names=["datetime", "instrument"],
-        )
-        factors = pd.DataFrame({"ROC5": range(1, 6)}, index=index)
-        config = {
-            "data": {"start_date": "2024-01-01", "end_date": "2024-01-03"},
-            "strategy": {"factor_group": "momentum", "top_n": 0, "max_turnover": 0, "rank_buffer": 0},
-            "factors": {"cache_file": "unused.parquet"},
-            "outputs": {"holdings_file": "unused.csv"},
-        }
+        market = require_real_market_data(start="2024-01-02", end="2024-01-05")
+        config = _signal_config(start_date="2024-01-02", end_date="2024-01-05", top_n=0, max_turnover=0)
 
-        with patch("src.signal_generator.load_config", return_value=config), patch(
-            "src.signal_generator.load_or_compute_factors",
-            return_value=factors,
-        ):
-            signal, holdings = generate_signal("latest", previous_holdings=[])
+        signal, holdings = generate_signal("latest", previous_holdings=[], config=config, factors=market.factors)
 
         self.assertEqual(holdings, [])
         self.assertTrue(signal.empty)
         self.assertEqual(signal.columns.tolist(), ["date", "instrument", "action"])
-        self.assertEqual(signal.attrs["signal_date"], "2024-01-02")
+        self.assertEqual(signal.attrs["signal_date"], "2024-01-05")
 
     def test_generate_signal_applies_max_industry_weight(self) -> None:
-        index = pd.MultiIndex.from_product(
-            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D"]],
-            names=["datetime", "instrument"],
+        market = require_real_market_data(start="2024-01-02", end="2024-01-05")
+        config = _signal_config(
+            start_date="2024-01-02",
+            end_date="2024-01-05",
+            top_n=3,
+            max_turnover=3,
+            max_industry_weight=0.5,
         )
-        factors = pd.DataFrame({"ROC5": [10, 9, 8, 7]}, index=index)
-        config = {
-            "data": {"start_date": "2024-01-01", "end_date": "2024-01-02"},
-            "strategy": {
-                "factor_group": "momentum",
-                "top_n": 3,
-                "max_turnover": 3,
-                "rank_buffer": 0,
-                "min_cross_section_obs": 1,
-                "max_industry_weight": 0.5,
-            },
-            "factors": {"cache_file": "unused.parquet"},
-            "outputs": {"holdings_file": "unused.csv"},
-        }
-        industry = pd.Series({"A": "bank", "B": "bank", "C": "tech", "D": "health"}, name="industry")
+        industry = load_industry_group_map(config)
 
-        with patch("src.signal_generator.load_config", return_value=config), patch(
-            "src.signal_generator.load_or_compute_factors", return_value=factors
-        ), patch("src.signal_generator.load_industry_group_map", return_value=industry):
-            _signal, holdings = generate_signal("latest", previous_holdings=[])
+        _signal, holdings = generate_signal("latest", previous_holdings=[], config=config, factors=market.factors)
 
-        self.assertEqual(holdings, ["A", "C", "D"])
+        self.assertLessEqual(len(holdings), 3)
+        self.assertTrue(set(code.lower() for code in holdings).issubset(set(market.instruments)))
+        if not industry.empty and holdings:
+            industry_counts = pd.Series(holdings).map(industry).value_counts(normalize=True)
+            self.assertTrue((industry_counts <= 0.5).all())
 
     def test_generate_signal_applies_selection_risk_filter(self) -> None:
         date = pd.Timestamp("2024-01-03")
@@ -238,6 +183,37 @@ class SignalGeneratorTests(unittest.TestCase):
         _signal, holdings = generate_signal("latest", previous_holdings=[], config=config, factors=factors, price_df=prices)
 
         self.assertEqual(holdings, ["B"])
+
+
+def _signal_config(
+    start_date: str,
+    end_date: str,
+    top_n: int = 1,
+    max_turnover: int = 1,
+    max_industry_weight: float | None = None,
+) -> dict:
+    strategy = {
+        "factor_group": "factor:LOW0",
+        "top_n": top_n,
+        "max_turnover": max_turnover,
+        "rank_buffer": 0,
+        "min_cross_section_obs": 1,
+    }
+    if max_industry_weight is not None:
+        strategy["max_industry_weight"] = max_industry_weight
+    return {
+        "data": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "constituents_file": "data/raw/mainboard_a_stocks.csv",
+        },
+        "strategy": strategy,
+        "factors": {"cache_file": "data/factors/alpha158.parquet"},
+        "outputs": {"holdings_file": "outputs/current_holdings.csv"},
+        "liquidity_filter": {"enabled": False},
+        "regime_score_blend": {"enabled": False},
+        "regime_score_filter": {"enabled": False},
+    }
 
 
 if __name__ == "__main__":

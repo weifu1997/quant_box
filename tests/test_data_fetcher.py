@@ -31,6 +31,83 @@ from src.data_fetcher import (
     update_index_constituents_data,
     update_st_calendar_data,
 )
+from tests.fixtures.real_data import require_real_market_data
+
+
+def _real_tushare_daily_rows(codes: list[str], params: dict) -> pd.DataFrame:
+    codes = [code.strip().upper() for code in codes if code.strip()]
+    if not codes:
+        return pd.DataFrame(columns=DAILY_FIELDS)
+    start, end = _request_window(params)
+    market = require_real_market_data(
+        instruments=[code.lower() for code in codes],
+        start=start,
+        end=end,
+        factor_columns=("LOW0",),
+    )
+    trade_date = _last_snapshot_trade_date(market.prices, start, end)
+    if trade_date is None:
+        return pd.DataFrame(columns=DAILY_FIELDS)
+    rows = []
+    for code in codes:
+        instrument = code.lower()
+        row = {"ts_code": code, "trade_date": trade_date.strftime("%Y%m%d")}
+        for field, tushare_field in {
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "vol",
+            "amount": "amount",
+        }.items():
+            row[tushare_field] = float(market.prices.loc[trade_date, (field, instrument)])
+        rows.append(row)
+    return pd.DataFrame(rows, columns=DAILY_FIELDS)
+
+
+def _real_tushare_adj_factor_rows(codes: list[str], params: dict) -> pd.DataFrame:
+    daily = _real_tushare_daily_rows(codes, params)
+    if daily.empty:
+        return pd.DataFrame(columns=["ts_code", "trade_date", "adj_factor"])
+    return pd.DataFrame(
+        {
+            "ts_code": daily["ts_code"],
+            "trade_date": daily["trade_date"],
+            "adj_factor": 1.0,
+        },
+        columns=["ts_code", "trade_date", "adj_factor"],
+    )
+
+
+def _real_tushare_daily_basic_rows(trade_date: str) -> pd.DataFrame:
+    market = require_real_market_data(
+        instruments=["000001.sz"],
+        start="2015-01-05",
+        end="2015-01-05",
+        factor_columns=("LOW0",),
+        require_daily_basic=True,
+    )
+    row = market.daily_basic.iloc[[0]].copy()
+    row["trade_date"] = trade_date
+    columns = [column for column in DAILY_BASIC_FIELDS if column in row.columns]
+    return row.loc[:, columns]
+
+
+def _request_window(params: dict) -> tuple[str, str]:
+    start = str(params.get("start_date") or params.get("trade_date") or params.get("end_date") or "20240102")
+    end = str(params.get("end_date") or params.get("trade_date") or params.get("start_date") or start)
+    return _tushare_date_to_iso(start), _tushare_date_to_iso(end)
+
+
+def _tushare_date_to_iso(value: str) -> str:
+    return pd.Timestamp(value).date().isoformat()
+
+
+def _last_snapshot_trade_date(frame: pd.DataFrame, start: str, end: str) -> pd.Timestamp | None:
+    start_ts = pd.Timestamp(start).normalize()
+    end_ts = pd.Timestamp(end).normalize()
+    dates = pd.DatetimeIndex(frame.index[(frame.index >= start_ts) & (frame.index <= end_ts)]).sort_values()
+    return pd.Timestamp(dates[-1]) if len(dates) else None
 
 
 class FakeTushareClient:
@@ -41,30 +118,10 @@ class FakeTushareClient:
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         codes = str(params.get("ts_code", "")).split(",")
-        trade_date = str(params.get("end_date", "20240102"))
-        rows = []
-        for code in codes:
-            if not code:
-                continue
-            rows.append(
-                {
-                    "ts_code": code,
-                    "trade_date": trade_date,
-                    "open": 10.0,
-                    "high": 11.0,
-                    "low": 9.0,
-                    "close": 10.5,
-                    "vol": 1000.0,
-                    "amount": 10000.0,
-                }
-            )
         if api_name == "daily":
-            return pd.DataFrame(rows, columns=DAILY_FIELDS)
+            return _real_tushare_daily_rows(codes, params)
         if api_name == "adj_factor":
-            return pd.DataFrame(
-                [{"ts_code": row["ts_code"], "trade_date": row["trade_date"], "adj_factor": 1.0} for row in rows],
-                columns=["ts_code", "trade_date", "adj_factor"],
-            )
+            return _real_tushare_adj_factor_rows(codes, params)
         raise AssertionError(f"Unexpected API call: {api_name}")
 
 
@@ -78,13 +135,8 @@ class MissingAdjFactorClient(FakeTushareClient):
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         codes = str(params.get("ts_code", "")).split(",")
-        trade_date = str(params.get("end_date", "20240102"))
-        rows = []
-        for code in codes:
-            if not code or code == self.missing_code:
-                continue
-            rows.append({"ts_code": code, "trade_date": trade_date, "adj_factor": 1.0})
-        return pd.DataFrame(rows, columns=["ts_code", "trade_date", "adj_factor"])
+        rows = _real_tushare_adj_factor_rows(codes, params)
+        return rows[rows["ts_code"] != self.missing_code].copy()
 
 
 class EmptyTushareClient(FakeTushareClient):
@@ -102,17 +154,7 @@ class DailyBasicClient(FakeTushareClient):
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         if api_name == "daily_basic":
-            return pd.DataFrame(
-                [
-                    {
-                        "ts_code": "000001.SZ",
-                        "trade_date": params.get("trade_date", "20240102"),
-                        "total_mv": 1000.0,
-                        "circ_mv": 800.0,
-                        "pb": 1.2,
-                    }
-                ]
-            )
+            return _real_tushare_daily_basic_rows(str(params.get("trade_date", "20240102")))
         return super().call(api_name, params=params, fields=fields)
 
 
