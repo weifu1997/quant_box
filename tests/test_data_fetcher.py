@@ -40,7 +40,7 @@ def _real_tushare_daily_rows(codes: list[str], params: dict) -> pd.DataFrame:
         return pd.DataFrame(columns=DAILY_FIELDS)
     start, end = _request_window(params)
     market = require_real_market_data(
-        instruments=[code.lower() for code in codes],
+        instruments=codes,
         start=start,
         end=end,
         factor_columns=("LOW0",),
@@ -50,7 +50,7 @@ def _real_tushare_daily_rows(codes: list[str], params: dict) -> pd.DataFrame:
         return pd.DataFrame(columns=DAILY_FIELDS)
     rows = []
     for code in codes:
-        instrument = code.lower()
+        instrument = code.upper()
         row = {"ts_code": code, "trade_date": trade_date.strftime("%Y%m%d")}
         for field, tushare_field in {
             "open": "open",

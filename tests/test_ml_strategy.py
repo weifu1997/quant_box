@@ -43,7 +43,7 @@ class MLStrategyTests(unittest.TestCase):
 
         self.assertFalse(result.scores.dropna().empty)
         self.assertEqual(set(result.scores.index.get_level_values("datetime")), {signal_date})
-        self.assertTrue(set(result.scores.index.get_level_values("instrument").str.lower()).issubset(set(market.instruments)))
+        self.assertTrue(set(result.scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
         row = result.diagnostics.iloc[0]
         self.assertTrue(bool(row["no_lookahead"]))
         self.assertLess(pd.Timestamp(row["max_label_end"]), pd.Timestamp(row["signal_date"]))

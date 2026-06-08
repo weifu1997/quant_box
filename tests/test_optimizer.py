@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 from unittest.mock import patch
 
@@ -66,6 +67,12 @@ class OptimizerTests(unittest.TestCase):
         self.assertFalse(result.empty)
         self.assertIn("optimization_score", result.columns)
         self.assertIn("test_start", result.columns)
+        self.assertEqual(len(result), 1)
+        row = result.iloc[0]
+        self.assertTrue(math.isfinite(float(row["optimization_score"])))
+        self.assertLess(pd.Timestamp(row["train_end"]), pd.Timestamp(row["test_start"]))
+        self.assertIn(row["top_n"], grid["top_n"])
+        self.assertIn(row["rebalance_freq"], grid["rebalance_freq"])
 
     def test_run_walk_forward_grid_validation_evaluates_all_grid_combinations(self) -> None:
         factors, prices = _walk_forward_data()

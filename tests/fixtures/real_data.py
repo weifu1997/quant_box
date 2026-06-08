@@ -15,14 +15,14 @@ SNAPSHOT_ROOT = Path(__file__).resolve().parent / "data_snapshot"
 FULL_DATA_ROOT = ROOT / "data"
 
 DEFAULT_INSTRUMENTS = (
-    "000001.sz",
-    "000002.sz",
-    "000006.sz",
-    "000007.sz",
-    "000008.sz",
-    "000009.sz",
-    "000011.sz",
-    "000012.sz",
+    "000001.SZ",
+    "000002.SZ",
+    "000006.SZ",
+    "000007.SZ",
+    "000008.SZ",
+    "000009.SZ",
+    "000011.SZ",
+    "000012.SZ",
 )
 DEFAULT_START = "2024-01-02"
 DEFAULT_END = "2024-04-30"
@@ -98,8 +98,9 @@ def _load_real_market_data(
     start_ts = pd.Timestamp(start).normalize()
     end_ts = pd.Timestamp(end).normalize()
 
+    storage_instruments = tuple(_storage_instrument(value) for value in instruments)
     try:
-        close = pd.read_parquet(close_panel, columns=list(instruments))
+        close = pd.read_parquet(close_panel, columns=list(storage_instruments))
     except Exception as exc:  # pragma: no cover - exercised when the committed snapshot is corrupted.
         pytest.fail(f"Unable to read real close price panel from {source_name}: {exc}")
     close = close.loc[(close.index >= start_ts) & (close.index <= end_ts)].copy()
@@ -111,10 +112,13 @@ def _load_real_market_data(
         missing = sorted(set(instruments) - set(available))
         pytest.fail(f"Real close price panel from {source_name} is missing requested instruments: {missing}")
 
-    price_columns = [str((field, instrument)) for field in price_fields for instrument in available]
+    price_columns = [str((field, _storage_instrument(instrument))) for field in price_fields for instrument in available]
     prices = _read_price_panel(price_panel, price_columns, source_name)
     prices = prices.loc[(prices.index >= start_ts) & (prices.index <= end_ts)].copy()
-    prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+    prices.columns = pd.MultiIndex.from_tuples(
+        [(str(field), _normalize_instrument(instrument)) for field, instrument in prices.columns],
+        names=["field", "instrument"],
+    )
     prices = prices.loc[:, prices.columns.get_level_values("instrument").isin(available)]
     _require_price_columns(prices, price_fields, available, source_name)
 
@@ -123,10 +127,11 @@ def _load_real_market_data(
     except Exception as exc:  # pragma: no cover - exercised when the committed snapshot is corrupted.
         pytest.fail(f"Unable to read real factor panel from {source_name}: {exc}")
     dates = pd.to_datetime(factors.index.get_level_values("datetime")).normalize()
-    factor_instruments = pd.Index(factors.index.get_level_values("instrument")).astype(str).str.lower()
+    factor_instruments = pd.Index([_normalize_instrument(value) for value in factors.index.get_level_values("instrument")])
     factors = factors[(dates >= start_ts) & (dates <= end_ts) & factor_instruments.isin(available)].copy()
     if factors.empty:
         pytest.fail(f"Real factor panel from {source_name} has no rows for the requested slice.")
+    factors = _normalize_factor_index(factors)
 
     active = sorted(set(factors.index.get_level_values("instrument")) & set(available))
     if set(active) != set(available):
@@ -142,8 +147,9 @@ def _load_real_market_data(
         pytest.fail(f"Unable to read real daily_basic panel from {source_name}: {exc}")
     if {"trade_date", "ts_code"}.issubset(daily_basic.columns):
         daily_dates = pd.to_datetime(daily_basic["trade_date"], errors="coerce").dt.normalize()
-        daily_codes = daily_basic["ts_code"].astype(str).str.lower()
+        daily_codes = pd.Index([_normalize_instrument(value) for value in daily_basic["ts_code"]])
         daily_basic = daily_basic[(daily_dates >= start_ts) & (daily_dates <= end_ts) & daily_codes.isin(active)].copy()
+        daily_basic["ts_code"] = [_normalize_instrument(value) for value in daily_basic["ts_code"]]
     else:
         daily_basic = daily_basic.iloc[0:0].copy()
     if require_daily_basic and daily_basic.empty:
@@ -261,4 +267,16 @@ def _require_price_columns(
 
 
 def _normalize_instrument(value: object) -> str:
+    return str(value).strip().upper()
+
+
+def _storage_instrument(value: object) -> str:
     return str(value).strip().lower()
+
+
+def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
+    frame = factors.copy()
+    datetime_values = pd.to_datetime(frame.index.get_level_values("datetime"))
+    instrument_values = [_normalize_instrument(value) for value in frame.index.get_level_values("instrument")]
+    frame.index = pd.MultiIndex.from_arrays([datetime_values, instrument_values], names=["datetime", "instrument"])
+    return frame

@@ -21,6 +21,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(len(scores), len(market.factors))
         self.assertFalse(scores.isna().any())
         self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
+        _assert_scores_have_cross_sectional_dispersion(self, scores)
 
     def test_build_strategy_scores_uses_dynamic_ic_weights(self) -> None:
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
@@ -35,6 +36,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(len(scores), len(market.factors))
         self.assertGreater(int(scores.notna().sum()), 0)
         self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
+        _assert_scores_have_cross_sectional_dispersion(self, scores)
 
     def test_build_strategy_scores_uses_dynamic_ic_selector(self) -> None:
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
@@ -57,6 +59,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(len(scores), len(market.factors))
         self.assertGreater(int(scores.notna().sum()), 0)
         self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
+        _assert_scores_have_cross_sectional_dispersion(self, scores)
 
     def test_dynamic_ic_selector_uses_configured_top_k_weights(self) -> None:
         index = pd.MultiIndex.from_product(
@@ -232,9 +235,7 @@ class ScoringTests(unittest.TestCase):
 
         self.assertGreater(int(scores.notna().sum()), 0)
         self.assertEqual(scores.attrs["regime_score_blend"]["dates_blended"], len(dates))
-        self.assertTrue(
-            set(scores.index.get_level_values("instrument").str.lower()).issubset(set(market.instruments))
-        )
+        self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
 
     def test_build_strategy_scores_applies_regime_score_filter_to_real_data(self) -> None:
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
@@ -639,6 +640,14 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(kwargs["method"], "pearson")
         self.assertEqual(kwargs["min_obs"], 2)
         self.assertEqual(set(scores.index.get_level_values(0)), {pd.Timestamp("2024-01-05")})
+
+
+def _assert_scores_have_cross_sectional_dispersion(test: unittest.TestCase, scores: pd.Series) -> None:
+    clean = scores.dropna()
+    test.assertGreater(float(clean.std()), 0.0)
+    for date in clean.index.get_level_values("datetime").unique():
+        daily = clean.xs(date, level="datetime")
+        test.assertGreater(daily.nunique(), 1)
 
 
 if __name__ == "__main__":

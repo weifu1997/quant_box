@@ -41,7 +41,11 @@ class PipelineIntegrationTests(unittest.TestCase):
         self.assertFalse(result.equity_curve.empty)
         self.assertIn("total_return", result.metrics)
         self.assertFalse(result.trades.empty)
-        self.assertTrue(set(result.trades["instrument"]).issubset({code.upper() for code in market.instruments}))
+        self.assertTrue(set(result.trades["instrument"]).issubset(set(market.instruments)))
+        self.assertGreater(result.metrics["total_return"], -1.0)
+        self.assertLess(result.metrics["total_return"], 10.0)
+        self.assertTrue(result.equity_curve.index.is_monotonic_increasing)
+        self.assertAlmostEqual(result.metrics["trade_cost"], 0.0)
 
 
 if __name__ == "__main__":

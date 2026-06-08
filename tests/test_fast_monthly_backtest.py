@@ -25,7 +25,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertFalse(result.equity_curve.empty)
         self.assertIn("total_return", result.metrics)
         self.assertFalse(result.weights.empty)
-        self.assertTrue(set(result.weights["instrument"].str.lower()).issubset(set(market.instruments)))
+        self.assertTrue(set(result.weights["instrument"]).issubset(set(market.instruments)))
 
     def test_fast_period_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])

@@ -17,7 +17,7 @@ class SignalGeneratorTests(unittest.TestCase):
         signal, holdings = generate_signal("2024-01-06", previous_holdings=[], config=config, factors=market.factors)
 
         self.assertEqual(len(holdings), 1)
-        self.assertIn(holdings[0].lower(), market.instruments)
+        self.assertIn(holdings[0], market.instruments)
         self.assertEqual(signal["date"].unique().tolist(), ["2024-01-05"])
 
     def test_generate_signal_rejects_when_no_cache_date_is_on_or_before_request(self) -> None:
@@ -34,7 +34,7 @@ class SignalGeneratorTests(unittest.TestCase):
         signal, holdings = generate_signal("latest", previous_holdings=[], config=config, factors=market.factors)
 
         self.assertEqual(len(holdings), 1)
-        self.assertIn(holdings[0].lower(), market.instruments)
+        self.assertIn(holdings[0], market.instruments)
         self.assertEqual(signal["date"].unique().tolist(), ["2024-01-05"])
 
     def test_generate_signal_uses_latest_intraday_factors_for_signal_date(self) -> None:
@@ -139,7 +139,7 @@ class SignalGeneratorTests(unittest.TestCase):
         _signal, holdings = generate_signal("latest", previous_holdings=[], config=config, factors=market.factors)
 
         self.assertLessEqual(len(holdings), 3)
-        self.assertTrue(set(code.lower() for code in holdings).issubset(set(market.instruments)))
+        self.assertTrue(set(holdings).issubset(set(market.instruments)))
         if not industry.empty and holdings:
             industry_counts = pd.Series(holdings).map(industry).value_counts(normalize=True)
             self.assertTrue((industry_counts <= 0.5).all())

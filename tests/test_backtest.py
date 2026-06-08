@@ -268,10 +268,13 @@ class BacktestTests(unittest.TestCase):
         self.assertGreater(len(result.equity_curve), 3)
         self.assertIn("total_return", result.metrics)
         self.assertIn("trade_cost", result.metrics)
+        self.assertAlmostEqual(float(result.equity_curve.iloc[0]), 100000.0)
+        self.assertGreater(result.metrics["total_return"], -1.0)
+        self.assertLess(result.metrics["total_return"], 100.0)
         self.assertGreater(result.metrics["trade_cost"], 0.0)
         self.assertGreater(result.metrics["annual_trade_cost_ratio"], 0.0)
         self.assertFalse(result.trades.empty)
-        self.assertTrue(set(result.trades["instrument"].str.lower()).issubset(set(market.instruments)))
+        self.assertTrue(set(result.trades["instrument"]).issubset(set(market.instruments)))
 
     def test_limit_up_blocks_buy(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
