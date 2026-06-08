@@ -46,7 +46,8 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(strategy["rebalance_drift_threshold"], 0.0)
 
     def test_settings_yaml_loads_current_strategy_overrides(self) -> None:
-        config = load_config(DEFAULT_CONFIG_PATH)
+        with self.assertNoLogs("src.config_loader", level="WARNING"):
+            config = load_config(DEFAULT_CONFIG_PATH)
 
         self.assertEqual(config["tushare"]["http_url"], "http://your-proxy-server:8020/")
         self.assertEqual(config["tushare"]["token"], "your_token")
@@ -57,6 +58,11 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(config["liquidity_filter"]["quantile"], 0.65)
         self.assertTrue(config["selection_risk_filter"]["enabled"])
         self.assertEqual(config["selection_risk_filter"]["lookback_sessions"], 3)
+        self.assertTrue(config["validated_strategy"]["enabled"])
+        self.assertTrue(config["validated_strategy"]["require_is_acceptable"])
+        self.assertTrue(config["backtest"]["exposure_schedule_rebalance_on_signal_only"])
+        self.assertTrue(config["backtest"]["equity_overlay"]["enabled"])
+        self.assertTrue(config["backtest"]["equity_overlay"]["rebalance_on_signal_only"])
 
     def test_load_config_warns_for_unknown_keys_without_rejecting_them(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -112,6 +118,10 @@ unknown_section:
         self.assertEqual(backtest["stop_fill_policy"], "conservative")
         self.assertEqual(backtest["star_limit_up_threshold"], 0.199)
         self.assertEqual(backtest["st_limit_down_threshold"], 0.049)
+        self.assertFalse(backtest["exposure_schedule_rebalance_on_signal_only"])
+        self.assertFalse(backtest["equity_overlay"]["enabled"])
+        self.assertEqual(backtest["equity_overlay"]["ma_window"], 90)
+        self.assertEqual(backtest["equity_overlay"]["rebalance_threshold"], 0.05)
 
     def test_default_manual_orders_include_execution_buffers(self) -> None:
         manual_orders = DEFAULT_CONFIG["manual_orders"]
