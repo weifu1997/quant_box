@@ -93,7 +93,7 @@ def main() -> None:
     parser.add_argument("--target-annual-return", type=float, default=config.get("quality", {}).get("target_annual_return", 0.20))
     parser.add_argument("--min-annual-return", type=float, default=config.get("quality", {}).get("min_optimizer_annual_return", 0.18))
     parser.add_argument("--drawdown-limit", type=float, default=config.get("quality", {}).get("max_backtest_drawdown_limit", -0.20))
-    parser.add_argument("--drawdown-penalty", type=float, default=2.0)
+    parser.add_argument("--drawdown-penalty", type=float, default=4.0)
     parser.add_argument("--rolling-ic", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--walk-forward", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(

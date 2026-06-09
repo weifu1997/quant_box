@@ -153,6 +153,38 @@ class AutoTuningTests(unittest.TestCase):
 
         self.assertEqual(selected["factor_group"], "factor:LOW0")
 
+    def test_select_stable_params_strict_rejects_when_no_params_meet_target_profile(self) -> None:
+        summary = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 7,
+                    "max_turnover": 1,
+                    "rank_buffer": 30,
+                    "rebalance_freq": "monthly",
+                    "annual_return_mean": 0.30,
+                    "max_drawdown_worst": -0.35,
+                    "annual_turnover_mean": 12.0,
+                    "annual_trade_cost_ratio_mean": 0.01,
+                    "auto_score": 10.0,
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "no_acceptable_params"):
+            select_stable_params(
+                summary,
+                {"min_optimizer_annual_return": 0.20, "max_drawdown_limit": -0.20},
+                strict=True,
+            )
+
+        quality = assess_parameter_quality(
+            summary,
+            {"min_optimizer_annual_return": 0.20, "max_drawdown_limit": -0.20},
+        )
+        self.assertFalse(quality.is_acceptable)
+        self.assertIn("no_acceptable_params", quality.issues)
+
     def test_default_parameter_summary_preserves_risk_control_variants(self) -> None:
         validation = pd.DataFrame(
             [

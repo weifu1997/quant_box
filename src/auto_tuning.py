@@ -115,7 +115,7 @@ def summarize_parameter_validation(
         + summary["positive_return_rate"]
         + 0.5 * summary["positive_score_rate"]
         + 0.25 * summary["sharpe_mean"]
-        + summary["max_drawdown_worst"]
+        + 2.0 * summary["max_drawdown_worst"]
         - summary["annual_trade_cost_ratio_mean"]
     )
     return summary.sort_values(
@@ -134,11 +134,14 @@ def select_stable_params(
     summary: pd.DataFrame,
     quality_config: dict | None = None,
     param_columns: Iterable[str] | None = None,
+    strict: bool = False,
 ) -> dict[str, Any]:
     param_columns = _parameter_columns(summary, param_columns)
     if summary.empty:
         raise ValueError("Cannot select parameters from an empty validation summary.")
-    candidates = _target_filtered_summary(summary, quality_config)
+    candidates = _target_filtered_summary(summary, quality_config, fallback=not strict)
+    if candidates.empty:
+        raise ValueError("no_acceptable_params")
     best = candidates.iloc[0]
     return {column: _python_scalar(best[column]) for column in param_columns}
 
@@ -175,7 +178,12 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
             max_annual_trade_cost_ratio=max_cost,
         )
 
-    best = _target_filtered_summary(summary, quality_config).iloc[0]
+    candidates = _target_filtered_summary(summary, quality_config, fallback=False)
+    if candidates.empty:
+        issues.append("no_acceptable_params")
+        best = _target_filtered_summary(summary, quality_config, fallback=True).iloc[0]
+    else:
+        best = candidates.iloc[0]
     windows = int(_number(best.get("windows"), 0))
     positive_return_rate = _number(best.get("positive_return_rate"), 0.0)
     annual_return_mean = _number(best.get("annual_return_mean"), 0.0)
@@ -267,7 +275,7 @@ def apply_strategy_params(config: dict[str, Any], params: dict[str, Any]) -> dic
     return selected
 
 
-def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None) -> pd.DataFrame:
+def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None, fallback: bool = True) -> pd.DataFrame:
     cfg = quality_config or {}
     if summary.empty:
         return summary
@@ -286,7 +294,9 @@ def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None)
         cost = pd.to_numeric(summary["annual_trade_cost_ratio_mean"], errors="coerce")
         mask &= cost <= float(cfg.get("max_annual_trade_cost_ratio", float("inf")))
     filtered = summary[mask]
-    return filtered if not filtered.empty else summary
+    if not filtered.empty:
+        return filtered
+    return summary if fallback else summary.iloc[0:0]
 
 
 def _parameter_columns(frame: pd.DataFrame, param_columns: Iterable[str] | None) -> list[str]:

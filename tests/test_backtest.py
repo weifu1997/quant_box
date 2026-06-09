@@ -812,6 +812,41 @@ class BacktestTests(unittest.TestCase):
             ["2024-01-05", "2024-01-08", "2024-01-10"],
         )
 
+    def test_circuit_breaker_keeps_historical_peak_after_cooldown(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09"])
+        signal_dates = pd.to_datetime(["2024-01-02", "2024-01-05"])
+        index = pd.MultiIndex.from_product([signal_dates, ["A"]], names=["datetime", "instrument"])
+        scores = pd.Series(10, index=index, name="score")
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({"A": [10.0, 10.0, 9.0, 9.0, 9.5, 9.2]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0] * len(dates)}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-09",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "circuit_breaker_drawdown": 0.08,
+                "circuit_breaker_cooldown_days": 1,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "limit_down_threshold": 1.0,
+            },
+        )
+
+        circuit_sells = result.trades[(result.trades["side"] == "SELL") & (result.trades["reason"] == "circuit_breaker")]
+        self.assertEqual(pd.to_datetime(circuit_sells["date"]).tolist(), [pd.Timestamp("2024-01-04"), pd.Timestamp("2024-01-09")])
+
     def test_circuit_breaker_target_exposure_reduces_instead_of_liquidates(self) -> None:
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])

@@ -321,6 +321,68 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertIn("## Backtest Quality", report)
             self.assertIn("## Research Diagnostics", report)
 
+    def test_no_acceptable_optimized_params_falls_back_to_current_config(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            config["strategy"].update({"factor_group": "momentum", "top_n": 1, "rank_buffer": 0})
+            config["quality"] = {
+                "min_validation_windows": 3,
+                "min_positive_return_rate": 0.5,
+                "min_optimizer_annual_return": 0.20,
+                "max_drawdown_limit": -0.20,
+                "min_backtest_annual_return": 0.20,
+                "max_backtest_drawdown_limit": -0.20,
+            }
+            validation = pd.DataFrame(
+                [
+                    {
+                        "factor_group": "factor:LOW0",
+                        "top_n": 10,
+                        "max_turnover": 1,
+                        "rank_buffer": 30,
+                        "rebalance_freq": "monthly",
+                        "rebalance_drift_threshold": 0.02,
+                        "optimization_score": 10.0,
+                        "annual_return": 0.30,
+                        "sharpe": 2.0,
+                        "max_drawdown": -0.35,
+                        "annual_turnover": 1.0,
+                        "annual_trade_cost_ratio": 0.01,
+                    }
+                ]
+                * 3
+            )
+            result = module.BacktestResult(
+                equity_curve=pd.Series([100000.0, 130000.0], index=pd.to_datetime(["2024-01-03", "2024-01-04"]), name="equity"),
+                holdings=pd.DataFrame(),
+                trades=pd.DataFrame(),
+                metrics={"annual_return": 0.30, "max_drawdown": -0.10, "calmar": 3.0},
+            )
+
+            with _patched_auto_run(
+                module,
+                config,
+                factors,
+                ["run_auto_signal.py", "--skip-update", "--skip-convert", "--no-archive"],
+            ), patch.object(module, "run_walk_forward_grid_validation", return_value=validation), patch.object(
+                module,
+                "run_backtest",
+                return_value=result,
+            ) as backtest:
+                module.main()
+
+            bt_config = backtest.call_args.args[4]
+            self.assertEqual(bt_config["factor_group"], "momentum")
+            self.assertEqual(bt_config["top_n"], 1)
+            selected = json.loads((root / "auto_selected_params.json").read_text(encoding="utf-8"))
+            self.assertEqual(selected, {})
+            quality = json.loads((root / "auto_parameter_quality.json").read_text(encoding="utf-8"))
+            self.assertIn("no_acceptable_params", quality["issues"])
+            report = json.loads((root / "auto_signal_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["selected_params_status"], "no_acceptable_params")
+
     def test_promote_candidate_writes_official_signal_and_latest_holdings(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:

@@ -41,11 +41,11 @@ DEFAULT_GRID = {
 
 BASELINE_GRID = {
     "factor_group": ["momentum", "factor:LOW0"],
-    "top_n": [7, 10, 20],
+    "top_n": [7, 10, 15, 20],
     "max_turnover": [1],
-    "rank_buffer": [30],
+    "rank_buffer": [20, 30],
     "rebalance_freq": ["monthly"],
-    "rebalance_drift_threshold": [0.0, 0.02, 0.05],
+    "rebalance_drift_threshold": [0.02],
 }
 
 
@@ -73,7 +73,7 @@ def run_parameter_grid(
     target_annual_return: float | None = 0.20,
     min_annual_return: float | None = 0.18,
     drawdown_limit: float | None = -0.20,
-    drawdown_penalty: float = 2.0,
+    drawdown_penalty: float = 4.0,
     annual_return_weight: float = 0.5,
     calmar_weight: float = 0.25,
     scoring_config: dict | None = None,
@@ -180,7 +180,7 @@ def run_walk_forward_optimization(
     target_annual_return: float | None = 0.20,
     min_annual_return: float | None = 0.18,
     drawdown_limit: float | None = -0.20,
-    drawdown_penalty: float = 2.0,
+    drawdown_penalty: float = 4.0,
     annual_return_weight: float = 0.5,
     calmar_weight: float = 0.25,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
@@ -339,7 +339,7 @@ def run_walk_forward_grid_validation(
     target_annual_return: float | None = 0.20,
     min_annual_return: float | None = 0.18,
     drawdown_limit: float | None = -0.20,
-    drawdown_penalty: float = 2.0,
+    drawdown_penalty: float = 4.0,
     annual_return_weight: float = 0.5,
     calmar_weight: float = 0.25,
     scoring_config: dict | None = None,
@@ -516,7 +516,7 @@ def _optimization_score(
     target_annual_return: float | None = 0.20,
     min_annual_return: float | None = 0.18,
     drawdown_limit: float | None = -0.20,
-    drawdown_penalty: float = 2.0,
+    drawdown_penalty: float = 4.0,
     annual_return_weight: float = 0.5,
     calmar_weight: float = 0.25,
 ) -> float:
@@ -550,7 +550,11 @@ def _sorted_results(rows: list[dict[str, object]]) -> pd.DataFrame:
     if not sort_columns:
         return result_df
     ascending = [column == "max_drawdown" for column in sort_columns]
-    return result_df.sort_values(sort_columns, ascending=ascending).reset_index(drop=True)
+    return result_df.sort_values(
+        sort_columns,
+        ascending=ascending,
+        key=lambda column: column.abs() if column.name == "max_drawdown" else column,
+    ).reset_index(drop=True)
 
 
 def _metric_float(metrics: dict, key: str) -> float:

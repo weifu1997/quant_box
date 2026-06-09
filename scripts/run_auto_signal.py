@@ -134,7 +134,7 @@ def main() -> None:
     parser.add_argument("--target-annual-return", type=float, default=base_config.get("quality", {}).get("target_annual_return", 0.20))
     parser.add_argument("--min-annual-return", type=float, default=base_config.get("quality", {}).get("min_optimizer_annual_return", 0.18))
     parser.add_argument("--drawdown-limit", type=float, default=base_config.get("quality", {}).get("max_backtest_drawdown_limit", -0.20))
-    parser.add_argument("--drawdown-penalty", type=float, default=2.0)
+    parser.add_argument("--drawdown-penalty", type=float, default=4.0)
     args = parser.parse_args()
 
     config = deepcopy(base_config)
@@ -238,6 +238,7 @@ def main() -> None:
 
         selected_config = config
         selected_params: dict[str, Any] = dict(config.get("strategy", {}))
+        selected_params_status = "current_config"
         validation = pd.DataFrame()
         summary = pd.DataFrame()
         if not args.skip_optimize:
@@ -314,11 +315,25 @@ def main() -> None:
             summary.to_csv(summary_path, index=False, encoding="utf-8-sig")
             artifacts.extend([validation_path, summary_path])
             if not summary.empty:
-                selected_params = select_stable_params(summary, config.get("quality", {}), param_columns=param_columns)
-                selected_config = apply_strategy_params(config, selected_params)
+                try:
+                    selected_params = select_stable_params(
+                        summary,
+                        config.get("quality", {}),
+                        param_columns=param_columns,
+                        strict=True,
+                    )
+                    selected_config = apply_strategy_params(config, selected_params)
+                    selected_params_status = "selected_acceptable_params"
+                except ValueError as exc:
+                    if str(exc) != "no_acceptable_params":
+                        raise
+                    selected_params = {}
+                    selected_config = config
+                    selected_params_status = "no_acceptable_params"
             _stage(status, out_dir, "optimize_params", "complete")
         else:
             _stage(status, out_dir, "optimize_params", "skipped")
+            selected_params_status = "skipped"
 
         parameter_quality = (
             assess_parameter_quality(summary, config.get("quality", {}))
@@ -485,6 +500,7 @@ def main() -> None:
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "target_date_resolution": target_resolution.to_dict(),
             "selected_params": selected_params,
+            "selected_params_status": selected_params_status,
             "parameter_quality": parameter_quality.to_dict(),
             "backtest_quality": backtest_quality.to_dict(),
             "data_health": data_health.to_dict(),

@@ -103,6 +103,7 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
     price_panel_start_date = _date_index_start_date(price_panel_dates)
     point_in_time_start = _point_in_time_start_date(data_start, factor_meta_start_date, price_panel_start_date)
     expected_price_dates = _filter_date_texts(price_panel_dates, point_in_time_start, factor_meta_end_date)
+    expected_price_start = min(expected_price_dates) if expected_price_dates else point_in_time_start
     if not factor_meta:
         warnings.append("factor_cache_meta_missing")
 
@@ -206,8 +207,8 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
         ]
         if missing_daily_basic_columns:
             issues.append("daily_basic_missing_columns:" + ",".join(missing_daily_basic_columns))
-        if daily_basic_start and point_in_time_start and _date_after(daily_basic_start, point_in_time_start):
-            issues.append(f"daily_basic_start_after_point_in_time_start:{daily_basic_start}>{point_in_time_start}")
+        if daily_basic_start and expected_price_start and _date_after(daily_basic_start, expected_price_start):
+            issues.append(f"daily_basic_start_after_point_in_time_start:{daily_basic_start}>{expected_price_start}")
         min_daily_basic_coverage = _float_value(gov_cfg.get("min_daily_basic_date_coverage", 1.0), 1.0)
         if daily_basic_expected_dates and daily_basic_date_coverage < min_daily_basic_coverage:
             issues.append(

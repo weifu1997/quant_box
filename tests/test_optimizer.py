@@ -42,10 +42,10 @@ class OptimizerTests(unittest.TestCase):
     def test_optimization_score_treats_missing_metrics_as_zero(self) -> None:
         self.assertEqual(_optimization_score({"sharpe": float("nan")}), 0.0)
 
-    def test_sorted_results_prefers_smaller_max_drawdown_when_core_metrics_tie(self) -> None:
+    def test_sorted_results_prefers_smaller_drawdown_when_primary_scores_tie(self) -> None:
         rows = [
-            {"name": "deep", "optimization_score": 1.0, "sharpe": 2.0, "annual_return": 0.3, "max_drawdown": 0.30},
-            {"name": "shallow", "optimization_score": 1.0, "sharpe": 2.0, "annual_return": 0.3, "max_drawdown": 0.10},
+            {"name": "deep", "optimization_score": 1.0, "sharpe": 0.5, "annual_return": 0.1, "max_drawdown": -0.40},
+            {"name": "shallow", "optimization_score": 1.0, "sharpe": 0.5, "annual_return": 0.1, "max_drawdown": -0.10},
         ]
 
         result = _sorted_results(rows)
@@ -55,8 +55,9 @@ class OptimizerTests(unittest.TestCase):
     def test_baseline_grid_is_smaller_than_full_grid(self) -> None:
         self.assertLess(_grid_size(BASELINE_GRID), _grid_size(DEFAULT_GRID))
         self.assertEqual(BASELINE_GRID["factor_group"], ["momentum", "factor:LOW0"])
-        self.assertEqual(BASELINE_GRID["top_n"], [7, 10, 20])
-        self.assertEqual(BASELINE_GRID["rebalance_drift_threshold"], [0.0, 0.02, 0.05])
+        self.assertEqual(BASELINE_GRID["top_n"], [7, 10, 15, 20])
+        self.assertEqual(BASELINE_GRID["rank_buffer"], [20, 30])
+        self.assertEqual(BASELINE_GRID["rebalance_drift_threshold"], [0.02])
 
     def test_run_walk_forward_optimization_returns_out_of_sample_window(self) -> None:
         factors, prices = _walk_forward_data()
