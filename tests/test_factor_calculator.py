@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_factor_calculator 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import json
@@ -14,18 +16,24 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class FakeQlib:
+    """类说明：提供 FakeQlib 测试替身实现。"""
     def __init__(self) -> None:
+        """函数说明：初始化实例状态。"""
         self.calls: list[tuple[str, str]] = []
 
     def init(self, provider_uri: str, region: str) -> None:
+        """函数说明：处理 init 主要逻辑。"""
         self.calls.append((provider_uri, region))
 
 
 class FactorCalculatorTests(unittest.TestCase):
+    """类说明：组织 FactorCalculatorTests 测试用例。"""
     def tearDown(self) -> None:
+        """函数说明：清理测试用例运行后的临时状态。"""
         factor_calculator._QLIB_INIT_STATE = None
 
     def test_ensure_qlib_initialized_reuses_matching_provider_and_region(self) -> None:
+        """函数说明：验证 test_ensure_qlib_initialized_reuses_matching_provider_and_region 覆盖的行为场景。"""
         fake = FakeQlib()
         provider = Path("data/qlib_data")
 
@@ -35,6 +43,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(fake.calls, [(str(provider), "cn")])
 
     def test_load_or_compute_factors_recomputes_when_price_panel_has_new_symbol(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_recomputes_when_price_panel_has_new_symbol 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -64,6 +73,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(set(factors.index.get_level_values("instrument")), set(full_market.instruments))
 
     def test_load_or_compute_factors_reuses_matching_cache(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_reuses_matching_cache 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -89,6 +99,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(set(factors.index.get_level_values("instrument")), set(market.instruments))
 
     def test_load_or_compute_factors_normalizes_cache_symbol_coverage(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_normalizes_cache_symbol_coverage 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -115,6 +126,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(len(factors), len(cached))
 
     def test_load_or_compute_factors_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -141,6 +153,7 @@ class FactorCalculatorTests(unittest.TestCase):
         compute.assert_not_called()
 
     def test_load_or_compute_factors_recomputes_when_requested_columns_are_missing(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_recomputes_when_requested_columns_are_missing 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -170,6 +183,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(factors.columns.tolist(), ["LOW0", "ROC5"])
 
     def test_load_or_compute_factors_reuses_cache_when_request_starts_before_first_trading_day(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_reuses_cache_when_request_starts_before_first_trading_day 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -213,6 +227,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).date), set(trading_dates.date))
 
     def test_load_or_compute_factors_reuses_superset_cache_and_slices_dates(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_reuses_superset_cache_and_slices_dates 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -255,6 +270,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(set(factors.index.get_level_values("instrument")), set(market.instruments))
 
     def test_load_or_compute_factors_does_not_overwrite_default_cache_for_partial_range(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_does_not_overwrite_default_cache_for_partial_range 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -283,6 +299,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertFalse(cache_path.with_name(f"{cache_path.name}.meta.json").exists())
 
     def test_load_or_compute_factors_recomputes_when_qlib_metadata_changes(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_recomputes_when_qlib_metadata_changes 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"
@@ -321,6 +338,7 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(float(factors.iloc[0]["F1"]), 3.0)
 
     def test_load_or_compute_factors_reuses_cache_when_meta_exists_but_qlib_config_is_missing(self) -> None:
+        """函数说明：验证 test_load_or_compute_factors_reuses_cache_when_meta_exists_but_qlib_config_is_missing 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache_path = root / "alpha158.parquet"

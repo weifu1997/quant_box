@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_reporting 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +12,9 @@ from src.reporting import archive_run, signal_action_summary, write_daily_signal
 
 
 class ReportingTests(unittest.TestCase):
+    """类说明：组织 ReportingTests 测试用例。"""
     def test_write_daily_signal_report_renders_quality_and_repair_context(self) -> None:
+        """函数说明：验证 test_write_daily_signal_report_renders_quality_and_repair_context 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "outputs"
             report = {
@@ -49,6 +53,7 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("- SELL: 3", text)
 
     def test_archive_run_copies_existing_files_under_signal_date(self) -> None:
+        """函数说明：验证 test_archive_run_copies_existing_files_under_signal_date 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "auto_signal_report.json"
@@ -61,6 +66,7 @@ class ReportingTests(unittest.TestCase):
             self.assertFalse((target / "missing.json").exists())
 
     def test_signal_action_summary_counts_known_actions_case_insensitively(self) -> None:
+        """函数说明：验证 test_signal_action_summary_counts_known_actions_case_insensitively 覆盖的行为场景。"""
         frame = pd.DataFrame({"action": ["buy", "BUY", "hold", "sell", "ignore"]})
 
         self.assertEqual(signal_action_summary(frame), {"BUY": 2, "HOLD": 1, "SELL": 1})

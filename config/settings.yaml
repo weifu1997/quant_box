@@ -42,7 +42,7 @@ ml_strategy:
   model_type: "ridge_numpy"
   model_objective: "regression"
   class_weight: "balanced"
-  fallback_on_missing_model: true
+  fallback_on_missing_model: false
   train_years: 3
   training_start_date: "auto"
   label_horizon_sessions: 20
@@ -171,7 +171,7 @@ ic:
   max_weight_turnover: 0.5
   price_file: "data/prices/ohlcv_adjusted.parquet"
   weights_cache_enabled: true
-  weights_cache_file: "data/factors/rolling_ic_weights.pkl"
+  weights_cache_file: "data/factors/rolling_ic_weights.parquet"
 
 dynamic_ic_selector:
   candidates:

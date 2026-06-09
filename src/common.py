@@ -1,3 +1,5 @@
+"""模块说明：提供跨模块复用的数据规范化工具。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,22 +12,26 @@ PRICE_FIELD_COLUMNS = frozenset({"open", "high", "low", "close", "volume", "vol"
 
 
 def normalize_instrument(value: object) -> str:
+    """函数说明：规范化 normalize_instrument 主要逻辑。"""
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
 
 
 def looks_like_field_table(columns: pd.Index, price_fields: set[str] | frozenset[str] = PRICE_FIELD_COLUMNS) -> bool:
+    """函数说明：处理 looks_like_field_table 主要逻辑。"""
     labels = {str(column).strip().lower() for column in columns}
     return len(labels) > 1 and bool(labels & price_fields)
 
 
 def is_stock_csv(path: Path) -> bool:
+    """函数说明：判断 is_stock_csv 是否成立。"""
     name = path.name.upper()
     return len(name) == len("000001.SZ.CSV") and name[:6].isdigit() and name[6:] in {".SZ.CSV", ".SH.CSV"}
 
 
 def parse_datetime_values(values: object) -> pd.Series:
+    """函数说明：解析 parse_datetime_values 主要逻辑。"""
     parsed = pd.to_datetime(values, errors="coerce")
     parsed_series = pd.Series(parsed)
     if parsed_series.isna().any():
@@ -35,10 +41,12 @@ def parse_datetime_values(values: object) -> pd.Series:
 
 
 def coverage_ratio(part: int, whole: int) -> float:
+    """函数说明：处理 coverage_ratio 主要逻辑。"""
     return float(part / whole) if whole else 0.0
 
 
 def close_price_frame(price_df: pd.DataFrame, normalize_symbols: bool = True) -> pd.DataFrame:
+    """函数说明：处理 close_price_frame 主要逻辑。"""
     if price_df.empty:
         return pd.DataFrame()
     if isinstance(price_df.columns, pd.MultiIndex):

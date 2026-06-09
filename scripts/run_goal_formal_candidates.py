@@ -1,3 +1,5 @@
+"""模块说明：提供 run_goal_formal_candidates 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -26,6 +28,7 @@ from src.trading_calendar import resolve_target_date_value
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     parser = argparse.ArgumentParser(description="Run selected full-history formal candidates for the active goal.")
     parser.add_argument("--output", default=dated_output_path("goal_formal_candidate_summary"))
     parser.add_argument("--start-index", type=int, default=1, help="1-based candidate index to start from.")
@@ -115,6 +118,7 @@ def main() -> None:
 
 
 def _load_existing_candidate_rows(path: Path) -> tuple[list[dict[str, Any]], set[str]]:
+    """函数说明：加载 load_existing_candidate_rows 的内部辅助逻辑。"""
     if not path.exists() or path.stat().st_size == 0:
         return [], set()
     try:
@@ -132,6 +136,7 @@ CANDIDATE_SPECS_PATH = ROOT / "config" / "goal_formal_candidates.json"
 
 
 def _candidate_specs(path: str | Path | None = None) -> list[dict[str, Any]]:
+    """函数说明：处理 candidate_specs 的内部辅助逻辑。"""
     specs_path = Path(path) if path is not None else CANDIDATE_SPECS_PATH
     if not specs_path.is_absolute():
         specs_path = ROOT / specs_path
@@ -144,6 +149,7 @@ def _candidate_specs(path: str | Path | None = None) -> list[dict[str, Any]]:
 
 
 def _validate_candidate_specs(specs: Any, path: Path) -> None:
+    """函数说明：校验 validate_candidate_specs 的内部辅助逻辑。"""
     if not isinstance(specs, list):
         raise ValueError(f"Candidate specs file must contain a list: {path}")
     seen: set[str] = set()
@@ -165,6 +171,7 @@ def _validate_candidate_specs(specs: Any, path: Path) -> None:
 
 
 def _strategy_config(config: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 strategy_config 的内部辅助逻辑。"""
     strategy = deepcopy(config["strategy"])
     for key, value in candidate.get("strategy", {}).items():
         if value == "__remove__":
@@ -175,6 +182,7 @@ def _strategy_config(config: dict[str, Any], candidate: dict[str, Any]) -> dict[
 
 
 def _scoring_config(config: dict[str, Any], strategy: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 scoring_config 的内部辅助逻辑。"""
     result = deepcopy(config)
     result["strategy"] = strategy
     for key in ["liquidity_filter", "market_regime", "regime_score_blend", "regime_score_filter"]:
@@ -184,6 +192,7 @@ def _scoring_config(config: dict[str, Any], strategy: dict[str, Any], candidate:
 
 
 def _timing_config(config: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 timing_config 的内部辅助逻辑。"""
     result = deepcopy(config)
     if "market_regime" in candidate:
         result["market_regime"] = {**result.get("market_regime", {}), **candidate["market_regime"]}
@@ -194,6 +203,7 @@ def _timing_config(config: dict[str, Any], candidate: dict[str, Any]) -> dict[st
 
 
 def _score_key(candidate: dict[str, Any]) -> str:
+    """函数说明：处理 score_key 的内部辅助逻辑。"""
     strategy_items = tuple(sorted(candidate.get("strategy", {}).items()))
     liquidity_items = tuple(sorted(candidate.get("liquidity_filter", {}).items()))
     market_items = json.dumps(candidate.get("market_regime", {}), sort_keys=True, default=str)
@@ -203,6 +213,7 @@ def _score_key(candidate: dict[str, Any]) -> str:
 
 
 def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 quality_flags 的内部辅助逻辑。"""
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
     annual_turnover = float(metrics.get("annual_turnover", 0.0) or 0.0)
@@ -230,12 +241,14 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
 
 
 def _quality_return_drawdown_thresholds(quality_cfg: dict[str, Any]) -> tuple[float, float]:
+    """函数说明：处理 quality_return_drawdown_thresholds 的内部辅助逻辑。"""
     return_threshold = float(quality_cfg.get("min_backtest_annual_return", quality_cfg.get("target_annual_return", 0.20)))
     drawdown_limit = float(quality_cfg.get("max_backtest_drawdown_limit", quality_cfg.get("max_drawdown_limit", -0.20)))
     return return_threshold, drawdown_limit
 
 
 def _yearly_pass_counts(yearly: pd.DataFrame, quality_cfg: dict[str, Any]) -> tuple[int, int]:
+    """函数说明：处理 yearly_pass_counts 的内部辅助逻辑。"""
     if yearly.empty:
         return 0, 0
     return_threshold, drawdown_limit = _quality_return_drawdown_thresholds(quality_cfg)
@@ -252,6 +265,7 @@ def _write_candidate_artifacts(
     config: dict[str, Any],
     write_diagnostics: bool,
 ) -> dict[str, str]:
+    """函数说明：写入 write_candidate_artifacts 的内部辅助逻辑。"""
     paths = {
         "equity_path": str(prefix) + "_equity.csv",
         "years_path": str(prefix) + "_years.csv",
@@ -275,6 +289,7 @@ def _write_candidate_artifacts(
 
 
 def _yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
+    """函数说明：处理 yearly_stats 的内部辅助逻辑。"""
     if equity_curve.empty:
         return pd.DataFrame(columns=["year", "days", "annual_return", "max_drawdown"])
     rows: list[dict[str, Any]] = []

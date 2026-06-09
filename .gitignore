@@ -8,7 +8,6 @@ htmlcov/
 .vscode/
 .idea/
 Thumbs.db
-config/settings.yaml
 config/settings.local.yaml
 config/account.yaml
 config/current_holdings.csv

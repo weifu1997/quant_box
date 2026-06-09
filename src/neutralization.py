@@ -1,3 +1,5 @@
+"""模块说明：对信号分数做行业和市值中性化。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +13,7 @@ from src.config_loader import resolve_path
 
 
 def load_industry_map(path: str | Path) -> pd.Series:
+    """函数说明：加载 load_industry_map 主要逻辑。"""
     file_path = resolve_path(path)
     if not file_path.exists():
         return pd.Series(dtype=object, name="industry")
@@ -26,6 +29,7 @@ def load_industry_map(path: str | Path) -> pd.Series:
 
 
 def load_daily_basic(path: str | Path) -> pd.DataFrame:
+    """函数说明：加载 load_daily_basic 主要逻辑。"""
     file_path = resolve_path(path)
     if not file_path.exists():
         return pd.DataFrame()
@@ -51,6 +55,7 @@ def neutralize_score_panel(
     daily_basic: pd.DataFrame | None = None,
     config: dict[str, Any] | None = None,
 ) -> tuple[pd.Series, dict[str, Any]]:
+    """函数说明：处理 neutralize_score_panel 主要逻辑。"""
     cfg = config or {}
     enabled = bool(cfg.get("enabled", False))
     market_cap_field = str(cfg.get("market_cap_field", "circ_mv"))
@@ -125,6 +130,7 @@ def neutralize_score_panel(
 
 
 def _normalize_score_index(scores: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_score_index 的内部辅助逻辑。"""
     raw_dates = _parse_datetime_values(scores.index.get_level_values(0))
     raw_instruments = scores.index.get_level_values(1)
     values = pd.to_numeric(pd.Series(scores.to_numpy()), errors="coerce").to_numpy()
@@ -152,6 +158,7 @@ def _normalize_score_index(scores: pd.Series) -> pd.Series:
 
 
 def _market_cap_residual(scores: pd.Series, market_cap: pd.Series, min_obs: int) -> pd.Series | None:
+    """函数说明：处理 market_cap_residual 的内部辅助逻辑。"""
     cap = np.log1p(pd.to_numeric(market_cap, errors="coerce").astype(float))
     y = scores.astype(float)
     valid = y.notna() & cap.notna() & np.isfinite(y) & np.isfinite(cap)

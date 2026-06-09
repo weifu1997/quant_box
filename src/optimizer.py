@@ -1,3 +1,5 @@
+"""模块说明：运行参数网格搜索和滚动样本外优化。"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -79,6 +81,7 @@ def run_parameter_grid(
     scoring_config: dict | None = None,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
+    """函数说明：运行 run_parameter_grid 相关流程。"""
     grid = grid or DEFAULT_GRID
     dynamic_weights = None
     if "ic_weighted" in set(grid.get("factor_group", [])) and use_rolling_ic:
@@ -185,6 +188,7 @@ def run_walk_forward_optimization(
     calmar_weight: float = 0.25,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
+    """函数说明：运行 run_walk_forward_optimization 相关流程。"""
     price_df = _normalize_window_price_frame(price_df)
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
@@ -464,6 +468,7 @@ def run_walk_forward_grid_validation(
 
 
 def _slice_factor_dates(factor_df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """函数说明：处理 slice_factor_dates 的内部辅助逻辑。"""
     dates = pd.to_datetime(factor_df.index.get_level_values(0)).normalize()
     start = pd.Timestamp(start).normalize()
     end = pd.Timestamp(end).normalize()
@@ -471,6 +476,7 @@ def _slice_factor_dates(factor_df: pd.DataFrame, start: pd.Timestamp, end: pd.Ti
 
 
 def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+    """函数说明：处理 slice_score_dates 的内部辅助逻辑。"""
     dates = pd.to_datetime(score_panel.index.get_level_values(0)).normalize()
     start = pd.Timestamp(start).normalize()
     end = pd.Timestamp(end).normalize()
@@ -478,6 +484,7 @@ def _slice_score_dates(score_panel: pd.Series, start: pd.Timestamp, end: pd.Time
 
 
 def _normalize_window_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_window_price_frame 的内部辅助逻辑。"""
     prices = price_df.copy()
     raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
     valid_dates = ~raw_dates.isna()
@@ -494,6 +501,7 @@ def _normalize_window_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _scoring_config(config: dict | None, params: dict[str, object]) -> dict:
+    """函数说明：处理 scoring_config 的内部辅助逻辑。"""
     result = deepcopy(config) if config is not None else {"strategy": {}}
     result.setdefault("strategy", {})
     for key in STRATEGY_GRID_KEYS:
@@ -503,6 +511,7 @@ def _scoring_config(config: dict | None, params: dict[str, object]) -> dict:
 
 
 def _last_dynamic_weights(weights_by_date: dict[pd.Timestamp, pd.Series]) -> pd.Series:
+    """函数说明：处理 last_dynamic_weights 的内部辅助逻辑。"""
     if not weights_by_date:
         return pd.Series(dtype=float)
     last_date = max(weights_by_date)
@@ -520,6 +529,7 @@ def _optimization_score(
     annual_return_weight: float = 0.5,
     calmar_weight: float = 0.25,
 ) -> float:
+    """函数说明：处理 optimization_score 的内部辅助逻辑。"""
     sharpe = _metric_float(metrics, "sharpe")
     annual_turnover = _metric_float(metrics, "annual_turnover")
     annual_trade_cost_ratio = _metric_float(metrics, "annual_trade_cost_ratio")
@@ -543,6 +553,7 @@ def _optimization_score(
 
 
 def _sorted_results(rows: list[dict[str, object]]) -> pd.DataFrame:
+    """函数说明：处理 sorted_results 的内部辅助逻辑。"""
     result_df = pd.DataFrame(rows)
     if result_df.empty:
         return result_df
@@ -558,6 +569,7 @@ def _sorted_results(rows: list[dict[str, object]]) -> pd.DataFrame:
 
 
 def _metric_float(metrics: dict, key: str) -> float:
+    """函数说明：处理 metric_float 的内部辅助逻辑。"""
     value = pd.to_numeric(metrics.get(key, 0.0), errors="coerce")
     if pd.isna(value):
         return 0.0
@@ -565,6 +577,7 @@ def _metric_float(metrics: dict, key: str) -> float:
 
 
 def _has_metric(metrics: dict, key: str) -> bool:
+    """函数说明：判断 has_metric 是否成立。"""
     if key not in metrics:
         return False
     value = pd.to_numeric(metrics.get(key), errors="coerce")

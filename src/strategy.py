@@ -1,3 +1,5 @@
+"""模块说明：实现因子合成、信号重采样和组合选股规则。"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -24,6 +26,7 @@ def composite_factor(
     factor_directions: pd.Series | dict[str, float] | None = None,
     min_obs: int = 5,
 ) -> pd.Series:
+    """函数说明：处理 composite_factor 主要逻辑。"""
     if factor_df.empty:
         raise ValueError("factor_df is empty.")
 
@@ -65,6 +68,7 @@ def _select_factor_columns(
     factor_weights: pd.Series | dict[str, float] | None = None,
     factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
 ) -> pd.DataFrame:
+    """函数说明：选择 select_factor_columns 的内部辅助逻辑。"""
     selected_cols = factor_columns_for_method(numeric.columns, method, factor_weights, factor_weights_dynamic)
     return numeric[selected_cols]
 
@@ -75,6 +79,7 @@ def factor_columns_for_method(
     factor_weights: pd.Series | dict[str, float] | None = None,
     factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
 ) -> list[object]:
+    """函数说明：处理 factor_columns_for_method 主要逻辑。"""
     method, _ = _factor_method_parts(method)
     column_list = list(columns)
     if method == "all":
@@ -94,6 +99,7 @@ def factor_columns_for_method(
 
 
 def _exact_factor_column(method: str) -> str | None:
+    """函数说明：处理 exact_factor_column 的内部辅助逻辑。"""
     for prefix in ("factor:", "column:"):
         if method.startswith(prefix):
             name = method[len(prefix) :].strip().lower()
@@ -102,6 +108,7 @@ def _exact_factor_column(method: str) -> str | None:
 
 
 def _factor_method_parts(method: str) -> tuple[str, float]:
+    """函数说明：处理 factor_method_parts 的内部辅助逻辑。"""
     method = str(method).strip().lower()
     for prefix in INVERSE_FACTOR_PREFIXES:
         if method.startswith(prefix):
@@ -113,6 +120,7 @@ def _weighted_factor_columns(
     factor_weights: pd.Series | dict[str, float] | None = None,
     factor_weights_dynamic: dict[pd.Timestamp, pd.Series] | None = None,
 ) -> set[str]:
+    """函数说明：处理 weighted_factor_columns 的内部辅助逻辑。"""
     columns: set[str] = set()
     if factor_weights is not None:
         weights = pd.Series(factor_weights, dtype=float)
@@ -129,6 +137,7 @@ def _dynamic_ic_weighted_score(
     factor_weights_dynamic: dict[pd.Timestamp, pd.Series],
     fallback_weights: pd.Series | dict[str, float] | None = None,
 ) -> pd.Series:
+    """函数说明：处理 dynamic_ic_weighted_score 的内部辅助逻辑。"""
     if not isinstance(clean.index, pd.MultiIndex):
         raise ValueError("dynamic IC weights require MultiIndex factor data.")
 
@@ -165,12 +174,14 @@ def _dynamic_ic_weighted_score(
 
 
 def _row_mean_with_min_count(df: pd.DataFrame) -> pd.Series:
+    """函数说明：处理 row_mean_with_min_count 的内部辅助逻辑。"""
     min_count = max(1, int(np.ceil(df.shape[1] / 2)))
     means = df.mean(axis=1, skipna=True)
     return means.where(df.count(axis=1) >= min_count)
 
 
 def _average_prior_weights(prior_weights: list[pd.Series]) -> pd.Series:
+    """函数说明：处理 average_prior_weights 的内部辅助逻辑。"""
     aligned = pd.concat(prior_weights, axis=1).fillna(0.0)
     recency = pd.Series(np.arange(1, aligned.shape[1] + 1, dtype=float), index=aligned.columns)
     averaged = aligned.mul(recency, axis=1).sum(axis=1) / recency.sum()
@@ -187,6 +198,7 @@ def select_stocks(
     group_map: Mapping[str, object] | pd.Series | None = None,
     max_group_weight: float | None = None,
 ) -> list[str]:
+    """函数说明：选择 select_stocks 主要逻辑。"""
     scores = _normalize_score_series(score_series)
     ranked = scores.index.astype(str).tolist()
     if top_n <= 0 or not ranked:
@@ -228,6 +240,7 @@ def _apply_group_cap(
     group_map: Mapping[str, object] | pd.Series | None,
     max_group_weight: float | None,
 ) -> list[str]:
+    """函数说明：应用 apply_group_cap 的内部辅助逻辑。"""
     group_limit = _group_limit(top_n, max_group_weight)
     groups = _normalize_group_map(group_map)
     if group_limit is None or groups is None:
@@ -265,6 +278,7 @@ def _enforce_group_cap(
     group_map: Mapping[str, object] | pd.Series | None,
     max_group_weight: float | None,
 ) -> list[str]:
+    """函数说明：处理 enforce_group_cap 的内部辅助逻辑。"""
     group_limit = _group_limit(top_n, max_group_weight)
     groups = _normalize_group_map(group_map)
     if group_limit is None or groups is None or not holdings:
@@ -321,6 +335,7 @@ def _enforce_group_cap(
 
 
 def _group_limit(top_n: int, max_group_weight: float | None) -> int | None:
+    """函数说明：处理 group_limit 的内部辅助逻辑。"""
     if max_group_weight is None:
         return None
     try:
@@ -333,6 +348,7 @@ def _group_limit(top_n: int, max_group_weight: float | None) -> int | None:
 
 
 def _normalize_score_series(score_series: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_score_series 的内部辅助逻辑。"""
     scores = score_series.dropna().sort_values(ascending=False)
     if scores.empty:
         return scores
@@ -347,6 +363,7 @@ def _normalize_score_series(score_series: pd.Series) -> pd.Series:
 
 
 def _normalize_instruments(values: Iterable[object]) -> list[str]:
+    """函数说明：规范化 normalize_instruments 的内部辅助逻辑。"""
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -359,6 +376,7 @@ def _normalize_instruments(values: Iterable[object]) -> list[str]:
 
 
 def _normalize_group_map(group_map: Mapping[str, object] | pd.Series | None) -> dict[str, str] | None:
+    """函数说明：规范化 normalize_group_map 的内部辅助逻辑。"""
     if group_map is None:
         return None
     items = group_map.items() if isinstance(group_map, Mapping) else pd.Series(group_map).items()
@@ -375,6 +393,7 @@ def _normalize_group_map(group_map: Mapping[str, object] | pd.Series | None) -> 
 
 
 def _group_for(code: str, groups: dict[str, str]) -> str | None:
+    """函数说明：处理 group_for 的内部辅助逻辑。"""
     return groups.get(str(code).strip().upper())
 
 
@@ -384,6 +403,7 @@ def _group_slot_available(
     group_limit: int,
     groups: dict[str, str],
 ) -> bool:
+    """函数说明：处理 group_slot_available 的内部辅助逻辑。"""
     group = _group_for(code, groups)
     if group is None:
         return True
@@ -391,6 +411,7 @@ def _group_slot_available(
 
 
 def _bump_group(code: str, group_counts: dict[str, int], groups: dict[str, str]) -> None:
+    """函数说明：处理 bump_group 的内部辅助逻辑。"""
     group = _group_for(code, groups)
     if group is None:
         return
@@ -398,6 +419,7 @@ def _bump_group(code: str, group_counts: dict[str, int], groups: dict[str, str])
 
 
 def _group_cap_satisfied(holdings: Iterable[str], group_limit: int, groups: dict[str, str]) -> bool:
+    """函数说明：处理 group_cap_satisfied 的内部辅助逻辑。"""
     counts: dict[str, int] = {}
     for code in holdings:
         group = _group_for(code, groups)
@@ -416,6 +438,7 @@ def _pick_keeps(
     allowed_new: int,
     rank_buffer: int,
 ) -> list[str]:
+    """函数说明：处理 pick_keeps 的内部辅助逻辑。"""
     buffer_limit = top_n + max(0, rank_buffer)
     keep = [code for code in previous if rank_map.get(code, float("inf")) < buffer_limit]
     keep = sorted(_dedupe_preserve(keep), key=lambda code: rank_map.get(code, float("inf")))[:top_n]
@@ -435,6 +458,7 @@ def _pick_additions(
     top_n: int,
     allowed_new: int,
 ) -> list[str]:
+    """函数说明：处理 pick_additions 的内部辅助逻辑。"""
     slots = max(top_n - len(keep), 0)
     return [code for code in ranked if code not in keep and code not in previous_set][: min(slots, allowed_new)]
 
@@ -446,6 +470,7 @@ def _enforce_turnover_cap(
     rank_map: dict[str, int],
     allowed_new: int,
 ) -> list[str]:
+    """函数说明：处理 enforce_turnover_cap 的内部辅助逻辑。"""
     protected = [code for code in previous if code in rank_map and code not in holdings]
     protected = sorted(_dedupe_preserve(protected), key=lambda code: rank_map.get(code, float("inf")))
     holdings = list(holdings)
@@ -461,6 +486,7 @@ def _enforce_turnover_cap(
 
 
 def _dedupe_preserve(values: Iterable[str]) -> list[str]:
+    """函数说明：处理 dedupe_preserve 的内部辅助逻辑。"""
     seen: set[str] = set()
     result: list[str] = []
     for value in values:
@@ -477,6 +503,7 @@ def generate_holdings_by_day(
     max_turnover: int = 1,
     rank_buffer: int = 0,
 ) -> pd.DataFrame:
+    """函数说明：生成 generate_holdings_by_day 主要逻辑。"""
     if not isinstance(score_panel.index, pd.MultiIndex):
         raise ValueError("score_panel must use MultiIndex: date/instrument.")
 
@@ -503,6 +530,7 @@ def generate_holdings_by_day(
 
 
 def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
+    """函数说明：处理 resample_signals 主要逻辑。"""
     if rebalance_freq == "daily":
         return score_panel
     if not isinstance(score_panel.index, pd.MultiIndex):
@@ -528,6 +556,7 @@ def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
 
 
 def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:
+    """函数说明：处理 cross_sectional_zscore 的内部辅助逻辑。"""
     if not isinstance(df.index, pd.MultiIndex):
         if len(df) < min_obs:
             return pd.DataFrame(np.nan, index=df.index, columns=df.columns)
@@ -556,6 +585,7 @@ def _cross_sectional_zscore(df: pd.DataFrame, min_obs: int = 5) -> pd.DataFrame:
 
 
 def _normalize_factor_frame_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_factor_frame_for_scoring 的内部辅助逻辑。"""
     if df.empty:
         return df
     if df.index.nlevels != 2:
@@ -587,6 +617,7 @@ def _normalize_factor_frame_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _mask_nonfinite(df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 mask_nonfinite 的内部辅助逻辑。"""
     values = df.to_numpy(copy=False)
     if np.isfinite(values).all():
         return df

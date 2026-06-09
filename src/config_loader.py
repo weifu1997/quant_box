@@ -1,3 +1,5 @@
+"""模块说明：加载默认配置、本地配置和环境变量覆盖项。"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -54,7 +56,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "model_type": "ridge_numpy",
         "model_objective": "regression",
         "class_weight": "balanced",
-        "fallback_on_missing_model": True,
+        "fallback_on_missing_model": False,
         "train_years": 3,
         "training_start_date": "auto",
         "label_horizon_sessions": 20,
@@ -185,7 +187,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_weight_turnover": 0.5,
         "price_file": "data/prices/ohlcv_adjusted.parquet",
         "weights_cache_enabled": True,
-        "weights_cache_file": "data/factors/rolling_ic_weights.pkl",
+        "weights_cache_file": "data/factors/rolling_ic_weights.parquet",
     },
     "dynamic_ic_selector": {
         "candidates": [
@@ -351,6 +353,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
+    """函数说明：加载 load_config 主要逻辑。"""
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     if not path.is_absolute():
         path = PROJECT_ROOT / path
@@ -372,6 +375,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
 
 
 def resolve_path(value: str | Path) -> Path:
+    """函数说明：解析 resolve_path 主要逻辑。"""
     path = Path(value).expanduser()
     if path.is_absolute():
         return path
@@ -379,6 +383,7 @@ def resolve_path(value: str | Path) -> Path:
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 deep_merge 的内部辅助逻辑。"""
     result = deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
@@ -389,6 +394,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def _warn_unknown_config_keys(override: dict[str, Any], schema: dict[str, Any] | None = None, prefix: str = "") -> None:
+    """函数说明：处理 warn_unknown_config_keys 的内部辅助逻辑。"""
     schema = DEFAULT_CONFIG if schema is None else schema
     for key, value in override.items():
         key_path = f"{prefix}.{key}" if prefix else str(key)
@@ -401,6 +407,7 @@ def _warn_unknown_config_keys(override: dict[str, Any], schema: dict[str, Any] |
 
 
 def _expand_env_values(value: Any) -> Any:
+    """函数说明：处理 expand_env_values 的内部辅助逻辑。"""
     if isinstance(value, dict):
         return {key: _expand_env_values(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -411,6 +418,7 @@ def _expand_env_values(value: Any) -> Any:
 
 
 def _env_replacement(match: re.Match[str]) -> str:
+    """函数说明：处理 env_replacement 的内部辅助逻辑。"""
     name = match.group(1)
     value = os.getenv(name)
     if value is None:

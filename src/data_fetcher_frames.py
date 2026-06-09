@@ -1,3 +1,5 @@
+"""模块说明：规范化 Tushare 返回的数据帧结构。"""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -13,6 +15,7 @@ from src.tushare_client import (
 
 
 def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
+    """函数说明：规范化 normalize_daily_frame 主要逻辑。"""
     renamed = df.rename(columns={"volume": "vol", "date": "trade_date"}).copy()
     if "ts_code" not in renamed.columns and default_ts_code:
         renamed["ts_code"] = default_ts_code
@@ -36,6 +39,7 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
 
 
 def normalize_daily_basic_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_daily_basic_frame 主要逻辑。"""
     if df.empty:
         return pd.DataFrame(columns=DAILY_BASIC_FIELDS)
     renamed = df.rename(columns={"date": "trade_date", "code": "ts_code"}).copy()
@@ -54,6 +58,7 @@ def normalize_daily_basic_frame(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize_index_constituents_frame(df: pd.DataFrame, default_index_code: str | None = None) -> pd.DataFrame:
+    """函数说明：规范化 normalize_index_constituents_frame 主要逻辑。"""
     if df.empty:
         return pd.DataFrame(columns=INDEX_WEIGHT_FIELDS)
     renamed = df.rename(columns={"ts_code": "con_code", "code": "con_code", "date": "trade_date"}).copy()
@@ -73,6 +78,7 @@ def normalize_index_constituents_frame(df: pd.DataFrame, default_index_code: str
 
 
 def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_st_calendar_frame 主要逻辑。"""
     if df.empty:
         return pd.DataFrame(columns=ST_CALENDAR_FIELDS)
     renamed = df.rename(
@@ -107,6 +113,7 @@ def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _coalesce_st_start_date(frame: pd.DataFrame) -> pd.Series:
+    """函数说明：处理 coalesce_st_start_date 的内部辅助逻辑。"""
     result = pd.Series(pd.NA, index=frame.index, dtype="object")
     for column in ["start_date", "start", "date", "ann_date"]:
         if column not in frame.columns:

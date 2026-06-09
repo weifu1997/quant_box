@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_signal_generator 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -13,7 +15,9 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class SignalGeneratorTests(unittest.TestCase):
+    """类说明：组织 SignalGeneratorTests 测试用例。"""
     def test_generate_signal_falls_back_to_latest_cache_date_before_request(self) -> None:
+        """函数说明：验证 test_generate_signal_falls_back_to_latest_cache_date_before_request 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-01-05")
         config = _signal_config(start_date="2024-01-02", end_date="2024-01-06")
 
@@ -24,6 +28,7 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(signal["date"].unique().tolist(), ["2024-01-05"])
 
     def test_generate_signal_rejects_when_no_cache_date_is_on_or_before_request(self) -> None:
+        """函数说明：验证 test_generate_signal_rejects_when_no_cache_date_is_on_or_before_request 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-01-05")
         config = _signal_config(start_date="2024-01-02", end_date="2024-01-05")
 
@@ -31,6 +36,7 @@ class SignalGeneratorTests(unittest.TestCase):
             generate_signal("2024-01-01", previous_holdings=[], config=config, factors=market.factors)
 
     def test_generate_signal_latest_uses_factor_cache_latest_date(self) -> None:
+        """函数说明：验证 test_generate_signal_latest_uses_factor_cache_latest_date 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-01-05")
         config = _signal_config(start_date="2024-01-02", end_date="2024-01-05")
 
@@ -41,6 +47,7 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(signal["date"].unique().tolist(), ["2024-01-05"])
 
     def test_generate_signal_uses_latest_intraday_factors_for_signal_date(self) -> None:
+        """函数说明：验证 test_generate_signal_uses_latest_intraday_factors_for_signal_date 覆盖的行为场景。"""
         index = pd.MultiIndex.from_tuples(
             [
                 (pd.Timestamp("2024-01-02 09:30"), "A"),
@@ -70,6 +77,7 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(signal[["date", "instrument", "action"]].to_dict("records"), [{"date": "2024-01-02", "instrument": "B", "action": "BUY"}])
 
     def test_generate_signal_matches_previous_holdings_case_insensitively(self) -> None:
+        """函数说明：验证 test_generate_signal_matches_previous_holdings_case_insensitively 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["000001.sz", "600519.sh"]],
             names=["datetime", "instrument"],
@@ -94,6 +102,7 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(signal[["instrument", "action"]].to_dict("records"), [{"instrument": "000001.SZ", "action": "HOLD"}])
 
     def test_generate_signal_keeps_highest_score_when_normalized_codes_duplicate(self) -> None:
+        """函数说明：验证 test_generate_signal_keeps_highest_score_when_normalized_codes_duplicate 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], [" a ", "A", "B"]],
             names=["datetime", "instrument"],
@@ -118,6 +127,7 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(signal[["instrument", "action"]].to_dict("records"), [{"instrument": "A", "action": "BUY"}])
 
     def test_empty_signal_keeps_effective_signal_date_metadata(self) -> None:
+        """函数说明：验证 test_empty_signal_keeps_effective_signal_date_metadata 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-01-05")
         config = _signal_config(start_date="2024-01-02", end_date="2024-01-05", top_n=0, max_turnover=0)
 
@@ -129,6 +139,7 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(signal.attrs["signal_date"], "2024-01-05")
 
     def test_generate_signal_applies_max_industry_weight(self) -> None:
+        """函数说明：验证 test_generate_signal_applies_max_industry_weight 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-01-05")
         config = _signal_config(
             start_date="2024-01-02",
@@ -148,6 +159,7 @@ class SignalGeneratorTests(unittest.TestCase):
             self.assertTrue((industry_counts <= 0.5).all())
 
     def test_generate_signal_applies_selection_risk_filter(self) -> None:
+        """函数说明：验证 test_generate_signal_applies_selection_risk_filter 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-03")
         index = pd.MultiIndex.from_product([[date], ["A", "B", "C"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"ROC5": [3.0, 2.0, 1.0]}, index=index)
@@ -188,6 +200,7 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertEqual(holdings, ["B"])
 
     def test_generate_signal_reads_previous_holdings_from_passed_config(self) -> None:
+        """函数说明：验证 test_generate_signal_reads_previous_holdings_from_passed_config 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"ROC5": [2.0, 1.0]}, index=index)
@@ -228,6 +241,7 @@ def _signal_config(
     max_turnover: int = 1,
     max_industry_weight: float | None = None,
 ) -> dict:
+    """函数说明：处理 signal_config 的内部辅助逻辑。"""
     strategy = {
         "factor_group": "factor:LOW0",
         "top_n": top_n,

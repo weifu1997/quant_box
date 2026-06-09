@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_run_apply_fills 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import importlib
@@ -12,7 +14,9 @@ import pandas as pd
 
 
 class RunApplyFillsTests(unittest.TestCase):
+    """类说明：组织 RunApplyFillsTests 测试用例。"""
     def test_apply_fills_updates_current_holdings_and_writes_audit(self) -> None:
+        """函数说明：验证 test_apply_fills_updates_current_holdings_and_writes_audit 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_apply_fills")
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -57,6 +61,7 @@ class RunApplyFillsTests(unittest.TestCase):
             self.assertEqual(audit["applied_fill_rows"], 2)
 
     def test_apply_fills_dry_run_keeps_current_holdings_unchanged(self) -> None:
+        """函数说明：验证 test_apply_fills_dry_run_keeps_current_holdings_unchanged 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_apply_fills")
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

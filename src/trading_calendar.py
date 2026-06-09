@@ -1,3 +1,5 @@
+"""模块说明：解析目标日期并提供交易日历工具。"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -20,6 +22,7 @@ DEFAULT_TIMEZONE = "Asia/Shanghai"
 
 @dataclass(frozen=True)
 class TargetDateResolution:
+    """类说明：封装 TargetDateResolution 相关数据和行为。"""
     requested: str
     target_date: str
     latest_trade_date: str
@@ -32,10 +35,12 @@ class TargetDateResolution:
     calendar_warnings: list[str]
 
     def to_dict(self) -> dict[str, Any]:
+        """函数说明：处理 to_dict 主要逻辑。"""
         return asdict(self)
 
 
 def price_calendar(price_df: pd.DataFrame | None = None, price_file: str | Path | None = None) -> pd.DatetimeIndex:
+    """函数说明：处理 price_calendar 主要逻辑。"""
     prices = price_df
     if prices is None:
         if price_file is None:
@@ -50,6 +55,7 @@ def price_calendar(price_df: pd.DataFrame | None = None, price_file: str | Path 
 
 
 def latest_trade_date(price_df: pd.DataFrame | None = None, price_file: str | Path | None = None) -> pd.Timestamp | None:
+    """函数说明：处理 latest_trade_date 主要逻辑。"""
     calendar = price_calendar(price_df=price_df, price_file=price_file)
     if calendar.empty:
         return None
@@ -64,6 +70,7 @@ def resolve_target_date_value(
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> str:
+    """函数说明：解析 resolve_target_date_value 主要逻辑。"""
     return resolve_target_date(
         value=value,
         config=config,
@@ -82,6 +89,7 @@ def resolve_target_date(
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> TargetDateResolution:
+    """函数说明：解析 resolve_target_date 主要逻辑。"""
     cfg = config or load_config()
     data_cfg = cfg.get("data", {})
     requested = str(value if value is not None else data_cfg.get("end_date", "auto"))
@@ -147,6 +155,7 @@ def next_trade_date(
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> pd.Timestamp | None:
+    """函数说明：处理 next_trade_date 主要逻辑。"""
     calendar = price_calendar(price_df=price_df, price_file=price_file)
     if calendar.empty:
         return None
@@ -165,6 +174,7 @@ def next_business_day(
     price_file: str | Path | None = None,
     strict: bool = False,
 ) -> pd.Timestamp:
+    """函数说明：处理 next_business_day 主要逻辑。"""
     signal_ts = _required_date(date)
     explicit = _normalize_calendar(calendar)
     next_date = _next_from_calendar(explicit, signal_ts)
@@ -200,10 +210,12 @@ def next_business_day(
 
 
 def _is_auto_date_value(value: str) -> bool:
+    """函数说明：判断 is_auto_date_value 是否成立。"""
     return value.strip().lower() in AUTO_DATE_VALUES
 
 
 def _normalize_now(now: datetime | None, timezone_name: str) -> datetime:
+    """函数说明：规范化 normalize_now 的内部辅助逻辑。"""
     tz = ZoneInfo(timezone_name or DEFAULT_TIMEZONE)
     if now is None:
         return datetime.now(tz)
@@ -213,6 +225,7 @@ def _normalize_now(now: datetime | None, timezone_name: str) -> datetime:
 
 
 def _parse_cutoff_time(value: str) -> time:
+    """函数说明：解析 parse_cutoff_time 的内部辅助逻辑。"""
     text = value.strip()
     for fmt in ["%H:%M:%S", "%H:%M"]:
         try:
@@ -223,6 +236,7 @@ def _parse_cutoff_time(value: str) -> time:
 
 
 def _format_cutoff(value: time) -> str:
+    """函数说明：处理 format_cutoff 的内部辅助逻辑。"""
     return value.strftime("%H:%M")
 
 
@@ -233,6 +247,7 @@ def _target_trade_calendar(
     price_df: pd.DataFrame | None,
     price_file: str | Path | None,
 ) -> tuple[pd.DatetimeIndex, str, list[str]]:
+    """函数说明：处理 target_trade_calendar 的内部辅助逻辑。"""
     warnings: list[str] = []
     explicit = _normalize_calendar(calendar)
     if not explicit.empty:
@@ -265,6 +280,7 @@ def _target_trade_calendar(
 
 
 def _normalize_calendar(calendar: Iterable[str | datetime | pd.Timestamp] | pd.DatetimeIndex | None) -> pd.DatetimeIndex:
+    """函数说明：规范化 normalize_calendar 的内部辅助逻辑。"""
     if calendar is None:
         return pd.DatetimeIndex([])
     raw = pd.Series(list(calendar), dtype="object")
@@ -277,6 +293,7 @@ def _normalize_calendar(calendar: Iterable[str | datetime | pd.Timestamp] | pd.D
 
 
 def _next_from_calendar(calendar: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp | None:
+    """函数说明：处理 next_from_calendar 的内部辅助逻辑。"""
     if calendar.empty:
         return None
     signal_ts = pd.Timestamp(date).normalize()
@@ -287,6 +304,7 @@ def _next_from_calendar(calendar: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Ti
 
 
 def _required_date(date: str | pd.Timestamp | None) -> pd.Timestamp:
+    """函数说明：处理 required_date 的内部辅助逻辑。"""
     if date is None:
         raise ValueError("date is required")
     try:
@@ -299,6 +317,7 @@ def _required_date(date: str | pd.Timestamp | None) -> pd.Timestamp:
 
 
 def _configured_file_calendar(config: dict) -> tuple[pd.DatetimeIndex, str]:
+    """函数说明：处理 configured_file_calendar 的内部辅助逻辑。"""
     data_cfg = config.get("data", {})
     qlib_cfg = config.get("qlib", {})
     candidates = [
@@ -317,6 +336,7 @@ def _configured_file_calendar(config: dict) -> tuple[pd.DatetimeIndex, str]:
 
 
 def _read_calendar_file(path: Path) -> pd.DatetimeIndex:
+    """函数说明：读取 read_calendar_file 的内部辅助逻辑。"""
     if not path.exists():
         return pd.DatetimeIndex([])
     try:
@@ -343,6 +363,7 @@ def _read_calendar_file(path: Path) -> pd.DatetimeIndex:
 
 
 def _tushare_trade_calendar(config: dict, now_dt: datetime) -> pd.DatetimeIndex:
+    """函数说明：处理 tushare_trade_calendar 的内部辅助逻辑。"""
     ts_cfg = config.get("tushare", {})
     http_url = str(ts_cfg.get("http_url", "") or "")
     if not http_url or "your-proxy-server" in http_url:
@@ -379,11 +400,13 @@ def _tushare_trade_calendar(config: dict, now_dt: datetime) -> pd.DatetimeIndex:
 
 
 def _open_day_mask(series: pd.Series) -> pd.Series:
+    """函数说明：处理 open_day_mask 的内部辅助逻辑。"""
     text = series.astype("string").str.strip().str.lower()
     return text.isin({"1", "1.0", "true", "t", "yes", "y", "open"})
 
 
 def _a_trade_calendar(config: dict, now_dt: datetime) -> pd.DatetimeIndex:
+    """函数说明：处理 a_trade_calendar 的内部辅助逻辑。"""
     try:
         import a_trade_calendar
     except ImportError:
@@ -401,6 +424,7 @@ def _a_trade_calendar(config: dict, now_dt: datetime) -> pd.DatetimeIndex:
 
 
 def _a_trade_calendar_next_trade_date(date: str | pd.Timestamp) -> pd.Timestamp | None:
+    """函数说明：处理 a_trade_calendar_next_trade_date 的内部辅助逻辑。"""
     try:
         import a_trade_calendar
     except ImportError:

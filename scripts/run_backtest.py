@@ -1,3 +1,5 @@
+"""模块说明：提供 run_backtest 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Run a lightweight ranking-strategy backtest.")
     parser.add_argument("--start-date", default=config["data"]["start_date"])
@@ -100,10 +103,12 @@ def _requested_factor_columns(
     score_blend_cfg: dict | None = None,
     score_filter_cfg: dict | None = None,
 ) -> list[str] | None:
+    """函数说明：处理 requested_factor_columns 的内部辅助逻辑。"""
     return requested_factor_columns(factor_file, strategy_cfg, dynamic_cfg, ml_cfg, score_blend_cfg, score_filter_cfg)
 
 
 def _strip_direction_prefix(value: str) -> str:
+    """函数说明：去除 strip_direction_prefix 的内部辅助逻辑。"""
     return strip_direction_prefix(value)
 
 

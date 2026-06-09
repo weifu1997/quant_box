@@ -1,3 +1,5 @@
+"""模块说明：提供 run_update_point_in_time_data 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -19,12 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 def _csv_values(value: str | None) -> list[str]:
+    """函数说明：处理 csv_values 的内部辅助逻辑。"""
     if not value:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(
         description="Update point-in-time governance data: daily_basic, index constituents and ST calendar."

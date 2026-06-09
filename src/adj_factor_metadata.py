@@ -1,3 +1,5 @@
+"""模块说明：构建和保存复权因子元数据。"""
+
 from __future__ import annotations
 
 import csv
@@ -14,6 +16,7 @@ from src.config_loader import load_config, resolve_path
 
 @dataclass
 class AdjFactorMetadata:
+    """类说明：封装 AdjFactorMetadata 相关数据和行为。"""
     schema_version: int
     generated_at: str
     source: str
@@ -29,6 +32,7 @@ class AdjFactorMetadata:
     issues: list[str]
 
     def to_dict(self) -> dict[str, Any]:
+        """函数说明：处理 to_dict 主要逻辑。"""
         return {
             "schema_version": self.schema_version,
             "generated_at": self.generated_at,
@@ -47,6 +51,7 @@ class AdjFactorMetadata:
 
 
 def build_adj_factor_metadata(config: dict | None = None) -> AdjFactorMetadata:
+    """函数说明：构建 build_adj_factor_metadata 主要逻辑。"""
     cfg = config or load_config()
     raw_dir = resolve_path(cfg.get("data", {}).get("raw_dir", "data/raw"))
     files = sorted(path for path in raw_dir.glob("*.csv") if _is_stock_csv(path)) if raw_dir.exists() else []
@@ -90,6 +95,7 @@ def build_adj_factor_metadata(config: dict | None = None) -> AdjFactorMetadata:
 
 
 def write_adj_factor_metadata(metadata: AdjFactorMetadata, config: dict | None = None, path: str | Path | None = None) -> Path:
+    """函数说明：写入 write_adj_factor_metadata 主要逻辑。"""
     cfg = config or load_config()
     output_path = resolve_path(
         path
@@ -101,6 +107,7 @@ def write_adj_factor_metadata(metadata: AdjFactorMetadata, config: dict | None =
 
 
 def _summarize_raw_adj_factor(path: Path, digest: hashlib._Hash) -> tuple[str, dict[str, Any] | None]:
+    """函数说明：汇总 summarize_raw_adj_factor 的内部辅助逻辑。"""
     symbol = path.name[:-4].upper()
     try:
         handle = path.open("r", encoding="utf-8-sig", newline="")
@@ -153,6 +160,7 @@ def _summarize_raw_adj_factor(path: Path, digest: hashlib._Hash) -> tuple[str, d
 
 
 def _normalize_date(value: object) -> tuple[str, str]:
+    """函数说明：规范化 normalize_date 的内部辅助逻辑。"""
     compact = str(value).strip().replace("-", "")
     if len(compact) != 8 or not compact.isdigit():
         return "", ""

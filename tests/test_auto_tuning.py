@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_auto_tuning 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -14,7 +16,9 @@ from src.auto_tuning import (
 
 
 class AutoTuningTests(unittest.TestCase):
+    """类说明：组织 AutoTuningTests 测试用例。"""
     def test_select_stable_params_prefers_consistent_out_of_sample_results(self) -> None:
+        """函数说明：验证 test_select_stable_params_prefers_consistent_out_of_sample_results 覆盖的行为场景。"""
         validation = pd.DataFrame(
             [
                 {
@@ -80,6 +84,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(selected["rank_buffer"], 20)
 
     def test_select_stable_params_prefers_rows_that_meet_target_profile(self) -> None:
+        """函数说明：验证 test_select_stable_params_prefers_rows_that_meet_target_profile 覆盖的行为场景。"""
         summary = pd.DataFrame(
             [
                 {
@@ -113,6 +118,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(selected["factor_group"], "factor:LOW0")
 
     def test_select_stable_params_filters_turnover_when_available(self) -> None:
+        """函数说明：验证 test_select_stable_params_filters_turnover_when_available 覆盖的行为场景。"""
         summary = pd.DataFrame(
             [
                 {
@@ -154,6 +160,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(selected["factor_group"], "factor:LOW0")
 
     def test_select_stable_params_strict_rejects_when_no_params_meet_target_profile(self) -> None:
+        """函数说明：验证 test_select_stable_params_strict_rejects_when_no_params_meet_target_profile 覆盖的行为场景。"""
         summary = pd.DataFrame(
             [
                 {
@@ -186,6 +193,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertIn("no_acceptable_params", quality.issues)
 
     def test_default_parameter_summary_preserves_risk_control_variants(self) -> None:
+        """函数说明：验证 test_default_parameter_summary_preserves_risk_control_variants 覆盖的行为场景。"""
         validation = pd.DataFrame(
             [
                 {
@@ -230,6 +238,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(selected["stop_loss_pct"], 0.08)
 
     def test_assess_parameter_quality_uses_target_filtered_selection(self) -> None:
+        """函数说明：验证 test_assess_parameter_quality_uses_target_filtered_selection 覆盖的行为场景。"""
         summary = pd.DataFrame(
             [
                 {
@@ -277,6 +286,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(quality.max_drawdown_worst, -0.18)
 
     def test_apply_strategy_params_does_not_mutate_source_config(self) -> None:
+        """函数说明：验证 test_apply_strategy_params_does_not_mutate_source_config 覆盖的行为场景。"""
         config = {"strategy": {"top_n": 5, "factor_group": "momentum"}, "backtest": {"initial_capital": 1000}}
 
         selected = apply_strategy_params(config, {"top_n": 7, "rebalance_freq": "weekly"})
@@ -286,6 +296,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(selected["strategy"]["rebalance_freq"], "weekly")
 
     def test_apply_strategy_params_carries_risk_controls(self) -> None:
+        """函数说明：验证 test_apply_strategy_params_carries_risk_controls 覆盖的行为场景。"""
         config = {
             "strategy": {"top_n": 5, "factor_group": "momentum", "circuit_breaker_drawdown": 0.12},
             "backtest": {"initial_capital": 1000},
@@ -310,6 +321,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertIsNone(selected["strategy"]["circuit_breaker_drawdown"])
 
     def test_assess_parameter_quality_blocks_unstable_selected_params(self) -> None:
+        """函数说明：验证 test_assess_parameter_quality_blocks_unstable_selected_params 覆盖的行为场景。"""
         summary = pd.DataFrame(
             [
                 {
@@ -339,6 +351,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertTrue(any(issue.startswith("annual_return_mean_below_threshold") for issue in quality.issues))
 
     def test_assess_backtest_quality_requires_return_and_drawdown_targets(self) -> None:
+        """函数说明：验证 test_assess_backtest_quality_requires_return_and_drawdown_targets 覆盖的行为场景。"""
         quality = assess_backtest_quality(
             {"annual_return": 0.195, "max_drawdown": -0.45, "calmar": 0.43},
             {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},
@@ -349,6 +362,7 @@ class AutoTuningTests(unittest.TestCase):
         self.assertTrue(any(issue.startswith("backtest_max_drawdown_worse_than_limit") for issue in quality.issues))
 
     def test_assess_backtest_quality_accepts_target_profile(self) -> None:
+        """函数说明：验证 test_assess_backtest_quality_accepts_target_profile 覆盖的行为场景。"""
         quality = assess_backtest_quality(
             {"annual_return": 0.205, "max_drawdown": -0.18, "calmar": 1.14},
             {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},

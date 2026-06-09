@@ -1,3 +1,5 @@
+"""模块说明：提供 run_auto_signal_supervised 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -22,6 +24,7 @@ STATUS_FILE_NAME = "auto_run_status.json"
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     parser = argparse.ArgumentParser(description="Start and inspect long-running auto signal jobs.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -64,6 +67,7 @@ def start_background_run(
     python_executable: str | Path | None = None,
     log_file: str | Path | None = None,
 ) -> dict[str, Any]:
+    """函数说明：启动 start_background_run 相关流程。"""
     config = load_config()
     out_dir = resolve_path(config.get("outputs", {}).get("dir", "outputs"))
     log_dir = out_dir / "logs"
@@ -112,11 +116,13 @@ def start_background_run(
 
 
 def build_auto_signal_command(run_args: list[str], python_executable: str | Path | None = None) -> list[str]:
+    """函数说明：构建 build_auto_signal_command 主要逻辑。"""
     python_path = str(python_executable or _default_python())
     return [python_path, str(ROOT / "scripts" / "run_auto_signal.py"), *run_args]
 
 
 def background_status() -> dict[str, Any]:
+    """函数说明：处理 background_status 主要逻辑。"""
     config = load_config()
     out_dir = resolve_path(config.get("outputs", {}).get("dir", "outputs"))
     job = _read_json(out_dir / JOB_FILE_NAME)
@@ -135,6 +141,7 @@ def background_status() -> dict[str, Any]:
 
 
 def tail_latest_log(lines: int = 80) -> str:
+    """函数说明：读取 tail_latest_log 主要逻辑。"""
     info = background_status()
     job = info.get("job") or {}
     log_file = job.get("log_file") if isinstance(job, dict) else None
@@ -149,12 +156,14 @@ def tail_latest_log(lines: int = 80) -> str:
 
 
 def _normalize_run_args(values: list[str]) -> list[str]:
+    """函数说明：规范化 normalize_run_args 的内部辅助逻辑。"""
     if values and values[0] == "--":
         return values[1:]
     return values
 
 
 def _default_python() -> Path:
+    """函数说明：处理 default_python 的内部辅助逻辑。"""
     if os.name == "nt":
         venv_python = ROOT / ".venv" / "Scripts" / "python.exe"
     else:
@@ -163,12 +172,14 @@ def _default_python() -> Path:
 
 
 def _background_creationflags() -> int:
+    """函数说明：处理 background_creationflags 的内部辅助逻辑。"""
     if os.name != "nt":
         return 0
     return int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) | int(getattr(subprocess, "DETACHED_PROCESS", 0))
 
 
 def _process_running(pid: int) -> bool:
+    """函数说明：处理 process_running 的内部辅助逻辑。"""
     if pid <= 0:
         return False
     if os.name == "nt":
@@ -188,6 +199,7 @@ def _process_running(pid: int) -> bool:
 
 
 def _latest_stage(status: dict[str, Any] | None) -> dict[str, Any] | None:
+    """函数说明：处理 latest_stage 的内部辅助逻辑。"""
     if not isinstance(status, dict):
         return None
     stages = status.get("stages")
@@ -198,6 +210,7 @@ def _latest_stage(status: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
+    """函数说明：读取 read_json 的内部辅助逻辑。"""
     if not path.exists():
         return None
     try:
@@ -208,6 +221,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _format_status(info: dict[str, Any]) -> str:
+    """函数说明：处理 format_status 的内部辅助逻辑。"""
     job = info.get("job") or {}
     status = info.get("auto_run_status") or {}
     stage = info.get("latest_stage") or {}

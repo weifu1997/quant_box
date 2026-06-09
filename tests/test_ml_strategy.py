@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_ml_strategy 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -21,7 +23,9 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class MLStrategyTests(unittest.TestCase):
+    """类说明：组织 MLStrategyTests 测试用例。"""
     def test_build_ml_scores_with_real_market_data_end_to_end(self) -> None:
+        """函数说明：验证 test_build_ml_scores_with_real_market_data_end_to_end 覆盖的行为场景。"""
         market = require_real_market_data(
             start="2024-01-02",
             end="2024-04-30",
@@ -52,6 +56,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(row["model_used"], "ridge_numpy")
 
     def test_cross_sectional_rank_label_mode_maps_returns_to_relative_ranks(self) -> None:
+        """函数说明：验证 test_cross_sectional_rank_label_mode_maps_returns_to_relative_ranks 覆盖的行为场景。"""
         returns = pd.DataFrame(
             {"A": [0.03, 0.01], "B": [0.01, 0.02], "C": [0.02, 0.03]},
             index=pd.to_datetime(["2024-01-02", "2024-01-03"]),
@@ -67,6 +72,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(float(labels.loc["2024-01-02", "A"]), 1.0)
 
     def test_cross_sectional_long_short_label_mode_marks_top_and_bottom_quantiles(self) -> None:
+        """函数说明：验证 test_cross_sectional_long_short_label_mode_marks_top_and_bottom_quantiles 覆盖的行为场景。"""
         returns = pd.DataFrame(
             {"A": [0.05], "B": [0.04], "C": [0.03], "D": [0.02], "E": [0.01]},
             index=pd.to_datetime(["2024-01-02"]),
@@ -87,6 +93,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(float(labels.loc["2024-01-02", "C"]), 0.0)
 
     def test_cross_sectional_top_quantile_label_mode_marks_binary_winners(self) -> None:
+        """函数说明：验证 test_cross_sectional_top_quantile_label_mode_marks_binary_winners 覆盖的行为场景。"""
         returns = pd.DataFrame(
             {"A": [0.05], "B": [0.04], "C": [0.03], "D": [0.02], "E": [0.01]},
             index=pd.to_datetime(["2024-01-02"]),
@@ -106,6 +113,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(float(labels.loc["2024-01-02", "E"]), 0.0)
 
     def test_label_return_adjustment_scales_by_trailing_volatility_without_future_returns(self) -> None:
+        """函数说明：验证 test_label_return_adjustment_scales_by_trailing_volatility_without_future_returns 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=8)
         close = pd.DataFrame(
             {
@@ -127,6 +135,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertGreater(float(last["LOW_VOL"]), float(last["HIGH_VOL"]))
 
     def test_feature_limit_keeps_extension_features(self) -> None:
+        """函数说明：验证 test_feature_limit_keeps_extension_features 覆盖的行为场景。"""
         frame = pd.DataFrame(columns=["F1", "F2", "F3", "PX_LOW_AMOUNT_20", "DB_circ_mv"])
 
         columns = _feature_columns(frame, {"feature_limit": 2})
@@ -134,6 +143,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(columns, ["F1", "F2", "PX_LOW_AMOUNT_20", "DB_circ_mv"])
 
     def test_close_frame_keeps_latest_intraday_price_per_session(self) -> None:
+        """函数说明：验证 test_close_frame_keeps_latest_intraday_price_per_session 覆盖的行为场景。"""
         prices = pd.DataFrame(
             {("close", "a"): [10.0, 30.0, 20.0]},
             index=pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"]),
@@ -146,6 +156,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(float(close.loc[pd.Timestamp("2024-01-02"), "A"]), 10.0)
 
     def test_training_label_neutralization_removes_industry_means(self) -> None:
+        """函数说明：验证 test_training_label_neutralization_removes_industry_means 覆盖的行为场景。"""
         labels = pd.DataFrame(
             {"A": [0.4], "B": [0.2], "C": [0.0], "D": [-0.1], "E": [-0.3], "F": [-0.5]},
             index=pd.to_datetime(["2024-01-02"]),
@@ -162,6 +173,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertAlmostEqual(float(neutralized[["D", "E", "F"]].mean(axis=1).iloc[0]), 0.0)
 
     def test_training_label_neutralization_normalizes_symbol_inputs(self) -> None:
+        """函数说明：验证 test_training_label_neutralization_normalizes_symbol_inputs 覆盖的行为场景。"""
         labels = pd.DataFrame(
             {" a ": [0.4], "b": [0.2], " C ": [0.0], "d": [-0.1], " E ": [-0.3], "f": [-0.5]},
             index=pd.to_datetime(["2024-01-02"]),
@@ -196,6 +208,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertTrue((cap_neutralized.abs() < 1e-12).all(axis=None))
 
     def test_training_label_neutralization_uses_latest_intraday_market_cap(self) -> None:
+        """函数说明：验证 test_training_label_neutralization_uses_latest_intraday_market_cap 覆盖的行为场景。"""
         cap_values = {"A": 10.0, "B": 20.0, "C": 40.0}
         labels = pd.DataFrame(
             {symbol: [float(np.log1p(cap))] for symbol, cap in cap_values.items()},
@@ -218,6 +231,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertTrue((neutralized.abs() < 1e-12).all(axis=None))
 
     def test_ranking_objective_prepares_query_groups_and_relevance_labels(self) -> None:
+        """函数说明：验证 test_ranking_objective_prepares_query_groups_and_relevance_labels 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-02", "2024-01-03", "2024-01-03"])
         instruments = ["A", "B", "A", "B"]
         index = pd.MultiIndex.from_arrays([dates, instruments], names=["datetime", "instrument"])
@@ -237,6 +251,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertTrue((prepared["y"] >= 0).all())
 
     def test_ranking_objective_samples_complete_date_groups(self) -> None:
+        """函数说明：验证 test_ranking_objective_samples_complete_date_groups 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=20)
         instruments = ["A", "B", "C"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -265,10 +280,13 @@ class MLStrategyTests(unittest.TestCase):
         captured_groups: list[list[int]] = []
 
         class ConstantModel:
+            """类说明：封装 ConstantModel 相关数据和行为。"""
             def predict(self, X):
+                """函数说明：处理 predict 主要逻辑。"""
                 return [0.0] * len(X)
 
         def fake_fit_lightgbm(X_train, y, cfg, seed, group=None):
+            """函数说明：处理 fake_fit_lightgbm 主要逻辑。"""
             self.assertIsNotNone(group)
             self.assertEqual(sum(group), len(y))
             self.assertTrue(all(value > 1 for value in group))
@@ -283,6 +301,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertTrue(captured_groups)
 
     def test_build_ml_scores_uses_only_labels_known_before_signal_date(self) -> None:
+        """函数说明：验证 test_build_ml_scores_uses_only_labels_known_before_signal_date 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=35)
         instruments = ["A", "B", "C", "D"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -328,6 +347,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertGreater(int(row["train_rows_used"]), 0)
 
     def test_build_ml_scores_normalizes_price_and_factor_instruments(self) -> None:
+        """函数说明：验证 test_build_ml_scores_normalizes_price_and_factor_instruments 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=18)
         instruments = ["000001.SZ", "600519.SH", "000002.SZ"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -368,6 +388,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(set(result.scores.index.get_level_values("instrument")), set(instruments))
 
     def test_build_ml_scores_deduplicates_normalized_factor_instruments(self) -> None:
+        """函数说明：验证 test_build_ml_scores_deduplicates_normalized_factor_instruments 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=18)
         raw_instruments = ["a", " A ", "B"]
         index = pd.MultiIndex.from_product([dates, raw_instruments], names=["datetime", "instrument"])
@@ -403,6 +424,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(set(result.scores.index.get_level_values("instrument")), {"A", "B"})
 
     def test_build_ml_scores_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_build_ml_scores_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=18)
         instruments = ["A", "B", "C"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -435,6 +457,7 @@ class MLStrategyTests(unittest.TestCase):
             build_ml_scores(factors, prices, config, signal_dates=[dates[-1]])
 
     def test_build_ml_scores_supports_fractional_train_years(self) -> None:
+        """函数说明：验证 test_build_ml_scores_supports_fractional_train_years 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=140)
         instruments = ["A", "B", "C"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -477,6 +500,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertGreater(int(row["train_rows_used"]), 0)
 
     def test_build_ml_scores_auto_model_falls_back_to_available_model(self) -> None:
+        """函数说明：验证 test_build_ml_scores_auto_model_falls_back_to_available_model 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=28)
         instruments = ["A", "B", "C"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -500,7 +524,61 @@ class MLStrategyTests(unittest.TestCase):
         self.assertFalse(result.scores.empty)
         self.assertIn(result.diagnostics.iloc[0]["model_used"], {"lightgbm", "xgboost", "sklearn_gbdt", "ridge_numpy"})
 
+    def test_explicit_missing_xgboost_model_raises_by_default(self) -> None:
+        """函数说明：验证 test_explicit_missing_xgboost_model_raises_by_default 覆盖的行为场景。"""
+        dates = pd.bdate_range("2024-01-02", periods=28)
+        instruments = ["A", "B", "C"]
+        index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": range(len(index)), "F2": range(len(index), 0, -1)}, index=index, dtype=float)
+        close = pd.DataFrame(10.0, index=dates, columns=instruments)
+        prices = pd.concat({"close": close}, axis=1)
+        config = {
+            "ml_strategy": {
+                "enabled": True,
+                "model_type": "xgboost",
+                "train_years": 1,
+                "label_horizon_sessions": 2,
+                "min_train_rows": 6,
+                "max_train_rows": 50,
+                "feature_limit": None,
+            }
+        }
+
+        with patch("src.ml_strategy._fit_xgboost_model", side_effect=ImportError("No module named xgboost")):
+            with self.assertRaises(ImportError):
+                build_ml_scores(factors, prices, config, signal_dates=[dates[-1]])
+
+    def test_explicit_missing_xgboost_fallback_records_diagnostics_when_enabled(self) -> None:
+        """函数说明：验证 test_explicit_missing_xgboost_fallback_records_diagnostics_when_enabled 覆盖的行为场景。"""
+        dates = pd.bdate_range("2024-01-02", periods=28)
+        instruments = ["A", "B", "C"]
+        index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+        factors = pd.DataFrame({"F1": range(len(index)), "F2": range(len(index), 0, -1)}, index=index, dtype=float)
+        close = pd.DataFrame(10.0, index=dates, columns=instruments)
+        prices = pd.concat({"close": close}, axis=1)
+        config = {
+            "ml_strategy": {
+                "enabled": True,
+                "model_type": "xgboost",
+                "fallback_on_missing_model": True,
+                "train_years": 1,
+                "label_horizon_sessions": 2,
+                "min_train_rows": 6,
+                "max_train_rows": 50,
+                "feature_limit": None,
+            }
+        }
+
+        with patch("src.ml_strategy._fit_xgboost_model", side_effect=ImportError("No module named xgboost")):
+            result = build_ml_scores(factors, prices, config, signal_dates=[dates[-1]])
+
+        row = result.diagnostics.iloc[0]
+        self.assertEqual(row["requested_model_type"], "xgboost")
+        self.assertEqual(row["model_used"], "ridge_numpy")
+        self.assertIn("missing_dependency:xgboost", row["fallback_reason"])
+
     def test_build_ml_scores_ensembles_recent_models(self) -> None:
+        """函数说明：验证 test_build_ml_scores_ensembles_recent_models 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=45)
         instruments = ["A", "B", "C"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -535,6 +613,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertTrue(all(completed["ensemble_models"].astype(str).str.contains("ridge_numpy")))
 
     def test_build_ml_scores_filters_predictions_without_enough_price_history(self) -> None:
+        """函数说明：验证 test_build_ml_scores_filters_predictions_without_enough_price_history 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=35)
         instruments = ["A", "B", "C"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -573,6 +652,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertNotIn("B", set(valid_scores.index.get_level_values("instrument")))
 
     def test_build_ml_scores_can_evolve_features_by_recent_ic(self) -> None:
+        """函数说明：验证 test_build_ml_scores_can_evolve_features_by_recent_ic 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=25)
         instruments = ["A", "B", "C"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -617,6 +697,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(int(row["feature_count"]), 1)
 
     def test_precompute_feature_ic_weights_defaults_to_daily_recalculation(self) -> None:
+        """函数说明：验证 test_precompute_feature_ic_weights_defaults_to_daily_recalculation 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=10)
         numeric, close = _feature_ic_precompute_frames(dates)
         daily_ic = pd.DataFrame({"F1": np.linspace(0.01, 0.10, len(dates)), "F2": np.linspace(0.10, 0.01, len(dates))}, index=dates)
@@ -638,6 +719,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(len(weights), len(dates) - 1)
 
     def test_precompute_feature_ic_weights_rebalances_on_configured_sessions(self) -> None:
+        """函数说明：验证 test_precompute_feature_ic_weights_rebalances_on_configured_sessions 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=10)
         numeric, close = _feature_ic_precompute_frames(dates)
         daily_ic = pd.DataFrame({"F1": np.linspace(0.01, 0.10, len(dates)), "F2": np.linspace(0.10, 0.01, len(dates))}, index=dates)
@@ -673,6 +755,7 @@ class MLStrategyTests(unittest.TestCase):
         self.assertEqual(feature_weights.to_dict(), {"F2": 1.0})
 
 def _feature_ic_precompute_frames(dates: pd.DatetimeIndex) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """函数说明：处理 feature_ic_precompute_frames 的内部辅助逻辑。"""
     instruments = ["A", "B"]
     index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
     numeric = pd.DataFrame(

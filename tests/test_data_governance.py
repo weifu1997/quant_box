@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_data_governance 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import json
@@ -12,7 +14,9 @@ from src.data_governance import build_data_governance_report, write_data_governa
 
 
 class DataGovernanceTests(unittest.TestCase):
+    """类说明：组织 DataGovernanceTests 测试用例。"""
     def test_build_adj_factor_metadata_records_digest_and_date_range(self) -> None:
+        """函数说明：验证 test_build_adj_factor_metadata_records_digest_and_date_range 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -39,6 +43,7 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertEqual(saved["symbols"][0]["last_adj_factor"], 1.1)
 
     def test_build_data_governance_report_tracks_point_in_time_evidence(self) -> None:
+        """函数说明：验证 test_build_data_governance_report_tracks_point_in_time_evidence 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -137,6 +142,7 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertEqual(saved["repair_actions"], [])
 
     def test_build_data_governance_report_flags_current_name_st_filter(self) -> None:
+        """函数说明：验证 test_build_data_governance_report_flags_current_name_st_filter 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -176,6 +182,7 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertIn("universe_industry_missing", report.warnings)
 
     def test_build_data_governance_report_flags_partial_daily_basic_history(self) -> None:
+        """函数说明：验证 test_build_data_governance_report_flags_partial_daily_basic_history 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -261,6 +268,7 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertIn("--skip-index-constituents --skip-st-calendar", daily_action["commands"][0])
 
     def test_build_data_governance_report_flags_point_in_time_coverage_gaps(self) -> None:
+        """函数说明：验证 test_build_data_governance_report_flags_point_in_time_coverage_gaps 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -350,6 +358,7 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertIn("index_constituents_month_coverage_below_required:1/3<1.00", report.issues)
 
     def test_build_data_governance_report_flags_partial_st_calendar_history(self) -> None:
+        """函数说明：验证 test_build_data_governance_report_flags_partial_st_calendar_history 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -419,6 +428,7 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertIn("st_calendar_end_before_factor_end:2024-01-04<2024-01-05", report.warnings)
 
     def test_build_data_governance_report_flags_incomplete_adj_factor_metadata_as_issue(self) -> None:
+        """函数说明：验证 test_build_data_governance_report_flags_incomplete_adj_factor_metadata_as_issue 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"

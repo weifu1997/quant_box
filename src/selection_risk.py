@@ -1,3 +1,5 @@
+"""模块说明：过滤存在停牌、跌停或价格缺失风险的候选标的。"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -13,6 +15,7 @@ _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str
 
 
 def selection_risk_filter_enabled(config: dict[str, Any] | None) -> bool:
+    """函数说明：处理 selection_risk_filter_enabled 主要逻辑。"""
     cfg = _selection_risk_config(config or {})
     return bool(cfg.get("enabled", False))
 
@@ -23,6 +26,7 @@ def filter_scores_by_selection_risk(
     signal_date: str | pd.Timestamp,
     config: dict[str, Any] | None,
 ) -> pd.Series:
+    """函数说明：过滤 filter_scores_by_selection_risk 主要逻辑。"""
     cfg = _selection_risk_config(config or {})
     if not bool(cfg.get("enabled", False)) or scores.empty:
         return scores
@@ -43,6 +47,7 @@ def selection_risk_eligible_instruments(
     instruments: Iterable[str],
     config: dict[str, Any] | None,
 ) -> set[str]:
+    """函数说明：处理 selection_risk_eligible_instruments 主要逻辑。"""
     cfg = _selection_risk_config(config or {})
     if not bool(cfg.get("enabled", False)):
         return {_normalize_instrument(code) for code in instruments if _normalize_instrument(code)}
@@ -85,6 +90,7 @@ def selection_risk_eligible_instruments(
 
 
 def _selection_risk_config(config: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 selection_risk_config 的内部辅助逻辑。"""
     cfg = config.get("selection_risk_filter", {})
     return cfg if isinstance(cfg, dict) else {}
 
@@ -96,6 +102,7 @@ def _missing_price_session_counts(
     required_fields: list[str],
     require_positive_volume: bool,
 ) -> pd.Series:
+    """函数说明：处理 missing_price_session_counts 的内部辅助逻辑。"""
     missing_sessions = pd.DataFrame(False, index=lookback_dates, columns=instruments)
     for field in required_fields:
         missing_sessions |= _missing_field_sessions(prices, field, instruments, lookback_dates)
@@ -110,6 +117,7 @@ def _missing_field_sessions(
     instruments: pd.Index,
     lookback_dates: pd.DatetimeIndex,
 ) -> pd.DataFrame:
+    """函数说明：处理 missing_field_sessions 的内部辅助逻辑。"""
     frame = _price_field_slice(prices, field, lookback_dates, instruments)
     if frame.empty:
         return pd.DataFrame(True, index=lookback_dates, columns=instruments)
@@ -124,6 +132,7 @@ def _recent_limit_down_day_counts(
     config: dict[str, Any],
     filter_cfg: dict[str, Any],
 ) -> pd.Series:
+    """函数说明：处理 recent_limit_down_day_counts 的内部辅助逻辑。"""
     needed_dates = _lookback_with_previous_dates(prices, lookback_dates)
     close = _price_field_slice(prices, "close", needed_dates, instruments)
     if close.empty:
@@ -146,6 +155,7 @@ def _limit_down_threshold_frame(
     instruments: pd.Index,
     config: dict[str, Any],
 ) -> pd.DataFrame:
+    """函数说明：处理 limit_down_threshold_frame 的内部辅助逻辑。"""
     thresholds = pd.Series(
         [_base_limit_down_threshold_for_stock(str(stock), config) for stock in instruments],
         index=instruments,
@@ -164,12 +174,14 @@ def _limit_down_threshold_frame(
 
 
 def _limit_down_threshold_for_stock(stock: str, prices: pd.DataFrame, date: pd.Timestamp, config: dict[str, Any]) -> float:
+    """函数说明：处理 limit_down_threshold_for_stock 的内部辅助逻辑。"""
     if _is_st_on_date(stock, prices, date):
         return float(_config_value(config, "st_limit_down_threshold", 0.049))
     return _base_limit_down_threshold_for_stock(stock, config)
 
 
 def _base_limit_down_threshold_for_stock(stock: str, config: dict[str, Any]) -> float:
+    """函数说明：处理 base_limit_down_threshold_for_stock 的内部辅助逻辑。"""
     lowered = str(stock).lower()
     if lowered.startswith(("688", "689")):
         return float(
@@ -193,6 +205,7 @@ def _base_limit_down_threshold_for_stock(stock: str, config: dict[str, Any]) -> 
 
 
 def _is_st_on_date(stock: str, prices: pd.DataFrame, date: pd.Timestamp) -> bool:
+    """函数说明：判断 is_st_on_date 是否成立。"""
     is_st = _price_field_slice(prices, "is_st", pd.DatetimeIndex([pd.Timestamp(date).normalize()]), pd.Index([stock]))
     if is_st.empty or stock not in is_st.columns or date not in is_st.index:
         return False
@@ -203,6 +216,7 @@ def _is_st_on_date(stock: str, prices: pd.DataFrame, date: pd.Timestamp) -> bool
 
 
 def _config_value(config: dict[str, Any], key: str, default: Any) -> Any:
+    """函数说明：处理 config_value 的内部辅助逻辑。"""
     if key in config:
         return config[key]
     backtest = config.get("backtest", {})
@@ -212,6 +226,7 @@ def _config_value(config: dict[str, Any], key: str, default: Any) -> Any:
 
 
 def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_price_frame 的内部辅助逻辑。"""
     raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
     valid_dates = ~pd.isna(raw_dates)
     if not valid_dates.all():
@@ -268,12 +283,14 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_price_field(value: object) -> str:
+    """函数说明：规范化 normalize_price_field 的内部辅助逻辑。"""
     if pd.isna(value):
         return ""
     return str(value).strip().lower()
 
 
 def _has_price_field(prices: pd.DataFrame, field: str) -> bool:
+    """函数说明：判断 has_price_field 是否成立。"""
     if not isinstance(prices.columns, pd.MultiIndex):
         return False
     field = _normalize_price_field(field)
@@ -286,6 +303,7 @@ def _price_field_slice(
     dates: pd.DatetimeIndex,
     instruments: pd.Index,
 ) -> pd.DataFrame:
+    """函数说明：处理 price_field_slice 的内部辅助逻辑。"""
     field = _normalize_price_field(field)
     dates = pd.DatetimeIndex(pd.to_datetime(dates, errors="coerce")).dropna().normalize().unique().sort_values()
     instruments = pd.Index([_normalize_instrument(value) for value in instruments]).drop_duplicates()
@@ -307,6 +325,7 @@ def _price_field_slice(
 
 
 def _lookback_with_previous_dates(prices: pd.DataFrame, lookback_dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """函数说明：处理 lookback_with_previous_dates 的内部辅助逻辑。"""
     price_dates = pd.DatetimeIndex(prices.index).unique().sort_values()
     lookback_dates = pd.DatetimeIndex(lookback_dates).unique().sort_values()
     if price_dates.empty or lookback_dates.empty:
@@ -317,6 +336,7 @@ def _lookback_with_previous_dates(prices: pd.DataFrame, lookback_dates: pd.Datet
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
+    """函数说明：处理 price_field 的内部辅助逻辑。"""
     field = _normalize_price_field(field)
     cache_key = id(prices)
     cached = _PRICE_FIELD_CACHE.get(cache_key)
@@ -339,6 +359,7 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
 
 
 def _numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 numeric_frame 的内部辅助逻辑。"""
     try:
         return frame.astype("float64", copy=False)
     except (TypeError, ValueError):

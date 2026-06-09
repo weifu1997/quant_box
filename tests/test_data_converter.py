@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_data_converter 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -12,7 +14,9 @@ from src.data_converter import _apply_adjustment
 
 
 class DataConverterTests(unittest.TestCase):
+    """类说明：组织 DataConverterTests 测试用例。"""
     def test_convert_to_qlib_format_ignores_metadata_csv_files(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_ignores_metadata_csv_files 覆盖的行为场景。"""
         config = {
             "data": {
                 "raw_dir": "unused",
@@ -52,6 +56,7 @@ class DataConverterTests(unittest.TestCase):
             )
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -68,6 +73,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertTrue(Path(result["adjusted_ohlcv_price_file"]).exists())
 
     def test_convert_to_qlib_format_writes_raw_and_adjusted_price_panels(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_writes_raw_and_adjusted_price_panels 覆盖的行为场景。"""
         config = {
             "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},
             "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
@@ -106,6 +112,7 @@ class DataConverterTests(unittest.TestCase):
             ).to_csv(raw_dir / "000001.SZ.csv", index=False)
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -128,6 +135,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertAlmostEqual(float(qlib_features.loc[0, "close"]), 5.0)
 
     def test_convert_to_qlib_format_deduplicates_raw_daily_rows(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_deduplicates_raw_daily_rows 覆盖的行为场景。"""
         config = {
             "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},
             "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
@@ -177,6 +185,7 @@ class DataConverterTests(unittest.TestCase):
             ).to_csv(raw_dir / "000001.SZ.csv", index=False)
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -198,6 +207,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertAlmostEqual(float(adjusted_features.loc[0, "close"]), 5.5)
 
     def test_convert_to_qlib_format_accepts_compact_calendar_dates(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_accepts_compact_calendar_dates 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -241,6 +251,7 @@ class DataConverterTests(unittest.TestCase):
             }
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -256,6 +267,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertEqual((qlib_dir / "calendars" / "day.txt").read_text(encoding="utf-8").splitlines()[0], "2024-01-02")
 
     def test_convert_to_qlib_format_filters_closed_calendar_rows(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_filters_closed_calendar_rows 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -288,6 +300,7 @@ class DataConverterTests(unittest.TestCase):
             }
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -303,6 +316,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertEqual((qlib_dir / "calendars" / "day.txt").read_text(encoding="utf-8").splitlines(), ["2024-01-02"])
 
     def test_convert_to_qlib_format_rejects_dates_missing_from_calendar(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_rejects_dates_missing_from_calendar 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -335,6 +349,7 @@ class DataConverterTests(unittest.TestCase):
             }
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -348,6 +363,7 @@ class DataConverterTests(unittest.TestCase):
                     convert_to_qlib_format(raw_dir=raw_dir, qlib_dir=qlib_dir)
 
     def test_convert_to_qlib_format_sanitizes_nonpositive_market_values(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_sanitizes_nonpositive_market_values 覆盖的行为场景。"""
         config = {
             "data": {"raw_dir": "unused", "constituents_file": "data/raw/mainboard_a_stocks.csv"},
             "qlib": {"provider_uri": "unused", "instruments": "mainboard_a"},
@@ -375,6 +391,7 @@ class DataConverterTests(unittest.TestCase):
             ).to_csv(raw_dir / "000001.SZ.csv", index=False)
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -397,6 +414,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertTrue(pd.isna(qlib_features.loc[0, "vwap"]))
 
     def test_convert_to_qlib_format_removes_stale_price_files_when_no_stock_remains(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_removes_stale_price_files_when_no_stock_remains 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -439,6 +457,7 @@ class DataConverterTests(unittest.TestCase):
             }
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return prices_dir
                 path = Path(value)
@@ -457,6 +476,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertFalse(adjusted_ohlcv_path.exists())
 
     def test_convert_to_qlib_format_normalizes_tradable_symbols(self) -> None:
+        """函数说明：验证 test_convert_to_qlib_format_normalizes_tradable_symbols 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -489,6 +509,7 @@ class DataConverterTests(unittest.TestCase):
             }
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 if str(value) == "data/prices":
                     return root / "prices"
                 path = Path(value)
@@ -504,6 +525,7 @@ class DataConverterTests(unittest.TestCase):
             self.assertTrue(Path(result["close_price_file"]).exists())
 
     def test_adjustment_scales_volume_opposite_to_prices(self) -> None:
+        """函数说明：验证 test_adjustment_scales_volume_opposite_to_prices 覆盖的行为场景。"""
         feature_df = pd.DataFrame(
             {
                 "date": pd.to_datetime(["2024-01-02", "2024-01-03"]),

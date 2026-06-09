@@ -1,3 +1,5 @@
+"""模块说明：提供 run_apply_fills 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Apply manually entered fill feedback to current holdings.")
     parser.add_argument("fill_file", help="Path to fill_feedback_YYYY-MM-DD.csv exported by the daily signal flow.")
@@ -65,6 +68,7 @@ def _audit_payload(
     fills: pd.DataFrame,
     dry_run: bool,
 ) -> dict[str, object]:
+    """函数说明：处理 audit_payload 的内部辅助逻辑。"""
     status = fills.get("fill_status", pd.Series(dtype=object)).fillna("").astype(str).str.strip().str.upper()
     applied = status.isin({"FILLED", "PARTIAL"})
     return {
@@ -81,6 +85,7 @@ def _audit_payload(
 
 
 def _signal_date(fills: pd.DataFrame, fill_path: Path) -> str:
+    """函数说明：处理 signal_date 的内部辅助逻辑。"""
     if "signal_date" in fills.columns and not fills["signal_date"].dropna().empty:
         return str(fills["signal_date"].dropna().iloc[0])
     stem = fill_path.stem

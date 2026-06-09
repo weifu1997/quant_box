@@ -1,3 +1,5 @@
+"""模块说明：提供 run_build_adj_factor_meta 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -16,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Build version metadata for raw adj_factor columns.")
     parser.add_argument("--output", help="Override data_governance.adj_factor_meta_file.")

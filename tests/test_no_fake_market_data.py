@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_no_fake_market_data 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import ast
@@ -10,6 +12,7 @@ SNAPSHOT_ROOT = ROOT / "tests" / "fixtures" / "data_snapshot"
 
 
 def test_real_data_fixture_uses_committed_snapshot_without_skip() -> None:
+    """函数说明：验证 test_real_data_fixture_uses_committed_snapshot_without_skip 覆盖的行为场景。"""
     source = (ROOT / "tests" / "fixtures" / "real_data.py").read_text(encoding="utf-8")
 
     assert "SNAPSHOT_ROOT" in source
@@ -17,6 +20,7 @@ def test_real_data_fixture_uses_committed_snapshot_without_skip() -> None:
 
 
 def test_committed_real_data_snapshot_is_present() -> None:
+    """函数说明：验证 test_committed_real_data_snapshot_is_present 覆盖的行为场景。"""
     expected = [
         SNAPSHOT_ROOT / "manifest.json",
         SNAPSHOT_ROOT / "prices" / "ohlcv_adjusted.parquet",
@@ -36,6 +40,7 @@ def test_committed_real_data_snapshot_is_present() -> None:
 
 
 def test_fake_tushare_client_daily_response_is_snapshot_derived() -> None:
+    """函数说明：验证 test_fake_tushare_client_daily_response_is_snapshot_derived 覆盖的行为场景。"""
     source = (ROOT / "tests" / "test_data_fetcher.py").read_text(encoding="utf-8")
     module = ast.parse(source)
     fake_client = next(
@@ -50,6 +55,7 @@ def test_fake_tushare_client_daily_response_is_snapshot_derived() -> None:
 
 
 def test_high_risk_pipeline_tests_use_real_market_data_fixture() -> None:
+    """函数说明：验证 test_high_risk_pipeline_tests_use_real_market_data_fixture 覆盖的行为场景。"""
     files = [
         ROOT / "tests" / "test_pipeline_integration.py",
         ROOT / "tests" / "test_signal_generator.py",

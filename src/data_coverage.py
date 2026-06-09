@@ -1,3 +1,5 @@
+"""模块说明：统计价格数据覆盖率并识别缺口。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,6 +14,7 @@ YEAR_COVERAGE_COLUMNS = ["year", "start", "end", "days", "has_equity", "passes_m
 
 
 def price_coverage_summary(price_df: pd.DataFrame, start_date: str, end_date: str) -> dict[str, Any]:
+    """函数说明：处理 price_coverage_summary 主要逻辑。"""
     close = _close_frame(price_df)
     close = _slice_dates(close, start_date, end_date)
     if close.empty:
@@ -42,6 +45,7 @@ def price_coverage_summary(price_df: pd.DataFrame, start_date: str, end_date: st
 
 
 def build_price_data_gaps(price_df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    """函数说明：构建 build_price_data_gaps 主要逻辑。"""
     close = _close_frame(price_df)
     close = _slice_dates(close, start_date, end_date)
     if close.empty:
@@ -68,6 +72,7 @@ def build_price_data_gaps(price_df: pd.DataFrame, start_date: str, end_date: str
 
 
 def build_skipped_months(diagnostics: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：构建 build_skipped_months 主要逻辑。"""
     if diagnostics.empty or "skip_reason" not in diagnostics.columns:
         return pd.DataFrame(columns=list(diagnostics.columns) if not diagnostics.empty else ["signal_date", "skip_reason"])
     reasons = diagnostics["skip_reason"].fillna("").astype(str).str.strip()
@@ -80,6 +85,7 @@ def build_yearly_equity_coverage(
     end_date: str,
     min_trading_days: int = 1,
 ) -> pd.DataFrame:
+    """函数说明：构建 build_yearly_equity_coverage 主要逻辑。"""
     start_year = int(pd.Timestamp(start_date).year)
     end_year = int(pd.Timestamp(end_date).year)
     if equity_curve.empty:
@@ -109,10 +115,12 @@ def build_yearly_equity_coverage(
 
 
 def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 close_frame 的内部辅助逻辑。"""
     return _common_close_price_frame(price_df, normalize_symbols=False)
 
 
 def _slice_dates(frame: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    """函数说明：处理 slice_dates 的内部辅助逻辑。"""
     if frame.empty:
         return frame
     start = pd.Timestamp(start_date).normalize()

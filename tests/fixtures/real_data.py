@@ -1,3 +1,5 @@
+"""模块说明：覆盖 real_data 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,6 +34,7 @@ DEFAULT_PRICE_FIELDS = ("open", "close", "low", "high", "volume", "amount")
 
 @dataclass(frozen=True)
 class RealMarketData:
+    """类说明：封装 RealMarketData 相关数据和行为。"""
     factors: pd.DataFrame
     prices: pd.DataFrame
     close: pd.DataFrame
@@ -43,6 +46,7 @@ class RealMarketData:
 
 @dataclass(frozen=True)
 class _MarketDataPaths:
+    """类说明：封装 MarketDataPaths 相关数据和行为。"""
     name: str
     root: Path
     price_panel: Path
@@ -95,6 +99,7 @@ def _load_real_market_data(
     price_fields: tuple[str, ...],
     require_daily_basic: bool,
 ) -> RealMarketData:
+    """函数说明：加载 load_real_market_data 的内部辅助逻辑。"""
     start_ts = pd.Timestamp(start).normalize()
     end_ts = pd.Timestamp(end).normalize()
 
@@ -173,6 +178,7 @@ def _select_data_paths(
     factor_columns: tuple[str, ...],
     price_fields: tuple[str, ...],
 ) -> _MarketDataPaths:
+    """函数说明：选择 select_data_paths 的内部辅助逻辑。"""
     snapshot_paths = _paths_for("snapshot", SNAPSHOT_ROOT)
     _require_files(snapshot_paths)
     if _snapshot_covers(start, end, instruments, factor_columns, price_fields):
@@ -188,6 +194,7 @@ def _select_data_paths(
 
 
 def _paths_for(name: str, root: Path) -> _MarketDataPaths:
+    """函数说明：处理 paths_for 的内部辅助逻辑。"""
     return _MarketDataPaths(
         name=name,
         root=root,
@@ -199,16 +206,19 @@ def _paths_for(name: str, root: Path) -> _MarketDataPaths:
 
 
 def _require_files(paths: _MarketDataPaths) -> None:
+    """函数说明：检查 require_files 的内部辅助逻辑。"""
     missing = [str(path.relative_to(ROOT)) for path in _path_values(paths) if not path.exists()]
     if missing:
         pytest.fail("Committed real market data snapshot is missing: " + ", ".join(missing))
 
 
 def _files_exist(paths: _MarketDataPaths) -> bool:
+    """函数说明：处理 files_exist 的内部辅助逻辑。"""
     return all(path.exists() for path in _path_values(paths))
 
 
 def _path_values(paths: _MarketDataPaths) -> tuple[Path, ...]:
+    """函数说明：处理 path_values 的内部辅助逻辑。"""
     return (paths.price_panel, paths.close_panel, paths.factor_panel, paths.daily_basic)
 
 
@@ -219,6 +229,7 @@ def _snapshot_covers(
     factor_columns: tuple[str, ...],
     price_fields: tuple[str, ...],
 ) -> bool:
+    """函数说明：处理 snapshot_covers 的内部辅助逻辑。"""
     manifest_path = SNAPSHOT_ROOT / "manifest.json"
     if not manifest_path.exists():
         pytest.fail("Committed real market data snapshot is missing: tests/fixtures/data_snapshot/manifest.json")
@@ -243,6 +254,7 @@ def _snapshot_covers(
 
 
 def _read_price_panel(path: Path, columns: list[str], source_name: str) -> pd.DataFrame:
+    """函数说明：读取 read_price_panel 的内部辅助逻辑。"""
     try:
         return pd.read_parquet(path, columns=columns)
     except Exception:
@@ -259,6 +271,7 @@ def _require_price_columns(
     instruments: list[str],
     source_name: str,
 ) -> None:
+    """函数说明：检查 require_price_columns 的内部辅助逻辑。"""
     available = set(prices.columns)
     expected = {(field, instrument) for field in price_fields for instrument in instruments}
     if not expected.issubset(available):
@@ -267,14 +280,17 @@ def _require_price_columns(
 
 
 def _normalize_instrument(value: object) -> str:
+    """函数说明：规范化 normalize_instrument 的内部辅助逻辑。"""
     return str(value).strip().upper()
 
 
 def _storage_instrument(value: object) -> str:
+    """函数说明：处理 storage_instrument 的内部辅助逻辑。"""
     return str(value).strip().lower()
 
 
 def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_factor_index 的内部辅助逻辑。"""
     frame = factors.copy()
     datetime_values = pd.to_datetime(frame.index.get_level_values("datetime"))
     instrument_values = [_normalize_instrument(value) for value in frame.index.get_level_values("instrument")]

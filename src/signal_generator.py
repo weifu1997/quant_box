@@ -1,3 +1,5 @@
+"""模块说明：从最新策略分数和历史持仓生成调仓信号。"""
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def read_previous_holdings(path: str | Path | None = None, config: dict | None = None) -> list[str]:
+    """函数说明：读取 read_previous_holdings 主要逻辑。"""
     config = config or load_config()
     holdings_path = resolve_path(path or config["outputs"]["holdings_file"])
     if not holdings_path.exists():
@@ -38,6 +41,7 @@ def generate_signal(
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
+    """函数说明：生成 generate_signal 主要逻辑。"""
     config = config or load_config()
     data_cfg = config["data"]
     strategy_cfg = config["strategy"]
@@ -92,6 +96,7 @@ def generate_signal(
 
 
 def _load_price_frame(price_file: str | Path | None, config: dict) -> pd.DataFrame:
+    """函数说明：加载 load_price_frame 的内部辅助逻辑。"""
     price_path = resolve_path(price_file or config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
     if not price_path.exists():
         raise FileNotFoundError(f"Price file not found for selection risk filter: {price_path}")
@@ -99,6 +104,7 @@ def _load_price_frame(price_file: str | Path | None, config: dict) -> pd.DataFra
 
 
 def _latest_daily_scores(scores: pd.Series) -> tuple[pd.Timestamp, pd.Series]:
+    """函数说明：处理 latest_daily_scores 的内部辅助逻辑。"""
     if scores.empty or not isinstance(scores.index, pd.MultiIndex):
         raise ValueError("scores must use MultiIndex: datetime/instrument.")
     raw_dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0), errors="coerce"))
@@ -129,6 +135,7 @@ def _latest_daily_scores(scores: pd.Series) -> tuple[pd.Timestamp, pd.Series]:
 
 
 def _effective_signal_date(factors: pd.DataFrame, requested_date: str) -> str:
+    """函数说明：处理 effective_signal_date 的内部辅助逻辑。"""
     requested_ts = pd.Timestamp(requested_date).normalize()
     dates = _factor_dates(factors)
     eligible = dates[dates <= requested_ts]
@@ -145,6 +152,7 @@ def _effective_signal_date(factors: pd.DataFrame, requested_date: str) -> str:
 
 
 def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
+    """函数说明：处理 factor_dates 的内部辅助逻辑。"""
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         raise ValueError("factors must use MultiIndex: date/instrument.")
     date_level = factors.index.names[0] or 0
@@ -152,6 +160,7 @@ def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
 
 
 def _normalize_score_index(scores: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_score_index 的内部辅助逻辑。"""
     if scores.empty:
         return scores
     result = scores.sort_values(ascending=False, kind="mergesort", na_position="last").copy()
@@ -164,6 +173,7 @@ def _normalize_score_index(scores: pd.Series) -> pd.Series:
 
 
 def _normalize_instruments(values: list[str] | pd.Series) -> list[str]:
+    """函数说明：规范化 normalize_instruments 的内部辅助逻辑。"""
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -176,6 +186,7 @@ def _normalize_instruments(values: list[str] | pd.Series) -> list[str]:
 
 
 def save_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str, config: dict | None = None) -> tuple[Path, Path]:
+    """函数说明：保存 save_signal 主要逻辑。"""
     config = config or load_config()
     out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +203,7 @@ def save_candidate_signal(
     signal_date: str,
     config: dict | None = None,
 ) -> tuple[Path, Path]:
+    """函数说明：保存 save_candidate_signal 主要逻辑。"""
     config = config or load_config()
     out_dir = resolve_path(config["outputs"].get("dir", "outputs"))
     out_dir.mkdir(parents=True, exist_ok=True)

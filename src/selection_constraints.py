@@ -1,3 +1,5 @@
+"""模块说明：将选股约束和行业映射应用到回测配置。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,6 +15,7 @@ def apply_selection_constraints_to_backtest_config(
     project_config: dict[str, Any],
     force: bool = False,
 ) -> dict[str, Any]:
+    """函数说明：应用 apply_selection_constraints_to_backtest_config 主要逻辑。"""
     result = dict(backtest_config)
     risk_filter = project_config.get("selection_risk_filter")
     if "selection_risk_filter" not in result and isinstance(risk_filter, dict):
@@ -27,6 +30,7 @@ def apply_selection_constraints_to_backtest_config(
 
 
 def load_industry_group_map(config: dict[str, Any]) -> pd.Series:
+    """函数说明：加载 load_industry_group_map 主要逻辑。"""
     path = _industry_file(config)
     if path is None or not path.exists():
         return pd.Series(dtype=object, name="industry")
@@ -46,6 +50,7 @@ def load_industry_group_map(config: dict[str, Any]) -> pd.Series:
 
 
 def _industry_file(config: dict[str, Any]) -> Path | None:
+    """函数说明：处理 industry_file 的内部辅助逻辑。"""
     strategy_cfg = config.get("strategy", {}) if isinstance(config.get("strategy"), dict) else {}
     research_cfg = config.get("research", {}).get("exposure", {}) if isinstance(config.get("research"), dict) else {}
     data_cfg = config.get("data", {}) if isinstance(config.get("data"), dict) else {}

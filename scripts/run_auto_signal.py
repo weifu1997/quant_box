@@ -1,3 +1,5 @@
+"""模块说明：提供 run_auto_signal 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -30,6 +32,7 @@ from src.data_fetcher import update_daily_data_resumable
 from src.data_governance import build_data_governance_report, write_data_governance_report
 from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
+from src.failure_analysis import build_failure_analysis_artifacts, write_failure_analysis_artifacts
 from src.manual_orders import (
     generate_fill_feedback_template,
     generate_manual_orders,
@@ -55,10 +58,12 @@ logger = logging.getLogger(__name__)
 
 
 def _csv_values(value: str, cast):
+    """函数说明：处理 csv_values 的内部辅助逻辑。"""
     return [cast(item.strip()) for item in value.split(",") if item.strip()]
 
 
 def _csv_optional_values(value: str, cast):
+    """函数说明：处理 csv_optional_values 的内部辅助逻辑。"""
     values = []
     for item in value.split(","):
         item = item.strip()
@@ -72,21 +77,25 @@ def _csv_optional_values(value: str, cast):
 
 
 def _grid_values(value: str | None, defaults: list, cast):
+    """函数说明：处理 grid_values 的内部辅助逻辑。"""
     if value is None:
         return list(defaults)
     return _csv_values(value, cast)
 
 
 def _maybe_add_grid_values(grid: dict[str, list], key: str, value: str | None, cast) -> None:
+    """函数说明：处理 maybe_add_grid_values 的内部辅助逻辑。"""
     if value is not None:
         grid[key] = _csv_optional_values(value, cast)
 
 
 def _grid_has_enabled_value(grid: dict[str, list], key: str) -> bool:
+    """函数说明：处理 grid_has_enabled_value 的内部辅助逻辑。"""
     return any(value is not None for value in grid.get(key, []))
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     base_config = load_config()
     parser = argparse.ArgumentParser(description="Run data refresh, automatic walk-forward tuning, backtest and latest signal.")
     parser.add_argument("--skip-update", action="store_true", help="Skip Tushare data update.")
@@ -166,7 +175,7 @@ def main() -> None:
         if not args.skip_update:
             _stage(status, out_dir, "update_data", "running")
             logger.info("Updating raw stock data that is missing or stale.")
-            update_daily_data_resumable(
+            update_result = update_daily_data_resumable(
                 start_date=args.start_date,
                 end_date=end_date,
                 chunk_size=args.chunk_size,
@@ -174,7 +183,13 @@ def main() -> None:
                 max_chunks=args.max_chunks,
                 include_existing=args.include_existing,
             )
-            _stage(status, out_dir, "update_data", "complete")
+            update_info = _update_result_status(update_result)
+            update_state = str(update_info.get("status") or "complete")
+            if update_state not in {"complete", "partial", "error"}:
+                update_state = "complete"
+            _stage(status, out_dir, "update_data", update_state, _update_status_message(update_info))
+            if update_state == "error" and not args.allow_unhealthy:
+                raise RuntimeError(f"Data update failed: {update_info.get('last_error') or update_info}")
         else:
             _stage(status, out_dir, "update_data", "skipped")
 
@@ -270,6 +285,7 @@ def main() -> None:
             _stage(status, out_dir, "optimize_params", "running", f"0 results; {total_combinations} combinations per validation window")
 
             def on_validation_result(row: dict[str, object], frame: pd.DataFrame) -> None:
+                """函数说明：处理 on_validation_result 主要逻辑。"""
                 _stage(status, out_dir, "optimize_params", "running", _validation_progress_message(row, len(frame)))
 
             base_bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
@@ -351,6 +367,7 @@ def main() -> None:
         holdings_bt_path = out_dir / "auto_backtest_holdings.csv"
         trades_path = out_dir / "auto_backtest_trades.csv"
         metrics_path = out_dir / "auto_backtest_metrics.json"
+        backtest_runtime_config: dict[str, Any] = {**selected_config["backtest"], **selected_config["strategy"]}
         if args.skip_backtest:
             _stage(status, out_dir, "backtest", "skipped")
             result = BacktestResult(
@@ -366,11 +383,12 @@ def main() -> None:
             scores = resample_signals(scores, selected_config["strategy"].get("rebalance_freq", "daily"))
             _stage(status, out_dir, "backtest", "running", "preparing backtest config")
             bt_config = apply_defensive_timing_to_backtest_config(
-                {**selected_config["backtest"], **selected_config["strategy"]},
+                backtest_runtime_config,
                 prices,
                 selected_config,
             )
             bt_config = apply_selection_constraints_to_backtest_config(bt_config, selected_config)
+            backtest_runtime_config = bt_config
             _stage(status, out_dir, "backtest", "running", "running historical backtest")
             result = run_backtest(
                 scores,
@@ -393,6 +411,7 @@ def main() -> None:
         artifacts.append(backtest_quality_path)
         backtest_quality_gate = backtest_quality.is_acceptable or args.allow_low_quality
         research_diagnostics: dict[str, Any] = {"enabled": False, "issues": ["backtest_skipped"] if args.skip_backtest else []}
+        research_tables: dict[str, pd.DataFrame] = {}
         research_files: dict[str, str] = {}
         if not args.skip_backtest:
             _stage(status, out_dir, "research_diagnostics", "running")
@@ -461,6 +480,52 @@ def main() -> None:
         allowed_with_warnings = not block_reasons and bool(quality_warnings) and args.force_official
         is_executable = not quality_warnings or allowed_with_warnings
 
+        failure_analysis: dict[str, Any] = {"enabled": False, "issues": ["backtest_skipped"] if args.skip_backtest else []}
+        failure_files: dict[str, str] = {}
+        if not args.skip_backtest:
+            failure_analysis, failure_tables = build_failure_analysis_artifacts(
+                selected_params=selected_params,
+                selected_params_status=selected_params_status,
+                parameter_quality=parameter_quality.to_dict(),
+                backtest_quality=backtest_quality.to_dict(),
+                backtest_metrics=result.metrics,
+                block_reasons=block_reasons,
+                quality_warnings=quality_warnings,
+                validation=validation,
+                backtest_result=result,
+                backtest_config=backtest_runtime_config,
+                research_diagnostics=research_diagnostics,
+                research_tables=research_tables,
+                start_date=args.start_date,
+                end_date=end_date,
+            )
+            failure_files = write_failure_analysis_artifacts(failure_analysis, failure_tables, out_dir)
+            artifacts.extend(Path(path) for path in failure_files.values())
+            if failure_analysis.get("parameter_backtest_mismatch"):
+                logger.warning("Parameter validation passed, but full-history backtest failed quality gates.")
+            if not backtest_quality.is_acceptable:
+                gaps = failure_analysis.get("backtest_threshold_gaps", {})
+                logger.warning(
+                    "Backtest quality failed: annual_return=%s target=%s gap=%s; max_drawdown=%s limit=%s gap=%s.",
+                    gaps.get("annual_return"),
+                    gaps.get("min_backtest_annual_return"),
+                    gaps.get("annual_return_gap"),
+                    gaps.get("max_drawdown"),
+                    gaps.get("max_backtest_drawdown_limit"),
+                    gaps.get("max_drawdown_gap"),
+                )
+            drawdown_summary = failure_analysis.get("drawdown_summary", {})
+            if drawdown_summary.get("trough_date"):
+                logger.info(
+                    "Worst drawdown: peak=%s start=%s trough=%s recovery=%s max_drawdown=%s.",
+                    drawdown_summary.get("peak_date"),
+                    drawdown_summary.get("start_date"),
+                    drawdown_summary.get("trough_date"),
+                    drawdown_summary.get("recovery_date"),
+                    drawdown_summary.get("max_drawdown"),
+                )
+            logger.info("Failure analysis saved to %s", failure_files.get("failure_analysis"))
+
         if is_executable:
             signal_path, holdings_path = save_signal(signal_df, target_holdings, output_date, config=selected_config)
         else:
@@ -507,6 +572,7 @@ def main() -> None:
             "data_governance": data_governance.to_dict(),
             "backtest_metrics": result.metrics,
             "research_diagnostics": research_diagnostics,
+            "failure_analysis": failure_analysis,
             "account": account.to_dict(),
             "signal_summary": signal_action_summary(signal_df),
             "signal_date": str(output_date),
@@ -532,6 +598,7 @@ def main() -> None:
                 "backtest_metrics": str(metrics_path),
                 "backtest_quality": str(backtest_quality_path),
                 **research_files,
+                **failure_files,
             },
         }
         report_path = out_dir / "auto_signal_report.json"
@@ -563,17 +630,53 @@ def main() -> None:
 
 
 def _new_status(target_date_resolution: dict[str, str] | None = None) -> dict[str, Any]:
+    """函数说明：处理 new_status 的内部辅助逻辑。"""
     status: dict[str, Any] = {"status": "running", "started_at": datetime.now().isoformat(timespec="seconds"), "stages": []}
     if target_date_resolution is not None:
         status["target_date_resolution"] = target_date_resolution
     return status
 
 
+def _update_result_status(result: Any) -> dict[str, Any]:
+    """函数说明：更新 update_result_status 的内部辅助逻辑。"""
+    if hasattr(result, "to_status_dict"):
+        value = result.to_status_dict()
+        return value if isinstance(value, dict) else {}
+    status = getattr(result, "status", "")
+    if status:
+        return {
+            "status": status,
+            "failed_symbols": getattr(result, "failed_symbols", 0),
+            "remaining_symbols": getattr(result, "remaining_symbols", 0),
+            "last_error": getattr(result, "last_error", ""),
+            "written_symbols": len(result) if hasattr(result, "__len__") else 0,
+        }
+    if isinstance(result, dict):
+        return {"status": "complete", "written_symbols": len(result)}
+    return {"status": "complete"}
+
+
+def _update_status_message(info: dict[str, Any]) -> str:
+    """函数说明：更新 update_status_message 的内部辅助逻辑。"""
+    parts = [
+        f"written={info.get('written_symbols', 0)}",
+        f"failed={info.get('failed_symbols', 0)}",
+        f"remaining={info.get('remaining_symbols', 0)}",
+    ]
+    if info.get("progress_path"):
+        parts.append(f"progress={info['progress_path']}")
+    if info.get("last_error"):
+        parts.append(f"last_error={info['last_error']}")
+    return "; ".join(parts)
+
+
 def _resolve_signal_date_arg(value: str, target_end_date: str) -> str:
+    """函数说明：解析 resolve_signal_date_arg 的内部辅助逻辑。"""
     return target_end_date if str(value).strip().lower() in {"auto", "latest_trade_date", "latest_trading_day"} else value
 
 
 def _signal_output_date(signal_df: pd.DataFrame, signal_date_arg: str, factors: pd.DataFrame | None = None) -> str:
+    """函数说明：处理 signal_output_date 的内部辅助逻辑。"""
     if not signal_df.empty and "date" in signal_df.columns:
         return str(signal_df["date"].iloc[0])
     signal_date = getattr(signal_df, "attrs", {}).get("signal_date")
@@ -586,6 +689,7 @@ def _signal_output_date(signal_df: pd.DataFrame, signal_date_arg: str, factors: 
 
 
 def _infer_signal_output_date(signal_date_arg: str, factors: pd.DataFrame | None) -> str | None:
+    """函数说明：处理 infer_signal_output_date 的内部辅助逻辑。"""
     if factors is None or factors.empty or not isinstance(factors.index, pd.MultiIndex):
         return None
     date_level = factors.index.names[0] or 0
@@ -605,6 +709,7 @@ def _infer_signal_output_date(signal_date_arg: str, factors: pd.DataFrame | None
 
 
 def _stage(status: dict[str, Any], out_dir: Path, name: str, state: str, message: str = "") -> None:
+    """函数说明：处理 stage 的内部辅助逻辑。"""
     status["stages"].append(
         {
             "name": name,
@@ -617,6 +722,7 @@ def _stage(status: dict[str, Any], out_dir: Path, name: str, state: str, message
 
 
 def _validation_progress_message(row: dict[str, object], completed: int) -> str:
+    """函数说明：处理 validation_progress_message 的内部辅助逻辑。"""
     test_start = _date_message_value(row.get("test_start"))
     test_end = _date_message_value(row.get("test_end"))
     factor_group = row.get("factor_group", "")
@@ -626,6 +732,7 @@ def _validation_progress_message(row: dict[str, object], completed: int) -> str:
 
 
 def _date_message_value(value: object) -> str:
+    """函数说明：处理 date_message_value 的内部辅助逻辑。"""
     if value is None or value == "":
         return ""
     try:
@@ -635,14 +742,17 @@ def _date_message_value(value: object) -> str:
 
 
 def _write_status(out_dir: Path, status: dict[str, Any]) -> None:
+    """函数说明：写入 write_status 的内部辅助逻辑。"""
     _write_json(out_dir / "auto_run_status.json", status)
 
 
 def _write_json(path: Path, value: Any) -> None:
+    """函数说明：写入 write_json 的内部辅助逻辑。"""
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
 
 def _save_candidate_signal(signal_df: pd.DataFrame, holdings: list[str], signal_date: str, out_dir: Path) -> tuple[Path, Path]:
+    """函数说明：保存 save_candidate_signal 的内部辅助逻辑。"""
     signal_path = out_dir / f"candidate_signal_{signal_date}.csv"
     holdings_path = out_dir / f"candidate_holdings_{signal_date}.csv"
     signal_df.to_csv(signal_path, index=False, encoding="utf-8-sig")
@@ -651,6 +761,7 @@ def _save_candidate_signal(signal_df: pd.DataFrame, holdings: list[str], signal_
 
 
 def _promote_candidate(date_arg: str, config: dict, out_dir: Path) -> tuple[Path, Path]:
+    """函数说明：处理 promote_candidate 的内部辅助逻辑。"""
     try:
         signal_date = str(pd.Timestamp(date_arg).date())
     except Exception as exc:
@@ -671,6 +782,7 @@ def _promote_candidate(date_arg: str, config: dict, out_dir: Path) -> tuple[Path
 
 
 def _validated_strategy_quality(config: dict[str, Any], quality_config: dict) -> ParameterQualityReport | None:
+    """函数说明：处理 validated_strategy_quality 的内部辅助逻辑。"""
     evidence_cfg = config.get("validated_strategy", {})
     if not isinstance(evidence_cfg, dict) or not bool(evidence_cfg.get("enabled", False)):
         return None
@@ -781,6 +893,7 @@ def _validated_strategy_quality(config: dict[str, Any], quality_config: dict) ->
 
 
 def _formal_candidate_quality_report(quality_config: dict, issues: list[str]) -> ParameterQualityReport:
+    """函数说明：处理 formal_candidate_quality_report 的内部辅助逻辑。"""
     min_windows = int(quality_config.get("min_validation_windows", 3))
     min_positive = float(quality_config.get("min_positive_return_rate", 0.5))
     min_return = float(quality_config.get("min_optimizer_annual_return", quality_config.get("target_annual_return", 0.20)))
@@ -810,6 +923,7 @@ def _formal_candidate_quality_report(quality_config: dict, issues: list[str]) ->
 
 
 def _quality_number(value: Any, default: float) -> float:
+    """函数说明：处理 quality_number 的内部辅助逻辑。"""
     parsed = pd.to_numeric(value, errors="coerce")
     if pd.isna(parsed):
         return default
@@ -817,10 +931,12 @@ def _quality_number(value: Any, default: float) -> float:
 
 
 def _truthy(value: Any) -> bool:
+    """函数说明：处理 truthy 的内部辅助逻辑。"""
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _skipped_quality(quality_config: dict) -> ParameterQualityReport:
+    """函数说明：处理 skipped_quality 的内部辅助逻辑。"""
     return ParameterQualityReport(
         is_acceptable=False,
         issues=["parameter_validation_skipped"],

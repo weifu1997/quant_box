@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_run_goal_fast_factor_screen 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -6,7 +8,9 @@ from scripts.run_goal_fast_factor_screen import _screen_quality_fields
 
 
 class RunGoalFastFactorScreenTests(unittest.TestCase):
+    """类说明：组织 RunGoalFastFactorScreenTests 测试用例。"""
     def test_screen_quality_fields_use_configured_thresholds(self) -> None:
+        """函数说明：验证 test_screen_quality_fields_use_configured_thresholds 覆盖的行为场景。"""
         config = {
             "quality": {
                 "min_backtest_annual_return": 0.25,

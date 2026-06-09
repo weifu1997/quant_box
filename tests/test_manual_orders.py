@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_manual_orders 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +22,9 @@ from src.manual_orders import (
 
 
 class ManualOrdersTests(unittest.TestCase):
+    """类说明：组织 ManualOrdersTests 测试用例。"""
     def test_generate_manual_orders_calculates_target_and_order_shares(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_calculates_target_and_order_shares 覆盖的行为场景。"""
         signal = pd.DataFrame(
             [
                 {"date": "2024-01-03", "instrument": "000001.SZ", "action": "HOLD"},
@@ -72,6 +76,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertIn("suggested_limit_price", orders.columns)
 
     def test_generate_manual_orders_marks_limit_flags_with_board_and_st_thresholds(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_marks_limit_flags_with_board_and_st_thresholds 覆盖的行为场景。"""
         dates = pd.DatetimeIndex(["2024-01-03", "2024-01-04"])
         star = "688001.SH"
         growth = "300001.SZ"
@@ -128,6 +133,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertTrue(bool(by_code.loc[st_stock, "is_limit_up"]))
 
     def test_generate_manual_orders_marks_blocked_candidate(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_marks_blocked_candidate 覆盖的行为场景。"""
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
         prices = _prices("2024-01-03", {"000001.SZ": 10.0})
         account = AccountState(
@@ -160,6 +166,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertIn("reference_price_from_signal_date", orders.iloc[0]["note"])
 
     def test_generate_manual_orders_applies_defensive_exposure_to_target_weight(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_applies_defensive_exposure_to_target_weight 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=6)
         signal_date = str(dates[-1].date())
         signal = pd.DataFrame([{"date": signal_date, "instrument": "000001.SZ", "action": "BUY"}])
@@ -206,6 +213,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(orders.iloc[0]["target_value"]), 40000.0)
 
     def test_generate_manual_orders_falls_back_to_signal_date_when_intended_price_is_missing(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_falls_back_to_signal_date_when_intended_price_is_missing 覆盖的行为场景。"""
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
         prices = _prices("2024-01-03", {"000001.SZ": 10.0})
         account = AccountState(
@@ -239,6 +247,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertIn("reference_price_from_signal_date", orders.iloc[0]["note"])
 
     def test_generate_manual_orders_redistributes_leftover_cash_after_lot_rounding(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_redistributes_leftover_cash_after_lot_rounding 覆盖的行为场景。"""
         signal = pd.DataFrame(
             [
                 {"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"},
@@ -271,6 +280,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(orders["target_shares"].sum()), 10300.0)
 
     def test_generate_manual_orders_normalizes_targets_and_price_columns(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_normalizes_targets_and_price_columns 覆盖的行为场景。"""
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.sz", "action": "BUY"}])
         prices = _prices("2024-01-04", {" 000001.sz ": 20.0})
         account = AccountState(
@@ -301,6 +311,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(orders.iloc[0]["target_shares"]), 5000.0)
 
     def test_generate_manual_orders_uses_last_intraday_price_for_trade_date(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_uses_last_intraday_price_for_trade_date 覆盖的行为场景。"""
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
         prices = _prices(
             ["2024-01-04 09:30", "2024-01-04 15:00"],
@@ -332,6 +343,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(orders.iloc[0]["target_shares"]), 5000.0)
 
     def test_generate_manual_orders_uses_last_intraday_amount_for_adv(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_uses_last_intraday_amount_for_adv 覆盖的行为场景。"""
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
         dates = pd.DatetimeIndex(
             [
@@ -374,6 +386,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(float(orders.iloc[0]["capacity_ratio"]), 5.0)
 
     def test_generate_manual_orders_does_not_treat_plain_close_panel_as_st_flags(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_does_not_treat_plain_close_panel_as_st_flags 覆盖的行为场景。"""
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "600000.SH", "action": "BUY"}])
         prices = pd.DataFrame(
             {"600000.SH": [10.0, 10.6]},
@@ -411,6 +424,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertFalse(bool(orders.iloc[0]["is_limit_up"]))
 
     def test_generate_manual_orders_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_generate_manual_orders_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
         prices = pd.DataFrame(
             {
@@ -444,6 +458,7 @@ class ManualOrdersTests(unittest.TestCase):
             )
 
     def test_load_current_holdings_preserves_duplicates_for_validation(self) -> None:
+        """函数说明：验证 test_load_current_holdings_preserves_duplicates_for_validation 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "current_holdings.csv"
             pd.DataFrame(
@@ -470,6 +485,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertIn("duplicate_instrument:000001.SZ", validate_current_holdings(holdings, account))
 
     def test_execution_templates_mark_actionable_orders_for_confirmation_and_fill_feedback(self) -> None:
+        """函数说明：验证 test_execution_templates_mark_actionable_orders_for_confirmation_and_fill_feedback 覆盖的行为场景。"""
         orders = pd.DataFrame(
             [
                 {
@@ -510,6 +526,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertEqual(feedback.loc[1, "fill_status"], "SKIPPED")
 
     def test_save_execution_templates_uses_configured_outputs_dir_for_defaults(self) -> None:
+        """函数说明：验证 test_save_execution_templates_uses_configured_outputs_dir_for_defaults 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             confirmation = pd.DataFrame({"instrument": ["000001.SZ"]})
@@ -529,6 +546,7 @@ class ManualOrdersTests(unittest.TestCase):
             self.assertIn("fill_feedback", files)
 
     def test_apply_fill_feedback_updates_holdings_with_buy_sell_and_partial_fills(self) -> None:
+        """函数说明：验证 test_apply_fill_feedback_updates_holdings_with_buy_sell_and_partial_fills 覆盖的行为场景。"""
         current = pd.DataFrame({"instrument": ["000001.SZ", "600519.SH"], "shares": [1000, 300]})
         fills = pd.DataFrame(
             [
@@ -563,6 +581,7 @@ class ManualOrdersTests(unittest.TestCase):
         self.assertNotIn("000002.SZ", updated.index)
 
     def test_apply_fill_feedback_rejects_duplicate_current_holdings(self) -> None:
+        """函数说明：验证 test_apply_fill_feedback_rejects_duplicate_current_holdings 覆盖的行为场景。"""
         current = pd.DataFrame({"instrument": ["000001.SZ", "000001.sz"], "shares": [100, 500]})
         fills = pd.DataFrame(
             [
@@ -583,6 +602,7 @@ class ManualOrdersTests(unittest.TestCase):
             apply_fill_feedback(current, fills)
 
     def test_validate_fill_feedback_blocks_unfinished_or_invalid_manual_entries(self) -> None:
+        """函数说明：验证 test_validate_fill_feedback_blocks_unfinished_or_invalid_manual_entries 覆盖的行为场景。"""
         current = pd.DataFrame({"instrument": ["000001.SZ"], "shares": [100]})
         fills = pd.DataFrame(
             [
@@ -601,6 +621,7 @@ class ManualOrdersTests(unittest.TestCase):
             apply_fill_feedback(current, fills)
 
     def test_validate_fill_feedback_requires_status_side_and_planned_shares(self) -> None:
+        """函数说明：验证 test_validate_fill_feedback_requires_status_side_and_planned_shares 覆盖的行为场景。"""
         current = pd.DataFrame({"instrument": ["000001.SZ"], "shares": [100]})
         fills = pd.DataFrame({"instrument": ["000001.SZ"], "executed_shares": [100]})
 
@@ -615,6 +636,7 @@ class ManualOrdersTests(unittest.TestCase):
 
 
 def _prices(date: str | list[str], close_values: dict[str, float | list[float]]) -> pd.DataFrame:
+    """函数说明：处理 prices 的内部辅助逻辑。"""
     dates = [date] if isinstance(date, str) else date
     instruments = list(close_values)
     columns = pd.MultiIndex.from_product([["close"], instruments], names=["field", "instrument"])
@@ -629,6 +651,7 @@ def _prices(date: str | list[str], close_values: dict[str, float | list[float]])
 
 
 def _price_panel(dates: pd.DatetimeIndex, fields: dict[str, dict[str, list[float]]]) -> pd.DataFrame:
+    """函数说明：处理 price_panel 的内部辅助逻辑。"""
     return pd.concat({field: pd.DataFrame(values, index=dates) for field, values in fields.items()}, axis=1)
 
 

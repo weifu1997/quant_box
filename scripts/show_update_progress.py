@@ -1,3 +1,5 @@
+"""模块说明：提供 show_update_progress 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -17,6 +19,7 @@ from src.trading_calendar import _configured_file_calendar, resolve_target_date_
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     parser = argparse.ArgumentParser(description="Show resumable raw data update progress.")
     parser.add_argument("--scan-raw", action="store_true", help="Scan raw CSV files to recompute latest-date coverage.")
     args = parser.parse_args()
@@ -90,6 +93,7 @@ def main() -> None:
 
 
 def _load_progress(path: Path) -> dict[str, object] | None:
+    """函数说明：加载 load_progress 的内部辅助逻辑。"""
     if not path.exists():
         return None
     try:
@@ -101,6 +105,7 @@ def _load_progress(path: Path) -> dict[str, object] | None:
 
 
 def _progress_freshness(progress: dict[str, object] | None, target_end: str) -> dict[str, object] | None:
+    """函数说明：处理 progress_freshness 的内部辅助逻辑。"""
     if not progress or str(progress.get("target_end_date", "")) != target_end:
         return None
     keys = ["latest_symbols", "stale_or_missing_symbols", "latest_coverage"]
@@ -110,6 +115,7 @@ def _progress_freshness(progress: dict[str, object] | None, target_end: str) -> 
 
 
 def _resolve_target_end(config: dict, progress: dict[str, object] | None, raw_dir: Path) -> str:
+    """函数说明：解析 resolve_target_end 的内部辅助逻辑。"""
     data_cfg = config.get("data", {})
     requested = str(data_cfg.get("end_date", "auto"))
     if requested.lower() not in {"auto", "latest", "latest_trade_date", "latest_trading_day"}:
@@ -132,6 +138,7 @@ def _resolve_target_end(config: dict, progress: dict[str, object] | None, raw_di
 
 
 def _target_symbols(config: dict, target_end: str) -> set[str]:
+    """函数说明：处理 target_symbols 的内部辅助逻辑。"""
     data_cfg = config.get("data", {})
     universe_file = resolve_path(data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
     if not universe_file.exists():
@@ -150,10 +157,12 @@ def _target_symbols(config: dict, target_end: str) -> set[str]:
 
 
 def _date_text(value: pd.Timestamp | None) -> str:
+    """函数说明：处理 date_text 的内部辅助逻辑。"""
     return "" if value is None else str(pd.Timestamp(value).date())
 
 
 def _format_value(value: object) -> object:
+    """函数说明：处理 format_value 的内部辅助逻辑。"""
     if isinstance(value, float) and 0 <= value <= 1:
         return f"{value:.2%}"
     return value

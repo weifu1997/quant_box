@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_fast_monthly_backtest 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -10,7 +12,9 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class FastMonthlyBacktestTests(unittest.TestCase):
+    """类说明：组织 FastMonthlyBacktestTests 测试用例。"""
     def test_fast_period_backtest_selects_top_scores(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_selects_top_scores 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         scores = resample_signals(market.factors["LOW0"].rename("score"), "monthly")
 
@@ -28,6 +32,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertTrue(set(result.weights["instrument"]).issubset(set(market.instruments)))
 
     def test_fast_period_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_matches_score_and_price_instruments_case_insensitively 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
             {
@@ -54,6 +59,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertEqual(result.weights["instrument"].tolist(), ["000001.SZ"])
 
     def test_fast_period_backtest_keeps_highest_score_when_normalized_codes_duplicate(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_keeps_highest_score_when_normalized_codes_duplicate 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
             {
@@ -83,6 +89,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertEqual(result.weights["instrument"].tolist(), ["A"])
 
     def test_fast_period_backtest_uses_latest_intraday_score_per_signal_date(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_uses_latest_intraday_score_per_signal_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
             {
@@ -117,6 +124,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertEqual(result.weights["instrument"].tolist(), ["B"])
 
     def test_fast_period_backtest_uses_last_intraday_price_per_trade_date(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_uses_last_intraday_price_per_trade_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31 15:00", "2024-02-01 09:30", "2024-02-01 15:00", "2024-02-29 15:00"])
         prices = pd.DataFrame(
             {
@@ -142,6 +150,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertAlmostEqual(result.equity_curve.iloc[-1], 200.0)
 
     def test_fast_period_backtest_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
             {
@@ -167,6 +176,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
             )
 
     def test_fast_period_backtest_respects_zero_exposure(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_respects_zero_exposure 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
             {
@@ -194,6 +204,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertTrue(result.weights.empty or result.weights["weight"].sum() == 0.0)
 
     def test_fast_period_backtest_uses_latest_intraday_exposure_per_trade_date(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_uses_latest_intraday_exposure_per_trade_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])
         prices = pd.DataFrame(
             {
@@ -224,6 +235,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertAlmostEqual(result.equity_curve.iloc[-1], 150.0)
 
     def test_fast_period_backtest_applies_max_industry_weight(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_applies_max_industry_weight 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29", "2024-03-01"])
         signal_dates = dates[[0, 2]]
         instruments = ["A", "B", "C", "D"]
@@ -255,6 +267,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertEqual(result.weights["instrument"].tolist(), ["A", "C", "D"])
 
     def test_fast_period_backtest_applies_rebalance_drift_threshold_to_weight_trims(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_applies_rebalance_drift_threshold_to_weight_trims 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29", "2024-03-01", "2024-03-29", "2024-04-01"])
         signal_dates = dates[[0, 2, 4]]
         instruments = ["A", "B", "C"]
@@ -294,6 +307,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertAlmostEqual(drift.metrics["total_weight_turnover"], 1.0)
 
     def test_fast_period_backtest_applies_rebalance_drift_threshold_to_price_drift(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_applies_rebalance_drift_threshold_to_price_drift 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29", "2024-03-01", "2024-03-29", "2024-04-01"])
         signal_dates = dates[[0, 2, 4]]
         prices = pd.DataFrame(
@@ -329,6 +343,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertAlmostEqual(drift.metrics["total_weight_turnover"], 1.0)
 
     def test_fast_period_backtest_drift_threshold_does_not_keep_dropped_holding(self) -> None:
+        """函数说明：验证 test_fast_period_backtest_drift_threshold_does_not_keep_dropped_holding 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29", "2024-03-01", "2024-03-29", "2024-04-01"])
         signal_dates = dates[[0, 2, 4]]
         instruments = ["A", "B", "C"]
@@ -355,6 +370,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertEqual(latest["instrument"].tolist(), ["B", "C"])
 
     def test_period_returns_uses_available_prices_when_boundaries_are_missing(self) -> None:
+        """函数说明：验证 test_period_returns_uses_available_prices_when_boundaries_are_missing 覆盖的行为场景。"""
         close = pd.DataFrame(
             {"A": [10.0, 12.0]},
             index=pd.to_datetime(["2024-01-03", "2024-01-05"]),
@@ -370,6 +386,7 @@ class FastMonthlyBacktestTests(unittest.TestCase):
         self.assertAlmostEqual(float(returns.loc["A"]), 0.2)
 
     def test_period_returns_empty_when_no_valid_price_window_exists(self) -> None:
+        """函数说明：验证 test_period_returns_empty_when_no_valid_price_window_exists 覆盖的行为场景。"""
         close = pd.DataFrame(
             {"A": [10.0]},
             index=pd.to_datetime(["2024-01-03"]),

@@ -1,3 +1,5 @@
+"""模块说明：评估参数质量并选择稳定的策略参数。"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -34,6 +36,7 @@ METRIC_DEFAULTS = {
 
 @dataclass
 class ParameterQualityReport:
+    """类说明：封装 ParameterQualityReport 相关数据和行为。"""
     is_acceptable: bool
     issues: list[str]
     windows: int
@@ -53,11 +56,13 @@ class ParameterQualityReport:
     max_annual_trade_cost_ratio: float
 
     def to_dict(self) -> dict[str, Any]:
+        """函数说明：处理 to_dict 主要逻辑。"""
         return asdict(self)
 
 
 @dataclass
 class BacktestQualityReport:
+    """类说明：封装 BacktestQualityReport 相关数据和行为。"""
     is_acceptable: bool
     issues: list[str]
     annual_return: float
@@ -67,6 +72,7 @@ class BacktestQualityReport:
     max_backtest_drawdown_limit: float
 
     def to_dict(self) -> dict[str, Any]:
+        """函数说明：处理 to_dict 主要逻辑。"""
         return asdict(self)
 
 
@@ -74,6 +80,7 @@ def summarize_parameter_validation(
     validation: pd.DataFrame,
     param_columns: Iterable[str] | None = None,
 ) -> pd.DataFrame:
+    """函数说明：汇总 summarize_parameter_validation 主要逻辑。"""
     param_columns = _parameter_columns(validation, param_columns)
     if validation.empty:
         return pd.DataFrame(columns=[*param_columns, "auto_score"])
@@ -136,6 +143,7 @@ def select_stable_params(
     param_columns: Iterable[str] | None = None,
     strict: bool = False,
 ) -> dict[str, Any]:
+    """函数说明：选择 select_stable_params 主要逻辑。"""
     param_columns = _parameter_columns(summary, param_columns)
     if summary.empty:
         raise ValueError("Cannot select parameters from an empty validation summary.")
@@ -147,6 +155,7 @@ def select_stable_params(
 
 
 def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None = None) -> ParameterQualityReport:
+    """函数说明：评估 assess_parameter_quality 主要逻辑。"""
     cfg = quality_config or {}
     min_windows = int(cfg.get("min_validation_windows", 3))
     min_positive = float(cfg.get("min_positive_return_rate", 0.5))
@@ -230,6 +239,7 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
 
 
 def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None = None) -> BacktestQualityReport:
+    """函数说明：评估 assess_backtest_quality 主要逻辑。"""
     cfg = quality_config or {}
     min_return = float(cfg.get("min_backtest_annual_return", cfg.get("target_annual_return", 0.20)))
     max_drawdown = float(cfg.get("max_backtest_drawdown_limit", -0.20))
@@ -267,6 +277,7 @@ def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None
 
 
 def apply_strategy_params(config: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：应用 apply_strategy_params 主要逻辑。"""
     selected = deepcopy(config)
     selected.setdefault("strategy", {})
     for key, value in params.items():
@@ -276,6 +287,7 @@ def apply_strategy_params(config: dict[str, Any], params: dict[str, Any]) -> dic
 
 
 def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None, fallback: bool = True) -> pd.DataFrame:
+    """函数说明：处理 target_filtered_summary 的内部辅助逻辑。"""
     cfg = quality_config or {}
     if summary.empty:
         return summary
@@ -300,6 +312,7 @@ def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None,
 
 
 def _parameter_columns(frame: pd.DataFrame, param_columns: Iterable[str] | None) -> list[str]:
+    """函数说明：处理 parameter_columns 的内部辅助逻辑。"""
     if param_columns is not None:
         return list(param_columns)
     inferred = [column for column in OPTIMIZABLE_PARAM_COLUMNS if column in frame.columns]
@@ -307,6 +320,7 @@ def _parameter_columns(frame: pd.DataFrame, param_columns: Iterable[str] | None)
 
 
 def _python_scalar(value: Any) -> Any:
+    """函数说明：处理 python_scalar 的内部辅助逻辑。"""
     if pd.isna(value):
         return None
     if hasattr(value, "item"):
@@ -315,6 +329,7 @@ def _python_scalar(value: Any) -> Any:
 
 
 def _number(value: Any, default: float) -> float:
+    """函数说明：处理 number 的内部辅助逻辑。"""
     parsed = pd.to_numeric(value, errors="coerce")
     if pd.isna(parsed):
         return default

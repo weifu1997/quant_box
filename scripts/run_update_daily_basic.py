@@ -1,3 +1,5 @@
+"""模块说明：提供 run_update_daily_basic 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Fetch Tushare daily_basic market-cap data into a parquet cache.")
     parser.add_argument("--start-date", default=config["data"].get("history_start_date", config["data"]["start_date"]))

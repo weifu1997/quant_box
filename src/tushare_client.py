@@ -1,3 +1,5 @@
+"""模块说明：封装 Tushare HTTP API 请求和返回数据解析。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -60,6 +62,7 @@ MAINBOARD_PREFIXES = ("000", "001", "002", "003", "600", "601", "603", "605")
 
 
 def _format_tushare_date(value: str | datetime | pd.Timestamp | None) -> str | None:
+    """函数说明：处理 format_tushare_date 的内部辅助逻辑。"""
     if value is None:
         return None
     ts = pd.Timestamp(value)
@@ -67,6 +70,7 @@ def _format_tushare_date(value: str | datetime | pd.Timestamp | None) -> str | N
 
 
 def _parse_tushare_dates(series: pd.Series) -> pd.Series:
+    """函数说明：解析 parse_tushare_dates 的内部辅助逻辑。"""
     text = series.astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
     compact = text.str.replace("-", "", regex=False).str.replace("/", "", regex=False)
     yyyymmdd = compact.str.fullmatch(r"\d{8}")
@@ -79,16 +83,19 @@ def _parse_tushare_dates(series: pd.Series) -> pd.Series:
 
 
 def _normalize_symbol(value: object) -> str:
+    """函数说明：规范化 normalize_symbol 的内部辅助逻辑。"""
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
 
 
 def _normalize_symbol_series(series: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_symbol_series 的内部辅助逻辑。"""
     return series.astype("string").str.strip().str.upper()
 
 
 def _unique_normalized_symbols(values: Iterable[object]) -> list[str]:
+    """函数说明：处理 unique_normalized_symbols 的内部辅助逻辑。"""
     symbols: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -100,6 +107,7 @@ def _unique_normalized_symbols(values: Iterable[object]) -> list[str]:
 
 
 def _parse_tushare_frame(data: dict) -> pd.DataFrame:
+    """函数说明：解析 parse_tushare_frame 的内部辅助逻辑。"""
     payload = data.get("data", data)
     fields = payload.get("fields")
     items = payload.get("items")
@@ -110,12 +118,14 @@ def _parse_tushare_frame(data: dict) -> pd.DataFrame:
 
 @dataclass
 class TushareHttpClient:
+    """类说明：封装 TushareHttpClient 相关数据和行为。"""
     http_url: str
     token: str | None = None
     timeout: int = 30
 
     @classmethod
     def from_config(cls, config: dict | None = None) -> "TushareHttpClient":
+        """函数说明：处理 from_config 主要逻辑。"""
         cfg = config or load_config()
         ts_cfg = cfg.get("tushare", {})
         return cls(
@@ -125,6 +135,7 @@ class TushareHttpClient:
         )
 
     def call(self, api_name: str, params: dict | None = None, fields: Iterable[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         if not self.http_url or "your-proxy-server" in self.http_url:
             raise RuntimeError("Please configure tushare.http_url in config/settings.yaml first.")
 
@@ -171,6 +182,7 @@ class TushareHttpClient:
         params: dict | None = None,
         fields: Iterable[str] | str | None = None,
     ) -> dict:
+        """函数说明：处理 redacted_request_preview 主要逻辑。"""
         if isinstance(fields, str):
             field_value = fields
         elif fields is None:
@@ -188,10 +200,12 @@ class TushareHttpClient:
 
 
 def _is_tushare_connection_error(exc: Exception) -> bool:
+    """函数说明：判断 is_tushare_connection_error 是否成立。"""
     return "Failed to connect to tushare HTTP proxy" in str(exc)
 
 
 def _retry_wait_seconds(attempt: int, retry_max_wait: float | None = None) -> float:
+    """函数说明：处理 retry_wait_seconds 的内部辅助逻辑。"""
     wait_seconds = 2 ** (attempt - 1) + random.uniform(0, 1)
     if retry_max_wait is None:
         return wait_seconds
@@ -203,6 +217,7 @@ def _date_windows(
     end_date: str | datetime,
     window_days: int | None,
 ) -> Iterable[tuple[str, str]]:
+    """函数说明：处理 date_windows 的内部辅助逻辑。"""
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
     if window_days is None or window_days <= 0 or start > end:
@@ -218,6 +233,7 @@ def _date_windows(
 
 
 def describe_endpoint(url: str) -> str:
+    """函数说明：处理 describe_endpoint 主要逻辑。"""
     parsed = urlparse(url)
     if not parsed.scheme or not parsed.netloc:
         return "<invalid-url>"
@@ -226,4 +242,5 @@ def describe_endpoint(url: str) -> str:
 
 
 def _default_port(scheme: str) -> int:
+    """函数说明：处理 default_port 的内部辅助逻辑。"""
     return 443 if scheme == "https" else 80

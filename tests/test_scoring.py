@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_scoring 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import json
@@ -13,7 +15,9 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class ScoringTests(unittest.TestCase):
+    """类说明：组织 ScoringTests 测试用例。"""
     def test_build_strategy_scores_uses_configured_min_cross_section_obs(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_uses_configured_min_cross_section_obs 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-01-05")
         config = {"strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2}}
 
@@ -25,6 +29,7 @@ class ScoringTests(unittest.TestCase):
         _assert_scores_have_cross_sectional_dispersion(self, scores)
 
     def test_build_strategy_scores_uses_dynamic_ic_weights(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_uses_dynamic_ic_weights 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
             "strategy": {"factor_group": "ic_weighted", "min_cross_section_obs": 2},
@@ -40,6 +45,7 @@ class ScoringTests(unittest.TestCase):
         _assert_scores_have_cross_sectional_dispersion(self, scores)
 
     def test_build_strategy_scores_uses_dynamic_ic_selector(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_uses_dynamic_ic_selector 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
             "strategy": {"factor_group": "dynamic_ic_selector", "min_cross_section_obs": 2},
@@ -63,6 +69,7 @@ class ScoringTests(unittest.TestCase):
         _assert_scores_have_cross_sectional_dispersion(self, scores)
 
     def test_dynamic_ic_selector_uses_configured_top_k_weights(self) -> None:
+        """函数说明：验证 test_dynamic_ic_selector_uses_configured_top_k_weights 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
             names=["datetime", "instrument"],
@@ -80,6 +87,7 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(float(latest["F1"]), float(latest["F2"]))
 
     def test_dynamic_ic_selector_falls_back_when_top_scores_are_negative(self) -> None:
+        """函数说明：验证 test_dynamic_ic_selector_falls_back_when_top_scores_are_negative 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
             names=["datetime", "instrument"],
@@ -99,6 +107,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(latest.to_dict(), {"F2": 1.0})
 
     def test_latest_dynamic_ic_selector_weights_uses_recent_history_only(self) -> None:
+        """函数说明：验证 test_latest_dynamic_ic_selector_weights_uses_recent_history_only 覆盖的行为场景。"""
         dates = pd.date_range("2024-01-01", periods=10, freq="D")
         index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": range(len(index))}, index=index)
@@ -106,6 +115,7 @@ class ScoringTests(unittest.TestCase):
         captured_dates: list[pd.Timestamp] = []
 
         def fake_rolling_ic(factor_history: pd.DataFrame, *_args, **_kwargs) -> pd.DataFrame:
+            """函数说明：处理 fake_rolling_ic 主要逻辑。"""
             captured_dates.extend(pd.to_datetime(factor_history.index.get_level_values("datetime")).unique())
             return pd.DataFrame({"F1": [0.1]}, index=[dates[-1]])
 
@@ -126,6 +136,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(set(captured_dates), set(dates[-4:]))
 
     def test_build_strategy_scores_excludes_low_liquidity_bucket(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_excludes_low_liquidity_bucket 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
             "strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2},
@@ -138,6 +149,7 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(int(scores.notna().sum()), 0)
 
     def test_build_strategy_scores_liquidity_filter_matches_price_columns_case_insensitively(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_liquidity_filter_matches_price_columns_case_insensitively 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
         index = pd.MultiIndex.from_product(
             [[dates[-1]], ["000001.SZ", "600519.SH"]],
@@ -173,6 +185,7 @@ class ScoringTests(unittest.TestCase):
         self.assertFalse(pd.isna(daily.loc["600519.SH"]))
 
     def test_build_strategy_scores_liquidity_filter_uses_last_intraday_amount_per_date(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_liquidity_filter_uses_last_intraday_amount_per_date 覆盖的行为场景。"""
         price_dates = pd.to_datetime(["2024-01-01 15:00", "2024-01-02 09:30", "2024-01-02 15:00"])
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B"]],
@@ -208,6 +221,7 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(pd.isna(daily.loc["B"]))
 
     def test_build_strategy_scores_excludes_high_liquidity_bucket(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_excludes_high_liquidity_bucket 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         config = {
             "strategy": {"factor_group": "factor:LOW0", "min_cross_section_obs": 2},
@@ -220,6 +234,7 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(int(scores.notna().sum()), 0)
 
     def test_build_strategy_scores_warns_when_liquidity_filter_removes_all_scores(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_warns_when_liquidity_filter_removes_all_scores 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0, 2.0]}, index=index)
@@ -247,6 +262,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scores.attrs["liquidity_filter"], {"rows_before": 2, "rows_after": 0, "rows_removed": 2})
 
     def test_build_strategy_scores_applies_regime_score_blend_to_real_data(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_applies_regime_score_blend_to_real_data 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         dates = pd.to_datetime(market.factors.index.get_level_values("datetime")).normalize().unique()
         config = {
@@ -266,6 +282,7 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
 
     def test_build_strategy_scores_applies_regime_score_filter_to_real_data(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_applies_regime_score_filter_to_real_data 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-04-30")
         dates = pd.to_datetime(market.factors.index.get_level_values("datetime")).normalize().unique()
         config = {
@@ -290,6 +307,7 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(scores.attrs["regime_score_filter"]["rows_removed"], 0)
 
     def test_build_strategy_scores_applies_regime_score_blend(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_applies_regime_score_blend 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [2.0, 1.0], "STD20": [10.0, 1.0]}, index=index)
@@ -311,6 +329,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scores.attrs["regime_score_blend"]["dates_blended"], 1)
 
     def test_build_strategy_scores_applies_regime_score_filter(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_applies_regime_score_filter 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_product([[date], ["A", "B", "C"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [3.0, 2.0, 1.0], "ROC20": [-0.5, 0.1, 0.5]}, index=index)
@@ -339,6 +358,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scores.attrs["regime_score_filter"]["rows_removed"], 1)
 
     def test_build_latest_strategy_scores_applies_regime_score_blend(self) -> None:
+        """函数说明：验证 test_build_latest_strategy_scores_applies_regime_score_blend 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [2.0, 1.0], "STD20": [10.0, 1.0]}, index=index)
@@ -359,6 +379,7 @@ class ScoringTests(unittest.TestCase):
         self.assertGreater(daily.loc["B"], daily.loc["A"])
 
     def test_build_strategy_scores_passes_ic_stability_config(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_passes_ic_stability_config 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
             names=["datetime", "instrument"],
@@ -395,6 +416,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(kwargs["max_weight_turnover"], 0.5)
 
     def test_build_strategy_scores_falls_back_to_close_price_file(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_falls_back_to_close_price_file 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             close_path = tmp_path / "close.parquet"
@@ -411,6 +433,7 @@ class ScoringTests(unittest.TestCase):
             }
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 return Path(value)
 
             with patch("src.scoring.resolve_path", side_effect=fake_resolve_path), patch(
@@ -425,6 +448,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scores.name, "score")
 
     def test_build_strategy_scores_falls_back_to_adjusted_close_price_file(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_falls_back_to_adjusted_close_price_file 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             close_path = tmp_path / "close_adjusted.parquet"
@@ -441,6 +465,7 @@ class ScoringTests(unittest.TestCase):
             }
 
             def fake_resolve_path(value: str | Path) -> Path:
+                """函数说明：处理 fake_resolve_path 主要逻辑。"""
                 return Path(value)
 
             with patch("src.scoring.resolve_path", side_effect=fake_resolve_path), patch(
@@ -455,6 +480,38 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(scores.name, "score")
 
     def test_build_strategy_scores_reuses_matching_weight_cache(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_reuses_matching_weight_cache 覆盖的行为场景。"""
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            cache_path = tmp_path / "weights.parquet"
+            index = pd.MultiIndex.from_product(
+                [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+                names=["datetime", "instrument"],
+            )
+            factors = pd.DataFrame({"F1": range(5)}, index=index)
+            prices = pd.DataFrame({"A": [10.0], "B": [10.0], "C": [10.0], "D": [10.0], "E": [10.0]}, index=[pd.Timestamp("2024-01-02")])
+            config = {
+                "strategy": {"factor_group": "ic_weighted"},
+                "ic": {
+                    "weights_cache_file": str(cache_path),
+                    "top_k": 1,
+                    "min_abs_ic": 0.0,
+                    "min_periods": 1,
+                    "corr_threshold": 0.7,
+                },
+            }
+
+            with patch("src.scoring.calculate_rolling_ic", return_value=pd.DataFrame()), patch(
+                "src.scoring.make_rolling_ic_weights",
+                return_value={pd.Timestamp("2024-01-02"): pd.Series({"F1": 1.0})},
+            ) as make_weights:
+                build_strategy_scores(factors, config, price_df=prices)
+                build_strategy_scores(factors, config, price_df=prices)
+
+        make_weights.assert_called_once()
+
+    def test_build_strategy_scores_ignores_legacy_pickle_weight_cache(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_ignores_legacy_pickle_weight_cache 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             cache_path = tmp_path / "weights.pkl"
@@ -482,12 +539,13 @@ class ScoringTests(unittest.TestCase):
                 build_strategy_scores(factors, config, price_df=prices)
                 build_strategy_scores(factors, config, price_df=prices)
 
-        make_weights.assert_called_once()
+        self.assertEqual(make_weights.call_count, 2)
 
     def test_build_strategy_scores_invalidates_legacy_weight_cache_without_version_source(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_invalidates_legacy_weight_cache_without_version_source 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            cache_path = tmp_path / "weights.pkl"
+            cache_path = tmp_path / "weights.parquet"
             meta_path = cache_path.with_name(f"{cache_path.name}.meta.json")
             index = pd.MultiIndex.from_product(
                 [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
@@ -520,9 +578,10 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(make_weights.call_count, 2)
 
     def test_build_strategy_scores_invalidates_weight_cache_when_params_change(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_invalidates_weight_cache_when_params_change 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            cache_path = tmp_path / "weights.pkl"
+            cache_path = tmp_path / "weights.parquet"
             index = pd.MultiIndex.from_product(
                 [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
                 names=["datetime", "instrument"],
@@ -554,9 +613,10 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(make_weights.call_count, 2)
 
     def test_build_strategy_scores_invalidates_weight_cache_when_ic_label_config_changes(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_invalidates_weight_cache_when_ic_label_config_changes 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            cache_path = tmp_path / "weights.pkl"
+            cache_path = tmp_path / "weights.parquet"
             index = pd.MultiIndex.from_product(
                 [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
                 names=["datetime", "instrument"],
@@ -591,9 +651,10 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(make_weights.call_count, 2)
 
     def test_build_strategy_scores_invalidates_weight_cache_when_factor_values_change(self) -> None:
+        """函数说明：验证 test_build_strategy_scores_invalidates_weight_cache_when_factor_values_change 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            cache_path = tmp_path / "weights.pkl"
+            cache_path = tmp_path / "weights.parquet"
             index = pd.MultiIndex.from_product(
                 [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
                 names=["datetime", "instrument"],
@@ -622,6 +683,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(make_weights.call_count, 2)
 
     def test_build_latest_strategy_scores_uses_target_date_only_for_output(self) -> None:
+        """函数说明：验证 test_build_latest_strategy_scores_uses_target_date_only_for_output 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
         factors = pd.DataFrame(
@@ -661,6 +723,7 @@ class ScoringTests(unittest.TestCase):
         rolling_ic.assert_not_called()
 
     def test_build_latest_strategy_scores_passes_ic_config_to_factor_ic(self) -> None:
+        """函数说明：验证 test_build_latest_strategy_scores_passes_ic_config_to_factor_ic 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
         index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
         factors = pd.DataFrame(
@@ -706,6 +769,7 @@ class ScoringTests(unittest.TestCase):
 
 
 def _assert_scores_have_cross_sectional_dispersion(test: unittest.TestCase, scores: pd.Series) -> None:
+    """函数说明：处理 assert_scores_have_cross_sectional_dispersion 的内部辅助逻辑。"""
     clean = scores.dropna()
     test.assertGreater(float(clean.std()), 0.0)
     for date in clean.index.get_level_values("datetime").unique():

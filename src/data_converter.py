@@ -1,3 +1,5 @@
+"""模块说明：将原始行情和基础数据转换为 Qlib 风格面板。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,6 +20,7 @@ def convert_to_qlib_format(
     raw_dir: str | Path | None = None,
     qlib_dir: str | Path | None = None,
 ) -> dict[str, int | Path]:
+    """函数说明：转换 convert_to_qlib_format 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     source_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
@@ -134,6 +137,7 @@ def convert_to_qlib_format(
 
 
 def _prepare_feature_frame(df: pd.DataFrame, adjusted: bool) -> pd.DataFrame:
+    """函数说明：准备 prepare_feature_frame 的内部辅助逻辑。"""
     feature_df = df.rename(columns={"trade_date": "date", "vol": "volume"}).copy()
     feature_df = _sanitize_market_values(feature_df)
     feature_df["vwap"] = np.where(
@@ -147,6 +151,7 @@ def _prepare_feature_frame(df: pd.DataFrame, adjusted: bool) -> pd.DataFrame:
 
 
 def _sanitize_market_values(feature_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 sanitize_market_values 的内部辅助逻辑。"""
     sanitized = feature_df.copy()
     for col in ["open", "high", "low", "close", "volume", "amount"]:
         if col not in sanitized.columns:
@@ -157,6 +162,7 @@ def _sanitize_market_values(feature_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_tradable_codes(path_value: str | Path) -> set[str]:
+    """函数说明：加载 load_tradable_codes 的内部辅助逻辑。"""
     path = resolve_path(path_value)
     df = pd.read_csv(path)
     col = next((name for name in ["ts_code", "instrument", "code", "con_code"] if name in df.columns), None)
@@ -171,12 +177,14 @@ def _load_tradable_codes(path_value: str | Path) -> set[str]:
 
 
 def _normalize_symbol(value: object) -> str:
+    """函数说明：规范化 normalize_symbol 的内部辅助逻辑。"""
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
 
 
 def _read_calendar_dates(path: Path) -> list[str]:
+    """函数说明：读取 read_calendar_dates 的内部辅助逻辑。"""
     frame = pd.read_csv(path, header=None)
     if frame.empty:
         return []
@@ -202,21 +210,25 @@ def _read_calendar_dates(path: Path) -> list[str]:
 
 
 def _open_day_mask(series: pd.Series) -> pd.Series:
+    """函数说明：处理 open_day_mask 的内部辅助逻辑。"""
     text = series.astype("string").str.strip().str.lower()
     return text.isin({"1", "1.0", "true", "t", "yes", "y", "open"})
 
 
 def _close_panel(feature_df: pd.DataFrame, code: str) -> pd.Series:
+    """函数说明：处理 close_panel 的内部辅助逻辑。"""
     return feature_df.set_index("date")["close"].rename(code.lower())
 
 
 def _ohlcv_panel(feature_df: pd.DataFrame, code: str) -> pd.DataFrame:
+    """函数说明：处理 ohlcv_panel 的内部辅助逻辑。"""
     panel = feature_df.set_index("date")[PANEL_COLUMNS].copy()
     panel.columns = pd.MultiIndex.from_product([panel.columns, [code.lower()]], names=["field", "instrument"])
     return panel
 
 
 def _apply_adjustment(feature_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：应用 apply_adjustment 的内部辅助逻辑。"""
     if "adj_factor" not in feature_df.columns or feature_df["adj_factor"].dropna().empty:
         return feature_df
 
@@ -235,15 +247,18 @@ def _apply_adjustment(feature_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _instrument_from_filename(path: Path) -> str:
+    """函数说明：处理 instrument_from_filename 的内部辅助逻辑。"""
     return path.stem.upper()
 
 
 def _write_instruments(path: Path, instruments: list[tuple[str, str, str]]) -> None:
+    """函数说明：写入 write_instruments 的内部辅助逻辑。"""
     rows = [f"{code.lower()}\t{start}\t{end}" for code, start, end in instruments]
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
 def _remove_price_outputs(prices_dir: Path) -> None:
+    """函数说明：处理 remove_price_outputs 的内部辅助逻辑。"""
     for name in ["close.parquet", "ohlcv.parquet", "close_adjusted.parquet", "ohlcv_adjusted.parquet"]:
         path = prices_dir / name
         if path.exists():
@@ -257,6 +272,7 @@ def _write_qlib_bin_features(
     calendar_index: dict[str, int],
     missing_value: float,
 ) -> None:
+    """函数说明：写入 write_qlib_bin_features 的内部辅助逻辑。"""
     indexed = feature_df.copy()
     indexed["date"] = pd.to_datetime(indexed["date"]).dt.strftime("%Y-%m-%d")
     indexed = indexed.set_index("date").sort_index()

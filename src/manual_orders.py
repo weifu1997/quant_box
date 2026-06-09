@@ -1,3 +1,5 @@
+"""模块说明：根据目标信号和账户状态生成手工交易指令。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
@@ -15,6 +17,7 @@ from src.market_regime import defensive_exposure_for_date
 
 @dataclass
 class AccountState:
+    """类说明：封装 AccountState 相关数据和行为。"""
     total_asset: float
     cash: float
     max_position_pct: float | None
@@ -25,10 +28,12 @@ class AccountState:
     holdings_loaded: bool
 
     def to_dict(self) -> dict[str, Any]:
+        """函数说明：处理 to_dict 主要逻辑。"""
         return asdict(self)
 
 
 def load_account_state(config: dict | None = None) -> AccountState:
+    """函数说明：加载 load_account_state 主要逻辑。"""
     cfg = config or load_config()
     account_cfg = dict(cfg.get("account", {}))
     account_path = resolve_path(account_cfg.get("file", "config/account.yaml"))
@@ -50,6 +55,7 @@ def load_account_state(config: dict | None = None) -> AccountState:
 
 
 def load_current_holdings(config: dict | None = None) -> pd.DataFrame:
+    """函数说明：加载 load_current_holdings 主要逻辑。"""
     cfg = config or load_config()
     account_cfg = cfg.get("account", {})
     holdings_path = resolve_path(account_cfg.get("current_holdings_file", "config/current_holdings.csv"))
@@ -81,6 +87,7 @@ def generate_manual_orders(
     is_executable: bool = True,
     block_reasons: list[str] | None = None,
 ) -> pd.DataFrame:
+    """函数说明：生成 generate_manual_orders 主要逻辑。"""
     cfg = config or load_config()
     account = account or load_account_state(cfg)
     current = current_holdings if current_holdings is not None else load_current_holdings(cfg)
@@ -178,6 +185,7 @@ def generate_manual_orders(
 
 
 def save_manual_orders(orders: pd.DataFrame, signal_date: str, out_dir: str | Path, executable: bool = True) -> Path:
+    """函数说明：保存 save_manual_orders 主要逻辑。"""
     output_dir = resolve_path(out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = "manual_orders" if executable else "manual_orders_candidate"
@@ -192,6 +200,7 @@ def generate_order_confirmation_template(
     intended_trade_date: str | None,
     block_reasons: list[str] | None = None,
 ) -> pd.DataFrame:
+    """函数说明：生成 generate_order_confirmation_template 主要逻辑。"""
     columns = [
         "signal_date",
         "intended_trade_date",
@@ -232,6 +241,7 @@ def generate_fill_feedback_template(
     signal_date: str,
     intended_trade_date: str | None,
 ) -> pd.DataFrame:
+    """函数说明：生成 generate_fill_feedback_template 主要逻辑。"""
     columns = [
         "signal_date",
         "intended_trade_date",
@@ -279,6 +289,7 @@ def save_execution_templates(
     config: dict | None = None,
     executable: bool = True,
 ) -> dict[str, str]:
+    """函数说明：保存 save_execution_templates 主要逻辑。"""
     cfg = config or load_config()
     manual_cfg = cfg.get("manual_orders", {})
     output_root = resolve_path(cfg.get("outputs", {}).get("dir", "outputs"))
@@ -297,6 +308,7 @@ def save_execution_templates(
 
 
 def apply_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：应用 apply_fill_feedback 主要逻辑。"""
     issues = validate_fill_feedback(current_holdings, fill_feedback)
     if issues:
         raise ValueError("Invalid fill feedback: " + ",".join(issues[:10]))
@@ -327,6 +339,7 @@ def apply_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFr
 
 
 def validate_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.DataFrame) -> list[str]:
+    """函数说明：校验 validate_fill_feedback 主要逻辑。"""
     current_issues = _current_holdings_feedback_issues(current_holdings)
     if fill_feedback.empty:
         return current_issues
@@ -388,6 +401,7 @@ def validate_fill_feedback(current_holdings: pd.DataFrame, fill_feedback: pd.Dat
 
 
 def save_updated_holdings(holdings: pd.DataFrame, config: dict | None = None) -> Path:
+    """函数说明：保存 save_updated_holdings 主要逻辑。"""
     cfg = config or load_config()
     holdings_path = resolve_path(cfg.get("account", {}).get("current_holdings_file", "config/current_holdings.csv"))
     holdings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -396,12 +410,14 @@ def save_updated_holdings(holdings: pd.DataFrame, config: dict | None = None) ->
 
 
 def _optional_float(value: object) -> float | None:
+    """函数说明：处理 optional_float 的内部辅助逻辑。"""
     if value is None:
         return None
     return float(value)
 
 
 def _current_share_map(current_holdings: pd.DataFrame) -> dict[str, float | None]:
+    """函数说明：处理 current_share_map 的内部辅助逻辑。"""
     if current_holdings.empty:
         return {}
     result: dict[str, float | None] = {}
@@ -415,6 +431,7 @@ def _current_share_map(current_holdings: pd.DataFrame) -> dict[str, float | None
 
 
 def _current_holdings_feedback_issues(current_holdings: pd.DataFrame) -> list[str]:
+    """函数说明：处理 current_holdings_feedback_issues 的内部辅助逻辑。"""
     if current_holdings.empty:
         return []
     missing_columns = [column for column in ("instrument", "shares") if column not in current_holdings.columns]
@@ -441,6 +458,7 @@ def _current_holdings_feedback_issues(current_holdings: pd.DataFrame) -> list[st
 
 
 def _signal_action_map(signal_df: pd.DataFrame) -> dict[str, str]:
+    """函数说明：处理 signal_action_map 的内部辅助逻辑。"""
     if signal_df.empty or "instrument" not in signal_df.columns or "action" not in signal_df.columns:
         return {}
     result: dict[str, str] = {}
@@ -452,6 +470,7 @@ def _signal_action_map(signal_df: pd.DataFrame) -> dict[str, str]:
 
 
 def _target_weight(target_holdings: list[str], account: AccountState, config: dict, exposure_scale: float = 1.0) -> float:
+    """函数说明：处理 target_weight 的内部辅助逻辑。"""
     if not target_holdings:
         return 0.0
     weight = 1.0 / len(target_holdings) * max(float(exposure_scale), 0.0)
@@ -464,6 +483,7 @@ def _target_weight(target_holdings: list[str], account: AccountState, config: di
 
 
 def _price_row(price_df: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Series:
+    """函数说明：处理 price_row 的内部辅助逻辑。"""
     if price_df.empty:
         return pd.Series(dtype=float)
     field = str(field).strip().lower()
@@ -493,6 +513,7 @@ def _price_row(price_df: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Ser
 
 
 def _last_matching_price_position(index: pd.Index, matches: pd.Series | pd.Index | list[bool]) -> int:
+    """函数说明：处理 last_matching_price_position 的内部辅助逻辑。"""
     positions = [pos for pos, is_match in enumerate(matches) if bool(is_match)]
     if not positions:
         raise ValueError("No matching price row.")
@@ -501,6 +522,7 @@ def _last_matching_price_position(index: pd.Index, matches: pd.Series | pd.Index
 
 
 def _reference_price(instrument: str, close: pd.Series) -> float | None:
+    """函数说明：处理 reference_price 的内部辅助逻辑。"""
     if instrument not in close.index or pd.isna(close.loc[instrument]):
         return None
     value = float(close.loc[instrument])
@@ -508,6 +530,7 @@ def _reference_price(instrument: str, close: pd.Series) -> float | None:
 
 
 def _target_shares(instrument: str, target_value: float, reference_price: float | None, account: AccountState) -> int | None:
+    """函数说明：处理 target_shares 的内部辅助逻辑。"""
     if reference_price is None or reference_price <= 0:
         return None
     lot_size = account.star_market_lot_size if instrument.lower().startswith(("688", "689")) else account.lot_size
@@ -515,6 +538,7 @@ def _target_shares(instrument: str, target_value: float, reference_price: float 
 
 
 def _target_share_plan(target_holdings: list[str], close: pd.Series, account: AccountState, target_weight: float, config: dict) -> dict[str, int]:
+    """函数说明：处理 target_share_plan 的内部辅助逻辑。"""
     if not target_holdings or target_weight <= 0:
         return {instrument: 0 for instrument in target_holdings}
     plan: dict[str, int] = {}
@@ -549,6 +573,7 @@ def _target_share_plan(target_holdings: list[str], close: pd.Series, account: Ac
 
 
 def _plan_value(plan: dict[str, int], close: pd.Series) -> float:
+    """函数说明：处理 plan_value 的内部辅助逻辑。"""
     total = 0.0
     for instrument, shares in plan.items():
         price = _reference_price(instrument, close)
@@ -558,10 +583,12 @@ def _plan_value(plan: dict[str, int], close: pd.Series) -> float:
 
 
 def _lot_size(instrument: str, account: AccountState) -> int:
+    """函数说明：处理 lot_size 的内部辅助逻辑。"""
     return account.star_market_lot_size if instrument.lower().startswith(("688", "689")) else account.lot_size
 
 
 def _order_shares(current_shares: float | None, target_shares: int | None, action: str) -> float | None:
+    """函数说明：处理 order_shares 的内部辅助逻辑。"""
     if target_shares is None:
         return None
     if current_shares is None:
@@ -578,6 +605,7 @@ def _order_note(
     account_issues: list[str] | None = None,
     row_actionable: bool = True,
 ) -> str:
+    """函数说明：处理 order_note 的内部辅助逻辑。"""
     notes: list[str] = []
     if not is_executable:
         notes.append("blocked:" + ",".join(block_reasons or ["quality_gate_failed"]))
@@ -595,6 +623,7 @@ def _order_note(
 
 
 def validate_account_inputs(account: AccountState, current_holdings: pd.DataFrame, config: dict | None = None) -> list[str]:
+    """函数说明：校验 validate_account_inputs 主要逻辑。"""
     cfg = config or {}
     issues: list[str] = []
     if account.total_asset <= 0:
@@ -612,6 +641,7 @@ def validate_account_inputs(account: AccountState, current_holdings: pd.DataFram
 
 
 def validate_current_holdings(current_holdings: pd.DataFrame, account: AccountState, config: dict | None = None) -> list[str]:
+    """函数说明：校验 validate_current_holdings 主要逻辑。"""
     if current_holdings.empty:
         return []
     issues: list[str] = []
@@ -638,6 +668,7 @@ def validate_current_holdings(current_holdings: pd.DataFrame, account: AccountSt
 
 
 def _reference_price_date(price_df: pd.DataFrame, signal_date: str, intended_trade_date: str | None) -> pd.Timestamp:
+    """函数说明：处理 reference_price_date 的内部辅助逻辑。"""
     signal_ts = pd.Timestamp(signal_date).normalize()
     if intended_trade_date:
         intended_ts = pd.Timestamp(intended_trade_date).normalize()
@@ -651,6 +682,7 @@ def _reference_from_signal_date(
     intended_trade_date: str | None,
     reference_date: pd.Timestamp,
 ) -> bool:
+    """函数说明：处理 reference_from_signal_date 的内部辅助逻辑。"""
     if not intended_trade_date:
         return False
     intended_ts = pd.Timestamp(intended_trade_date).normalize()
@@ -659,6 +691,7 @@ def _reference_from_signal_date(
 
 
 def _has_price_date(price_df: pd.DataFrame, date: pd.Timestamp) -> bool:
+    """函数说明：判断 has_price_date 是否成立。"""
     if price_df.empty:
         return False
     normalized_index = pd.DatetimeIndex(pd.to_datetime(price_df.index).normalize())
@@ -666,6 +699,7 @@ def _has_price_date(price_df: pd.DataFrame, date: pd.Timestamp) -> bool:
 
 
 def _suggested_limit_price(action: str, reference_price: float | None, config: dict) -> float | None:
+    """函数说明：处理 suggested_limit_price 的内部辅助逻辑。"""
     if reference_price is None:
         return None
     buffer = float(config.get("manual_orders", {}).get("limit_price_buffer", config.get("backtest", {}).get("slippage", 0.001)))
@@ -677,12 +711,14 @@ def _suggested_limit_price(action: str, reference_price: float | None, config: d
 
 
 def _stop_loss_price(reference_price: float | None, stop_loss_pct: object) -> float | None:
+    """函数说明：处理 stop_loss_price 的内部辅助逻辑。"""
     if reference_price is None or stop_loss_pct is None:
         return None
     return round(reference_price * (1 - abs(float(stop_loss_pct))), 4)
 
 
 def _adv_for_date(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict, window: int = 10) -> float | None:
+    """函数说明：处理 adv_for_date 的内部辅助逻辑。"""
     amount = _price_field(price_df, "amount")
     if amount.empty or instrument not in amount.columns:
         return None
@@ -696,6 +732,7 @@ def _adv_for_date(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, c
 
 
 def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
+    """函数说明：处理 price_field 的内部辅助逻辑。"""
     if price_df.empty or not isinstance(price_df.columns, pd.MultiIndex):
         return pd.DataFrame(index=price_df.index)
     fields = price_df.columns.get_level_values(0).astype(str).str.lower()
@@ -715,14 +752,17 @@ def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
 
 
 def _is_limit_up(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict) -> bool:
+    """函数说明：判断 is_limit_up 是否成立。"""
     return _limit_state(price_df, date, instrument, config, side="up")
 
 
 def _is_limit_down(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict) -> bool:
+    """函数说明：判断 is_limit_down 是否成立。"""
     return _limit_state(price_df, date, instrument, config, side="down")
 
 
 def _limit_state(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict, side: str) -> bool:
+    """函数说明：处理 limit_state 的内部辅助逻辑。"""
     current = pd.Timestamp(date).normalize()
     dates = pd.DatetimeIndex(pd.to_datetime(price_df.index).normalize()).unique().sort_values()
     prev_dates = dates[dates < current]
@@ -743,6 +783,7 @@ def _limit_state(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, co
 
 
 def _limit_threshold(instrument: str, config: dict, side: str) -> float:
+    """函数说明：处理 limit_threshold 的内部辅助逻辑。"""
     backtest_cfg = config.get("backtest", {})
     suffix = "up" if side == "up" else "down"
     lowered = instrument.lower()
@@ -756,6 +797,7 @@ def _limit_threshold(instrument: str, config: dict, side: str) -> float:
 
 
 def _limit_threshold_for_date(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str, config: dict, side: str) -> float:
+    """函数说明：处理 limit_threshold_for_date 的内部辅助逻辑。"""
     if _is_st(price_df, date, instrument):
         suffix = "up" if side == "up" else "down"
         return float(config.get("backtest", {}).get(f"st_limit_{suffix}_threshold", 0.049))
@@ -763,6 +805,7 @@ def _limit_threshold_for_date(price_df: pd.DataFrame, date: pd.Timestamp, instru
 
 
 def _is_st(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str) -> bool:
+    """函数说明：判断 is_st 是否成立。"""
     st_field = _price_row(price_df, "is_st", date)
     if instrument in st_field.index and not pd.isna(st_field.loc[instrument]):
         return bool(st_field.loc[instrument])
@@ -770,6 +813,7 @@ def _is_st(price_df: pd.DataFrame, date: pd.Timestamp, instrument: str) -> bool:
 
 
 def _cash_after_orders_estimate(orders: pd.DataFrame, account: AccountState) -> float | None:
+    """函数说明：处理 cash_after_orders_estimate 的内部辅助逻辑。"""
     if orders.empty or "order_shares" not in orders.columns or "reference_price" not in orders.columns:
         return None
     actionable = orders[orders["is_order_actionable"].astype(bool)].copy()
@@ -787,6 +831,7 @@ def _sizing_warning(
     reference_price: float | None,
     account_issues: list[str],
 ) -> str:
+    """函数说明：处理 sizing_warning 的内部辅助逻辑。"""
     warnings: list[str] = []
     if reference_from_signal_date:
         warnings.append("indicative_only")
@@ -799,10 +844,12 @@ def _sizing_warning(
 
 
 def _valid_instrument(instrument: str) -> bool:
+    """函数说明：处理 valid_instrument 的内部辅助逻辑。"""
     return bool(re.match(r"^\d{6}\.(SH|SZ|BJ)$", instrument))
 
 
 def _normalize_instruments(values: list[str]) -> list[str]:
+    """函数说明：规范化 normalize_instruments 的内部辅助逻辑。"""
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -815,6 +862,7 @@ def _normalize_instruments(values: list[str]) -> list[str]:
 
 
 def _executed_share_delta(executed_shares: object, side: object) -> float:
+    """函数说明：处理 executed_share_delta 的内部辅助逻辑。"""
     value = float(executed_shares)
     side_text = str(side).strip().upper()
     if side_text == "SELL" and value > 0:
@@ -825,6 +873,7 @@ def _executed_share_delta(executed_shares: object, side: object) -> float:
 
 
 def _select_or_blank(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """函数说明：选择 select_or_blank 的内部辅助逻辑。"""
     result = frame.copy()
     for column in columns:
         if column not in result.columns:

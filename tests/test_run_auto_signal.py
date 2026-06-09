@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_run_auto_signal 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import importlib
@@ -14,7 +16,9 @@ import pandas as pd
 
 
 class RunAutoSignalTests(unittest.TestCase):
+    """类说明：组织 RunAutoSignalTests 测试用例。"""
     def test_validation_progress_message_includes_window_and_params(self) -> None:
+        """函数说明：验证 test_validation_progress_message_includes_window_and_params 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
 
         message = module._validation_progress_message(
@@ -33,6 +37,7 @@ class RunAutoSignalTests(unittest.TestCase):
         self.assertIn("factor_group=momentum", message)
 
     def test_signal_output_date_infers_latest_factor_date_for_empty_signal(self) -> None:
+        """函数说明：验证 test_signal_output_date_infers_latest_factor_date_for_empty_signal 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         index = pd.MultiIndex.from_product(
             [[pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")], ["A"]],
@@ -45,6 +50,7 @@ class RunAutoSignalTests(unittest.TestCase):
         self.assertEqual(output_date, "2024-01-03")
 
     def test_skip_optimize_defaults_to_candidate_outputs(self) -> None:
+        """函数说明：验证 test_skip_optimize_defaults_to_candidate_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -69,6 +75,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertIn("## Execution Loop", report)
 
     def test_empty_latest_signal_uses_factor_date_for_candidate_outputs(self) -> None:
+        """函数说明：验证 test_empty_latest_signal_uses_factor_date_for_candidate_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -91,6 +98,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertEqual(status["status"], "blocked")
 
     def test_skip_optimize_uses_validated_strategy_evidence(self) -> None:
+        """函数说明：验证 test_skip_optimize_uses_validated_strategy_evidence 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -165,6 +173,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertEqual(quality["windows"], 3)
 
     def test_allow_low_quality_keeps_skip_optimize_run_as_candidate_outputs(self) -> None:
+        """函数说明：验证 test_allow_low_quality_keeps_skip_optimize_run_as_candidate_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -190,6 +199,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")
 
     def test_force_official_promotes_allowed_low_quality_run(self) -> None:
+        """函数说明：验证 test_force_official_promotes_allowed_low_quality_run 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -218,7 +228,83 @@ class RunAutoSignalTests(unittest.TestCase):
             latest_frame = pd.read_csv(latest)
             self.assertEqual(latest_frame["instrument"].tolist(), ["E"])
 
+    def test_update_partial_stage_is_not_marked_complete(self) -> None:
+        """函数说明：验证 test_update_partial_stage_is_not_marked_complete 覆盖的行为场景。"""
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            latest = root / "latest_holdings.csv"
+            latest.write_text("instrument\nOLD.SZ\n", encoding="utf-8")
+            update_result = SimpleNamespace(
+                to_status_dict=lambda: {
+                    "status": "partial",
+                    "written_symbols": 1,
+                    "failed_symbols": 0,
+                    "remaining_symbols": 2,
+                    "progress_path": str(root / "progress.json"),
+                    "last_error": "",
+                }
+            )
+            argv = [
+                "run_auto_signal.py",
+                "--skip-convert",
+                "--skip-optimize",
+                "--skip-backtest",
+                "--no-archive",
+            ]
+
+            with _patched_auto_run(module, config, factors, argv), patch.object(
+                module,
+                "update_daily_data_resumable",
+                return_value=update_result,
+            ):
+                module.main()
+
+            status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
+            update_stages = [stage for stage in status["stages"] if stage["name"] == "update_data"]
+            self.assertEqual(update_stages[-1]["state"], "partial")
+            self.assertIn("remaining=2", update_stages[-1]["message"])
+
+    def test_update_error_fails_run_without_allow_unhealthy(self) -> None:
+        """函数说明：验证 test_update_error_fails_run_without_allow_unhealthy 覆盖的行为场景。"""
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            update_result = SimpleNamespace(
+                to_status_dict=lambda: {
+                    "status": "error",
+                    "written_symbols": 0,
+                    "failed_symbols": 1,
+                    "remaining_symbols": 1,
+                    "last_error": "000001.SZ:not_written",
+                }
+            )
+            argv = [
+                "run_auto_signal.py",
+                "--skip-convert",
+                "--skip-optimize",
+                "--skip-backtest",
+                "--no-archive",
+            ]
+
+            with _patched_auto_run(module, config, factors, argv), patch.object(
+                module,
+                "update_daily_data_resumable",
+                return_value=update_result,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Data update failed"):
+                    module.main()
+
+            status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["status"], "failed")
+            update_stages = [stage for stage in status["stages"] if stage["name"] == "update_data"]
+            self.assertEqual(update_stages[-1]["state"], "error")
+            self.assertIn("000001.SZ:not_written", status["last_error"])
+
     def test_data_governance_issues_block_official_outputs_even_with_force_official(self) -> None:
+        """函数说明：验证 test_data_governance_issues_block_official_outputs_even_with_force_official 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -253,6 +339,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertIn("scripts\\run_update_point_in_time_data.py", report)
 
     def test_backtest_quality_blocks_official_outputs(self) -> None:
+        """函数说明：验证 test_backtest_quality_blocks_official_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -291,7 +378,7 @@ class RunAutoSignalTests(unittest.TestCase):
                 equity_curve=pd.Series([100000.0, 90000.0], index=pd.to_datetime(["2024-01-03", "2024-01-04"]), name="equity"),
                 holdings=pd.DataFrame(),
                 trades=pd.DataFrame(),
-                metrics={"annual_return": 0.30, "max_drawdown": -0.30, "calmar": 1.0},
+                metrics={"annual_return": 0.19, "max_drawdown": -0.30, "calmar": 1.0},
             )
 
             with _patched_auto_run(
@@ -320,8 +407,23 @@ class RunAutoSignalTests(unittest.TestCase):
             report = (root / "daily_signal_report.md").read_text(encoding="utf-8")
             self.assertIn("## Backtest Quality", report)
             self.assertIn("## Research Diagnostics", report)
+            self.assertIn("## Failure Analysis", report)
+            self.assertIn("Parameter/backtest mismatch: True", report)
+            failure = json.loads((root / "auto_failure_analysis.json").read_text(encoding="utf-8"))
+            self.assertTrue(failure["parameter_backtest_mismatch"])
+            self.assertAlmostEqual(failure["backtest_threshold_gaps"]["annual_return_gap"], -0.01)
+            self.assertEqual(failure["drawdown_summary"]["trough_date"], "2024-01-04")
+            self.assertAlmostEqual(failure["drawdown_summary"]["strategy_return_peak_to_trough"], -0.1)
+            comparison = pd.read_csv(root / "auto_validation_vs_backtest.csv")
+            self.assertIn("failure_driver", comparison.columns)
+            self.assertIn("validation_window", comparison["row_type"].tolist())
+            self.assertIn("backtest_segment", comparison["row_type"].tolist())
+            self.assertIn("max_drawdown", ",".join(comparison["failure_driver"].astype(str).tolist()))
+            yearly = pd.read_csv(root / "auto_backtest_yearly_breakdown.csv")
+            self.assertEqual(yearly["year"].tolist(), [2024])
 
     def test_no_acceptable_optimized_params_falls_back_to_current_config(self) -> None:
+        """函数说明：验证 test_no_acceptable_optimized_params_falls_back_to_current_config 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -384,6 +486,7 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertEqual(report["selected_params_status"], "no_acceptable_params")
 
     def test_promote_candidate_writes_official_signal_and_latest_holdings(self) -> None:
+        """函数说明：验证 test_promote_candidate_writes_official_signal_and_latest_holdings 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -411,6 +514,7 @@ class RunAutoSignalTests(unittest.TestCase):
 
 
 def _auto_config_and_factors(root: Path) -> tuple[dict, pd.DataFrame]:
+    """函数说明：处理 auto_config_and_factors 的内部辅助逻辑。"""
     price_path = root / "prices.parquet"
     dates = pd.to_datetime(["2024-01-03", "2024-01-04"])
     prices = pd.concat(
@@ -440,6 +544,7 @@ def _auto_config_and_factors(root: Path) -> tuple[dict, pd.DataFrame]:
 
 @contextmanager
 def _patched_auto_run(module, config: dict, factors: pd.DataFrame, argv: list[str], governance=None):
+    """函数说明：处理 patched_auto_run 的内部辅助逻辑。"""
     health = SimpleNamespace(is_healthy=True, issues=[], to_dict=lambda: {"is_healthy": True, "issues": []})
     adj_meta = SimpleNamespace(files_with_adj_factor=1, raw_file_count=1)
     governance = governance or _governance_report(ready=True, issues=[])
@@ -458,6 +563,7 @@ def _patched_auto_run(module, config: dict, factors: pd.DataFrame, argv: list[st
 
 
 def _write_health_files(root: Path) -> tuple[Path, Path]:
+    """函数说明：写入 write_health_files 的内部辅助逻辑。"""
     json_path = root / "data_health_report.json"
     csv_path = root / "data_health_report.csv"
     json_path.write_text('{"is_healthy": true, "issues": []}', encoding="utf-8")
@@ -466,6 +572,7 @@ def _write_health_files(root: Path) -> tuple[Path, Path]:
 
 
 def _governance_report(ready: bool, issues: list[str]):
+    """函数说明：处理 governance_report 的内部辅助逻辑。"""
     repair_actions = (
         [
             {
@@ -494,12 +601,14 @@ def _governance_report(ready: bool, issues: list[str]):
 
 
 def _write_governance_file(root: Path, report) -> Path:
+    """函数说明：写入 write_governance_file 的内部辅助逻辑。"""
     path = root / "data_governance_report.json"
     path.write_text(json.dumps(report.to_dict()), encoding="utf-8")
     return path
 
 
 def _write_adj_meta_file(root: Path) -> Path:
+    """函数说明：写入 write_adj_meta_file 的内部辅助逻辑。"""
     path = root / "adj_factor_meta.json"
     path.write_text('{"source": "raw_csv_adj_factor", "digest": "test"}', encoding="utf-8")
     return path

@@ -1,3 +1,5 @@
+"""模块说明：识别市场状态并应用防御择时规则。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,15 +19,18 @@ REGIME_STATES = {REGIME_BULL, REGIME_BEAR, REGIME_SIDEWAYS}
 
 
 def market_regime_enabled(config: dict[str, Any]) -> bool:
+    """函数说明：处理 market_regime_enabled 主要逻辑。"""
     return bool(config.get("market_regime", {}).get("enabled", False))
 
 
 def detect_market_regime(price_df: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
+    """函数说明：识别 detect_market_regime 主要逻辑。"""
     cfg = config.get("market_regime", {})
     return _detect_regime(price_df, config, cfg, name="market_regime")
 
 
 def detect_reporting_regime(price_df: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
+    """函数说明：识别 detect_reporting_regime 主要逻辑。"""
     base = dict(config.get("market_regime", {}))
     reporting_cfg = dict(config.get("reporting_regime", {}))
     cfg = {**base, **reporting_cfg}
@@ -34,6 +39,7 @@ def detect_reporting_regime(price_df: pd.DataFrame, config: dict[str, Any]) -> p
 
 
 def _detect_regime(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[str, Any], name: str) -> pd.Series:
+    """函数说明：识别 detect_regime 的内部辅助逻辑。"""
     benchmark = _benchmark_close(price_df, config, cfg)
     if benchmark.empty:
         return pd.Series(dtype="object", name=name)
@@ -76,6 +82,7 @@ def _detect_regime(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[str
 
 
 def regime_for_date(regimes: pd.Series, date: pd.Timestamp | str, default: str = REGIME_SIDEWAYS) -> str:
+    """函数说明：处理 regime_for_date 主要逻辑。"""
     if regimes.empty:
         return normalize_regime(default)
     target = pd.Timestamp(date).normalize()
@@ -87,6 +94,7 @@ def regime_for_date(regimes: pd.Series, date: pd.Timestamp | str, default: str =
 
 
 def regimes_for_dates(regimes: pd.Series, dates: pd.Index, default: str = REGIME_SIDEWAYS) -> pd.Series:
+    """函数说明：处理 regimes_for_dates 主要逻辑。"""
     normalized_dates = pd.DatetimeIndex(pd.to_datetime(dates).normalize())
     if regimes.empty:
         return pd.Series(default, index=normalized_dates, dtype="object")
@@ -96,11 +104,13 @@ def regimes_for_dates(regimes: pd.Series, dates: pd.Index, default: str = REGIME
 
 
 def normalize_regime(value: str | None, default: str = REGIME_SIDEWAYS) -> str:
+    """函数说明：规范化 normalize_regime 主要逻辑。"""
     state = str(value or default).strip().lower()
     return state if state in REGIME_STATES else default
 
 
 def _normalize_regime_index(regimes: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_regime_index 的内部辅助逻辑。"""
     normalized = regimes.copy()
     raw_dates = pd.DatetimeIndex(pd.to_datetime(normalized.index, errors="coerce"))
     valid_dates = ~raw_dates.isna()
@@ -116,6 +126,7 @@ def _normalize_regime_index(regimes: pd.Series) -> pd.Series:
 
 
 def defensive_exposure_schedule(regimes: pd.Series, config: dict[str, Any], dates: pd.Index | None = None) -> pd.Series:
+    """函数说明：处理 defensive_exposure_schedule 主要逻辑。"""
     cfg = config.get("defensive_timing", {})
     if not bool(cfg.get("enabled", False)):
         target_dates = pd.DatetimeIndex(pd.to_datetime(dates).normalize()) if dates is not None else regimes.index
@@ -138,6 +149,7 @@ def apply_defensive_timing_to_backtest_config(
     price_df: pd.DataFrame,
     config: dict[str, Any],
 ) -> dict[str, Any]:
+    """函数说明：应用 apply_defensive_timing_to_backtest_config 主要逻辑。"""
     result = dict(bt_config)
     if not market_regime_enabled(config) or not bool(config.get("defensive_timing", {}).get("enabled", False)):
         return result
@@ -163,6 +175,7 @@ def defensive_exposure_for_date(
     date: str | pd.Timestamp,
     default: float = 1.0,
 ) -> float:
+    """函数说明：处理 defensive_exposure_for_date 主要逻辑。"""
     if not market_regime_enabled(config) or not bool(config.get("defensive_timing", {}).get("enabled", False)):
         return float(default)
     regimes = detect_market_regime(price_df, config)
@@ -177,6 +190,7 @@ def defensive_exposure_for_date(
 
 
 def summarize_regime_performance(equity_curve: pd.Series, regimes: pd.Series, config: dict[str, Any] | None = None) -> pd.DataFrame:
+    """函数说明：汇总 summarize_regime_performance 主要逻辑。"""
     if equity_curve.empty:
         return pd.DataFrame(columns=["regime", "start", "end", "days", "total_return", "annual_return", "max_drawdown"])
     annual_days = int((config or {}).get("annual_trading_days", 252))
@@ -218,6 +232,7 @@ def summarize_regime_performance(equity_curve: pd.Series, regimes: pd.Series, co
 
 
 def aggregate_regime_performance(regime_stats: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 aggregate_regime_performance 主要逻辑。"""
     if regime_stats.empty:
         return pd.DataFrame(columns=["regime", "segments", "days", "total_return", "weighted_annual_return", "worst_drawdown"])
     rows: list[dict[str, object]] = []
@@ -241,6 +256,7 @@ def aggregate_regime_performance(regime_stats: pd.DataFrame) -> pd.DataFrame:
 
 
 def _high_volatility_mask(volatility: pd.Series, cfg: dict[str, Any]) -> pd.Series:
+    """函数说明：处理 high_volatility_mask 的内部辅助逻辑。"""
     fixed_threshold = cfg.get("high_volatility_threshold")
     if fixed_threshold is not None:
         return volatility >= float(fixed_threshold)
@@ -251,6 +267,7 @@ def _high_volatility_mask(volatility: pd.Series, cfg: dict[str, Any]) -> pd.Seri
 
 
 def _drawdown_bear_mask(benchmark: pd.Series, cfg: dict[str, Any], min_periods: int) -> pd.Series:
+    """函数说明：处理 drawdown_bear_mask 的内部辅助逻辑。"""
     threshold = cfg.get("bear_drawdown_threshold")
     if threshold is None:
         return pd.Series(False, index=benchmark.index)
@@ -267,6 +284,7 @@ def _drawdown_bear_mask(benchmark: pd.Series, cfg: dict[str, Any], min_periods: 
 
 
 def _benchmark_close(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[str, Any] | None = None) -> pd.Series:
+    """函数说明：处理 benchmark_close 的内部辅助逻辑。"""
     cfg = cfg or config.get("market_regime", {})
     benchmark_file = cfg.get("benchmark_file")
     if benchmark_file:
@@ -293,6 +311,7 @@ def _benchmark_close(price_df: pd.DataFrame, config: dict[str, Any], cfg: dict[s
 
 
 def _load_benchmark_file(path_value: str | Path) -> pd.Series:
+    """函数说明：加载 load_benchmark_file 的内部辅助逻辑。"""
     path = resolve_path(path_value)
     if not path.exists():
         return pd.Series(dtype=float)
@@ -316,10 +335,12 @@ def _load_benchmark_file(path_value: str | Path) -> pd.Series:
 
 
 def _close_frame(price_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 close_frame 的内部辅助逻辑。"""
     return _common_close_price_frame(price_df, normalize_symbols=True)
 
 
 def _load_hs300_symbols(path_value: str | Path | None) -> set[str]:
+    """函数说明：加载 load_hs300_symbols 的内部辅助逻辑。"""
     if not path_value:
         return set()
     path = resolve_path(path_value)
@@ -336,6 +357,7 @@ def _load_hs300_symbols(path_value: str | Path | None) -> set[str]:
 
 
 def _equal_weight_proxy(close: pd.DataFrame) -> pd.Series:
+    """函数说明：处理 equal_weight_proxy 的内部辅助逻辑。"""
     numeric = close.apply(pd.to_numeric, errors="coerce")
     returns = numeric.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
     proxy_returns = returns.mean(axis=1, skipna=True).fillna(0.0)
@@ -345,6 +367,7 @@ def _equal_weight_proxy(close: pd.DataFrame) -> pd.Series:
 
 
 def _match_column(columns: pd.Index, symbol: str) -> str | None:
+    """函数说明：处理 match_column 的内部辅助逻辑。"""
     target = _normalize_symbol(symbol)
     for column in columns:
         if _normalize_symbol(str(column)) == target:
@@ -353,4 +376,5 @@ def _match_column(columns: pd.Index, symbol: str) -> str | None:
 
 
 def _normalize_symbol(value: str) -> str:
+    """函数说明：规范化 normalize_symbol 的内部辅助逻辑。"""
     return str(value).strip().replace("_", ".").lower()

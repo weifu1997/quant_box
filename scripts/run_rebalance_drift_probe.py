@@ -1,3 +1,5 @@
+"""模块说明：提供 run_rebalance_drift_probe 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Run a fast approximate probe for rebalance drift thresholds.")
     parser.add_argument("--start-date", default="2024-01-01")
@@ -106,14 +109,17 @@ def main() -> None:
 
 
 def _read_selected_params(path_value: str | Path) -> dict[str, object]:
+    """函数说明：读取 read_selected_params 的内部辅助逻辑。"""
     return read_selected_params(path_value)
 
 
 def _probe_symbols(source: str, max_symbols: int) -> list[str]:
+    """函数说明：处理 probe_symbols 的内部辅助逻辑。"""
     return probe_symbols(source, max_symbols)
 
 
 def _probe_factor_columns(factor_file: str | Path, config: dict) -> list[str] | None:
+    """函数说明：处理 probe_factor_columns 的内部辅助逻辑。"""
     return probe_factor_columns(factor_file, config)
 
 
@@ -124,6 +130,7 @@ def _read_factor_subset(
     end_date: str,
     symbols: list[str],
 ) -> pd.DataFrame:
+    """函数说明：读取 read_factor_subset 的内部辅助逻辑。"""
     return read_factor_subset(factor_file, factor_columns, start_date, end_date, symbols)
 
 
@@ -134,10 +141,12 @@ def _read_price_subset(
     start_date: str,
     end_date: str,
 ) -> pd.DataFrame:
+    """函数说明：读取 read_price_subset 的内部辅助逻辑。"""
     return read_price_subset(price_file, fields, symbols, start_date, end_date)
 
 
 def _csv_floats(value: str) -> list[float]:
+    """函数说明：处理 csv_floats 的内部辅助逻辑。"""
     return [float(item.strip()) for item in str(value).split(",") if item.strip()]
 
 

@@ -314,7 +314,7 @@ data/prices/ohlcv.parquet              OHLCV 价格面板
 data/factors/alpha158.parquet          Alpha158 因子缓存
 data/factors/alpha158.parquet.meta.json 因子缓存元数据
 data/factors/adj_factor_meta.json      复权因子版本元数据
-data/factors/rolling_ic_weights.pkl    rolling IC 权重缓存
+data/factors/rolling_ic_weights.parquet rolling IC 权重缓存
 outputs/backtest_equity.csv            回测净值
 outputs/backtest_holdings.csv          回测持仓
 outputs/backtest_trades.csv            回测成交
@@ -377,6 +377,14 @@ outputs/history/YYYY-MM-DD/            每次自动运行的归档快照
 - 涨跌停：优先用 high/low 判断触板，并按主板、科创/创业、北交所、ST 分别使用阈值
 - 止盈止损：默认配置 8% 个股止损，关闭固定止盈；日内触发采用保守成交价，跳空低开按开盘价成交
 - 长期缺价/停牌：默认按 `stale_price_haircut` 折价退出，避免长期冻结造成虚高净值
+
+## 可选 ML 依赖
+
+基础 `requirements.txt` 不安装 `xgboost`。默认 ML 模型是 `ridge_numpy`，`model_type: auto` 会优先尝试已安装的模型并在缺少可选依赖时回退；如果显式设置 `model_type: xgboost`，请先手动安装：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install "xgboost>=2.0"
+```
 
 ## 测试
 

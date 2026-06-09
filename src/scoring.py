@@ -1,8 +1,9 @@
+"""模块说明：构建策略分数面板并应用动态权重和风险过滤。"""
+
 from __future__ import annotations
 
 import json
 import logging
-import pickle
 from pathlib import Path
 
 import pandas as pd
@@ -44,6 +45,7 @@ def build_strategy_scores(
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> pd.Series:
+    """函数说明：构建 build_strategy_scores 主要逻辑。"""
     strategy_cfg = config.get("strategy", {})
     factor_group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
     min_obs = int(strategy_cfg.get("min_cross_section_obs", 5))
@@ -90,6 +92,7 @@ def build_latest_strategy_scores(
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> pd.Series:
+    """函数说明：构建 build_latest_strategy_scores 主要逻辑。"""
     strategy_cfg = config.get("strategy", {})
     factor_group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
     min_obs = int(strategy_cfg.get("min_cross_section_obs", 5))
@@ -143,18 +146,22 @@ def build_latest_strategy_scores(
 
 
 def _regime_score_blend_enabled(config: dict) -> bool:
+    """函数说明：处理 regime_score_blend_enabled 的内部辅助逻辑。"""
     return bool(config.get("regime_score_blend", {}).get("enabled", False))
 
 
 def _regime_score_filter_enabled(config: dict) -> bool:
+    """函数说明：处理 regime_score_filter_enabled 的内部辅助逻辑。"""
     return bool(config.get("regime_score_filter", {}).get("enabled", False))
 
 
 def _regime_score_adjustment_enabled(config: dict) -> bool:
+    """函数说明：处理 regime_score_adjustment_enabled 的内部辅助逻辑。"""
     return _regime_score_blend_enabled(config) or _regime_score_filter_enabled(config)
 
 
 def _apply_regime_score_blend(scores: pd.Series, factors: pd.DataFrame, prices: pd.DataFrame, config: dict) -> pd.Series:
+    """函数说明：应用 apply_regime_score_blend 的内部辅助逻辑。"""
     if not _regime_score_adjustment_enabled(config):
         return scores
     regimes = detect_market_regime(prices, config)
@@ -171,6 +178,7 @@ def _apply_regime_score_blend(scores: pd.Series, factors: pd.DataFrame, prices: 
 
 
 def _load_ic_price_frame(path_value: str | Path) -> pd.DataFrame:
+    """函数说明：加载 load_ic_price_frame 的内部辅助逻辑。"""
     price_path = resolve_path(path_value)
     if not price_path.exists() and price_path.name in {"ohlcv.parquet", "ohlcv_adjusted.parquet"}:
         fallback_name = "close_adjusted.parquet" if price_path.name == "ohlcv_adjusted.parquet" else "close.parquet"
@@ -188,6 +196,7 @@ def _build_dynamic_ic_selector_scores(
     config: dict,
     min_obs: int,
 ) -> pd.Series:
+    """函数说明：构建 build_dynamic_ic_selector_scores 的内部辅助逻辑。"""
     signed_factors = _signed_candidate_factors(factors, _dynamic_ic_candidates(config))
     weights = _dynamic_ic_selector_weights(signed_factors, prices, config.get("dynamic_ic_selector", {}))
     fallback = _dynamic_ic_fallback_weights(signed_factors, config.get("dynamic_ic_selector", {}))
@@ -200,6 +209,7 @@ def _latest_dynamic_ic_selector_weights(
     config: dict,
     target_date: pd.Timestamp,
 ) -> pd.Series:
+    """函数说明：处理 latest_dynamic_ic_selector_weights 的内部辅助逻辑。"""
     selector_cfg = config.get("dynamic_ic_selector", {})
     horizon = max(1, int(selector_cfg.get("horizon", 20)))
     window = int(selector_cfg.get("window", 504))
@@ -216,12 +226,14 @@ def _latest_dynamic_ic_selector_weights(
 
 
 def _dynamic_ic_candidates(config: dict) -> list[str]:
+    """函数说明：处理 dynamic_ic_candidates 的内部辅助逻辑。"""
     selector_cfg = config.get("dynamic_ic_selector", {})
     candidates = selector_cfg.get("candidates", DEFAULT_DYNAMIC_IC_CANDIDATES)
     return [str(candidate) for candidate in candidates]
 
 
 def _dynamic_ic_fallback_weights(signed_factors: pd.DataFrame, selector_cfg: dict) -> pd.Series:
+    """函数说明：处理 dynamic_ic_fallback_weights 的内部辅助逻辑。"""
     fallback_candidate = selector_cfg.get("fallback_candidate", "factor:LOW0")
     if fallback_candidate in {None, ""}:
         return pd.Series(dtype=float)
@@ -235,6 +247,7 @@ def _dynamic_ic_fallback_weights(signed_factors: pd.DataFrame, selector_cfg: dic
 
 
 def _signed_candidate_factors(factors: pd.DataFrame, candidates: list[str]) -> pd.DataFrame:
+    """函数说明：处理 signed_candidate_factors 的内部辅助逻辑。"""
     numeric = factors.select_dtypes("number")
     if numeric.empty:
         raise ValueError("factor_df has no numeric factor columns.")
@@ -249,6 +262,7 @@ def _signed_candidate_factors(factors: pd.DataFrame, candidates: list[str]) -> p
 
 
 def _candidate_column_and_direction(candidate: str, columns: pd.Index) -> tuple[str, float]:
+    """函数说明：处理 candidate_column_and_direction 的内部辅助逻辑。"""
     method = str(candidate).strip()
     direction = 1.0
     lowered = method.lower()
@@ -268,6 +282,7 @@ def _dynamic_ic_selector_weights(
     prices: pd.DataFrame,
     selector_cfg: dict,
 ) -> dict[pd.Timestamp, pd.Series]:
+    """函数说明：处理 dynamic_ic_selector_weights 的内部辅助逻辑。"""
     rolling_ic = calculate_rolling_ic(
         signed_factors,
         prices,
@@ -302,6 +317,7 @@ def _dynamic_ic_selector_weights(
 
 
 def _dynamic_ic_selector_metric(rolling_ic: pd.DataFrame, selector_cfg: dict) -> pd.DataFrame:
+    """函数说明：处理 dynamic_ic_selector_metric 的内部辅助逻辑。"""
     metric = str(selector_cfg.get("metric", "mean")).strip().lower()
     if metric == "mean":
         return rolling_ic
@@ -319,10 +335,12 @@ def _dynamic_ic_selector_metric(rolling_ic: pd.DataFrame, selector_cfg: dict) ->
 
 
 def _liquidity_filter_enabled(filter_cfg: dict) -> bool:
+    """函数说明：处理 liquidity_filter_enabled 的内部辅助逻辑。"""
     return bool(filter_cfg.get("enabled", False))
 
 
 def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg: dict) -> pd.Series:
+    """函数说明：应用 apply_liquidity_filter 的内部辅助逻辑。"""
     if not _liquidity_filter_enabled(filter_cfg):
         return scores
     if scores.empty:
@@ -378,6 +396,7 @@ def _apply_liquidity_filter(scores: pd.Series, prices: pd.DataFrame, filter_cfg:
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
+    """函数说明：处理 price_field 的内部辅助逻辑。"""
     field = str(field).strip().lower()
     if isinstance(prices.columns, pd.MultiIndex):
         field_names = prices.columns.get_level_values(0).astype(str).str.strip().str.lower()
@@ -393,6 +412,7 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
 
 
 def _normalize_price_field_index(frame: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_price_field_index 的内部辅助逻辑。"""
     if frame.empty:
         return frame
     raw_dates = pd.DatetimeIndex(pd.to_datetime(frame.index, errors="coerce"))
@@ -414,12 +434,14 @@ def _normalize_price_field_index(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _optional_float(value: object) -> float | None:
+    """函数说明：处理 optional_float 的内部辅助逻辑。"""
     if value is None:
         return None
     return float(value)
 
 
 def _load_or_compute_dynamic_weights(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dict) -> dict[pd.Timestamp, pd.Series]:
+    """函数说明：加载 load_or_compute_dynamic_weights 的内部辅助逻辑。"""
     cache_file = ic_cfg.get("weights_cache_file")
     expected_meta = _weights_cache_meta(factors, prices, ic_cfg)
     if cache_file and bool(ic_cfg.get("weights_cache_enabled", True)):
@@ -453,6 +475,7 @@ def _load_or_compute_dynamic_weights(factors: pd.DataFrame, prices: pd.DataFrame
 
 
 def _latest_ic_weights(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dict, target_date: pd.Timestamp) -> pd.Series:
+    """函数说明：处理 latest_ic_weights 的内部辅助逻辑。"""
     horizon = max(1, int(ic_cfg.get("horizon", 1)))
     window = int(ic_cfg.get("window", 252))
     min_periods = int(ic_cfg.get("min_periods", 60))
@@ -483,10 +506,12 @@ def _latest_ic_weights(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dict
 
 
 def _is_empty_weight_vector(weights: pd.Series) -> bool:
+    """函数说明：判断 is_empty_weight_vector 是否成立。"""
     return weights.empty or float(weights.abs().sum()) <= 0
 
 
 def _mean_ic_weights(summary: pd.DataFrame, top_k: int, min_abs_ic: float = 0.0) -> pd.Series:
+    """函数说明：处理 mean_ic_weights 的内部辅助逻辑。"""
     if summary.empty or "mean_ic" not in summary.columns:
         return pd.Series(dtype=float)
     scores = summary["mean_ic"].copy()
@@ -497,6 +522,7 @@ def _mean_ic_weights(summary: pd.DataFrame, top_k: int, min_abs_ic: float = 0.0)
 
 
 def _equal_ic_weights(summary: pd.DataFrame, top_k: int) -> pd.Series:
+    """函数说明：处理 equal_ic_weights 的内部辅助逻辑。"""
     if summary.empty:
         return pd.Series(dtype=float)
     candidates = summary.copy()
@@ -509,34 +535,56 @@ def _equal_ic_weights(summary: pd.DataFrame, top_k: int) -> pd.Series:
 
 
 def _read_weights_cache(cache_path: Path, expected_meta: dict[str, object]) -> dict[pd.Timestamp, pd.Series] | None:
+    """函数说明：读取 read_weights_cache 的内部辅助逻辑。"""
     meta_path = _weights_cache_meta_path(cache_path)
     if not cache_path.exists() or not meta_path.exists():
+        return None
+    if cache_path.suffix.lower() == ".pkl":
+        logger.info("Ignoring legacy pickle IC weights cache %s; it will be recomputed as a structured cache.", cache_path)
         return None
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         if meta != expected_meta:
             return None
-        with cache_path.open("rb") as f:
-            weights = pickle.load(f)
-    except (OSError, json.JSONDecodeError, pickle.PickleError, EOFError, AttributeError, ValueError):
+        frame = pd.read_parquet(cache_path)
+    except (OSError, json.JSONDecodeError, ValueError, ImportError):
         return None
-    if not isinstance(weights, dict):
+    required = {"date", "factor", "weight"}
+    if frame.empty or not required.issubset(frame.columns):
         return None
-    return {pd.Timestamp(date).normalize(): series for date, series in weights.items() if isinstance(series, pd.Series)}
+    frame = frame.copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.normalize()
+    frame["factor"] = frame["factor"].astype(str)
+    frame["weight"] = pd.to_numeric(frame["weight"], errors="coerce")
+    frame = frame.dropna(subset=["date", "factor", "weight"])
+    if frame.empty:
+        return None
+    result: dict[pd.Timestamp, pd.Series] = {}
+    for date, group in frame.groupby("date", sort=True):
+        series = pd.Series(group["weight"].to_numpy(dtype=float), index=group["factor"].astype(str), dtype=float)
+        result[pd.Timestamp(date).normalize()] = series
+    return result or None
 
 
 def _write_weights_cache(cache_path: Path, weights: dict[pd.Timestamp, pd.Series], meta: dict[str, object]) -> None:
+    """函数说明：写入 write_weights_cache 的内部辅助逻辑。"""
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    with cache_path.open("wb") as f:
-        pickle.dump(weights, f, protocol=pickle.HIGHEST_PROTOCOL)
+    rows: list[dict[str, object]] = []
+    for date, series in sorted(weights.items()):
+        weights_series = pd.Series(series, dtype=float).dropna()
+        for factor, weight in weights_series.items():
+            rows.append({"date": pd.Timestamp(date).normalize(), "factor": str(factor), "weight": float(weight)})
+    pd.DataFrame(rows, columns=["date", "factor", "weight"]).to_parquet(cache_path, index=False)
     _weights_cache_meta_path(cache_path).write_text(json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _weights_cache_meta_path(cache_path: Path) -> Path:
+    """函数说明：处理 weights_cache_meta_path 的内部辅助逻辑。"""
     return cache_path.with_name(f"{cache_path.name}.meta.json")
 
 
 def _resolve_score_date(factors: pd.DataFrame, signal_date: str | pd.Timestamp | None) -> pd.Timestamp:
+    """函数说明：解析 resolve_score_date 的内部辅助逻辑。"""
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         raise ValueError("factors must use MultiIndex: datetime/instrument.")
     dates = _factor_dates(factors)
@@ -549,17 +597,20 @@ def _resolve_score_date(factors: pd.DataFrame, signal_date: str | pd.Timestamp |
 
 
 def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
+    """函数说明：处理 factor_dates 的内部辅助逻辑。"""
     date_level = factors.index.names[0] or 0
     return pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(date_level)).normalize()).unique().sort_values()
 
 
 def _slice_factor_date(factors: pd.DataFrame, target_date: pd.Timestamp) -> pd.DataFrame:
+    """函数说明：处理 slice_factor_date 的内部辅助逻辑。"""
     date_level = factors.index.names[0] or 0
     dates = pd.to_datetime(factors.index.get_level_values(date_level)).normalize()
     return factors[dates == target_date]
 
 
 def _slice_recent_factor_history(factors: pd.DataFrame, target_date: pd.Timestamp, sessions: int) -> pd.DataFrame:
+    """函数说明：处理 slice_recent_factor_history 的内部辅助逻辑。"""
     date_level = factors.index.names[0] or 0
     dates = pd.to_datetime(factors.index.get_level_values(date_level)).normalize()
     eligible = pd.DatetimeIndex(dates[dates <= target_date]).unique().sort_values()
@@ -570,6 +621,7 @@ def _slice_recent_factor_history(factors: pd.DataFrame, target_date: pd.Timestam
 
 
 def _slice_price_history(prices: pd.DataFrame, target_date: pd.Timestamp, sessions: int) -> pd.DataFrame:
+    """函数说明：处理 slice_price_history 的内部辅助逻辑。"""
     if prices.empty:
         return prices
     price_dates = pd.DatetimeIndex(pd.to_datetime(prices.index).normalize())
@@ -581,6 +633,7 @@ def _slice_price_history(prices: pd.DataFrame, target_date: pd.Timestamp, sessio
 
 
 def _weights_cache_meta(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dict) -> dict[str, object]:
+    """函数说明：处理 weights_cache_meta 的内部辅助逻辑。"""
     return {
         "cache_version": WEIGHTS_CACHE_VERSION,
         "cache_source": WEIGHTS_CACHE_SOURCE,
@@ -603,6 +656,7 @@ def _weights_cache_meta(factors: pd.DataFrame, prices: pd.DataFrame, ic_cfg: dic
 
 
 def _frame_signature(frame: pd.DataFrame) -> dict[str, object]:
+    """函数说明：处理 frame_signature 的内部辅助逻辑。"""
     if frame.empty:
         return {"rows": 0, "columns": [], "start": "", "end": "", "symbols": [], "sample_hash": 0}
     if isinstance(frame.index, pd.MultiIndex):
@@ -625,6 +679,7 @@ def _frame_signature(frame: pd.DataFrame) -> dict[str, object]:
 
 
 def _sample_frame_hash(frame: pd.DataFrame, max_samples: int = 512) -> int:
+    """函数说明：处理 sample_frame_hash 的内部辅助逻辑。"""
     if frame.empty:
         return 0
     if len(frame) <= max_samples:

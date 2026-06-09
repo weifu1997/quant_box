@@ -1,3 +1,5 @@
+"""模块说明：提供 run_optimize 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -25,10 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 def _csv_values(value: str, cast):
+    """函数说明：处理 csv_values 的内部辅助逻辑。"""
     return [cast(item.strip()) for item in value.split(",") if item.strip()]
 
 
 def _csv_optional_values(value: str, cast):
+    """函数说明：处理 csv_optional_values 的内部辅助逻辑。"""
     values = []
     for item in value.split(","):
         item = item.strip()
@@ -42,21 +46,25 @@ def _csv_optional_values(value: str, cast):
 
 
 def _grid_values(value: str | None, defaults: list, cast):
+    """函数说明：处理 grid_values 的内部辅助逻辑。"""
     if value is None:
         return list(defaults)
     return _csv_values(value, cast)
 
 
 def _maybe_add_grid_values(grid: dict[str, list], key: str, value: str | None, cast) -> None:
+    """函数说明：处理 maybe_add_grid_values 的内部辅助逻辑。"""
     if value is not None:
         grid[key] = _csv_optional_values(value, cast)
 
 
 def _grid_has_enabled_value(grid: dict[str, list], key: str) -> bool:
+    """函数说明：处理 grid_has_enabled_value 的内部辅助逻辑。"""
     return any(value is not None for value in grid.get(key, []))
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Run parameter grid search for the ranking strategy.")
     parser.add_argument("--start-date", default=config["data"]["start_date"])
@@ -267,6 +275,7 @@ def _requested_factor_columns(
     score_blend_cfg: dict | None = None,
     score_filter_cfg: dict | None = None,
 ) -> list[str] | None:
+    """函数说明：处理 requested_factor_columns 的内部辅助逻辑。"""
     groups = {str(group).strip().lower() for group in factor_groups}
     if not groups or groups.intersection({"all", "ic_weighted"}):
         return None
@@ -287,13 +296,16 @@ def _requested_factor_columns(
 
 
 def _strip_direction_prefix(value: str) -> str:
+    """函数说明：去除 strip_direction_prefix 的内部辅助逻辑。"""
     return strip_direction_prefix(value)
 
 
 def _progress_writer(output_path: Path):
+    """函数说明：处理 progress_writer 的内部辅助逻辑。"""
     count = 0
 
     def write_progress(row: dict[str, object], results: pd.DataFrame) -> None:
+        """函数说明：写入 write_progress 主要逻辑。"""
         nonlocal count
         count += 1
         results.to_csv(output_path, index=False, encoding="utf-8-sig")
@@ -313,6 +325,7 @@ def _progress_writer(output_path: Path):
 
 
 def _number(value: object) -> float:
+    """函数说明：处理 number 的内部辅助逻辑。"""
     parsed = pd.to_numeric(value, errors="coerce")
     if pd.isna(parsed):
         return 0.0

@@ -1,5 +1,8 @@
+"""模块说明：覆盖 test_data_fetcher 相关行为的测试用例。"""
+
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,6 +28,7 @@ from src.data_fetcher import (
     normalize_st_calendar_frame,
     _fetch_daily_stock_batch,
     _raw_latest_date,
+    _target_codes_hash,
     update_daily_basic_data,
     update_daily_data,
     update_daily_data_resumable,
@@ -35,6 +39,7 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 def _real_tushare_daily_rows(codes: list[str], params: dict) -> pd.DataFrame:
+    """函数说明：处理 real_tushare_daily_rows 的内部辅助逻辑。"""
     codes = [code.strip().upper() for code in codes if code.strip()]
     if not codes:
         return pd.DataFrame(columns=DAILY_FIELDS)
@@ -66,6 +71,7 @@ def _real_tushare_daily_rows(codes: list[str], params: dict) -> pd.DataFrame:
 
 
 def _real_tushare_adj_factor_rows(codes: list[str], params: dict) -> pd.DataFrame:
+    """函数说明：处理 real_tushare_adj_factor_rows 的内部辅助逻辑。"""
     daily = _real_tushare_daily_rows(codes, params)
     if daily.empty:
         return pd.DataFrame(columns=["ts_code", "trade_date", "adj_factor"])
@@ -80,6 +86,7 @@ def _real_tushare_adj_factor_rows(codes: list[str], params: dict) -> pd.DataFram
 
 
 def _real_tushare_daily_basic_rows(trade_date: str) -> pd.DataFrame:
+    """函数说明：处理 real_tushare_daily_basic_rows 的内部辅助逻辑。"""
     market = require_real_market_data(
         instruments=["000001.sz"],
         start="2015-01-05",
@@ -94,16 +101,19 @@ def _real_tushare_daily_basic_rows(trade_date: str) -> pd.DataFrame:
 
 
 def _request_window(params: dict) -> tuple[str, str]:
+    """函数说明：处理 request_window 的内部辅助逻辑。"""
     start = str(params.get("start_date") or params.get("trade_date") or params.get("end_date") or "20240102")
     end = str(params.get("end_date") or params.get("trade_date") or params.get("start_date") or start)
     return _tushare_date_to_iso(start), _tushare_date_to_iso(end)
 
 
 def _tushare_date_to_iso(value: str) -> str:
+    """函数说明：处理 tushare_date_to_iso 的内部辅助逻辑。"""
     return pd.Timestamp(value).date().isoformat()
 
 
 def _last_snapshot_trade_date(frame: pd.DataFrame, start: str, end: str) -> pd.Timestamp | None:
+    """函数说明：处理 last_snapshot_trade_date 的内部辅助逻辑。"""
     start_ts = pd.Timestamp(start).normalize()
     end_ts = pd.Timestamp(end).normalize()
     dates = pd.DatetimeIndex(frame.index[(frame.index >= start_ts) & (frame.index <= end_ts)]).sort_values()
@@ -111,10 +121,13 @@ def _last_snapshot_trade_date(frame: pd.DataFrame, start: str, end: str) -> pd.T
 
 
 class FakeTushareClient:
+    """类说明：提供 FakeTushareClient 测试替身实现。"""
     def __init__(self) -> None:
+        """函数说明：初始化实例状态。"""
         self.calls: list[tuple[str, dict, list[str] | str | None]] = []
 
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         codes = str(params.get("ts_code", "")).split(",")
@@ -126,9 +139,11 @@ class FakeTushareClient:
 
 
 class MissingAdjFactorClient(FakeTushareClient):
+    """类说明：封装 MissingAdjFactorClient 相关数据和行为。"""
     missing_code = "600519.SH"
 
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         if api_name != "adj_factor":
             return super().call(api_name, params=params, fields=fields)
 
@@ -140,7 +155,9 @@ class MissingAdjFactorClient(FakeTushareClient):
 
 
 class EmptyTushareClient(FakeTushareClient):
+    """类说明：封装 EmptyTushareClient 相关数据和行为。"""
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         self.calls.append((api_name, (params or {}).copy(), fields))
         if api_name == "daily":
             return pd.DataFrame(columns=DAILY_FIELDS)
@@ -150,7 +167,9 @@ class EmptyTushareClient(FakeTushareClient):
 
 
 class DailyBasicClient(FakeTushareClient):
+    """类说明：封装 DailyBasicClient 相关数据和行为。"""
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         if api_name == "daily_basic":
@@ -159,7 +178,9 @@ class DailyBasicClient(FakeTushareClient):
 
 
 class FlakyDailyBasicClient(DailyBasicClient):
+    """类说明：封装 FlakyDailyBasicClient 相关数据和行为。"""
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         params = params or {}
         if api_name == "daily_basic" and params.get("trade_date") == "20240103":
             self.calls.append((api_name, params.copy(), fields))
@@ -168,7 +189,9 @@ class FlakyDailyBasicClient(DailyBasicClient):
 
 
 class PointInTimeClient(FakeTushareClient):
+    """类说明：封装 PointInTimeClient 相关数据和行为。"""
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         params = params or {}
         self.calls.append((api_name, params.copy(), fields))
         if api_name == "index_weight":
@@ -208,13 +231,17 @@ class PointInTimeClient(FakeTushareClient):
 
 
 class FailingTushareClient(FakeTushareClient):
+    """类说明：封装 FailingTushareClient 相关数据和行为。"""
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         self.calls.append((api_name, (params or {}).copy(), fields))
         raise RuntimeError("limited")
 
 
 class FlakyIndexClient(PointInTimeClient):
+    """类说明：封装 FlakyIndexClient 相关数据和行为。"""
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         params = params or {}
         if api_name == "index_weight" and params.get("start_date") == "20240201":
             self.calls.append((api_name, params.copy(), fields))
@@ -223,7 +250,9 @@ class FlakyIndexClient(PointInTimeClient):
 
 
 class FallbackIndexClient(PointInTimeClient):
+    """类说明：封装 FallbackIndexClient 相关数据和行为。"""
     def call(self, api_name: str, params: dict | None = None, fields: list[str] | str | None = None) -> pd.DataFrame:
+        """函数说明：处理 call 主要逻辑。"""
         params = params or {}
         if api_name == "index_weight" and params.get("index_code") == "000300.SH":
             self.calls.append((api_name, params.copy(), fields))
@@ -232,7 +261,9 @@ class FallbackIndexClient(PointInTimeClient):
 
 
 class DataFetcherTests(unittest.TestCase):
+    """类说明：组织 DataFetcherTests 测试用例。"""
     def test_raw_latest_date_reads_latest_value_from_csv_tail(self) -> None:
+        """函数说明：验证 test_raw_latest_date_reads_latest_value_from_csv_tail 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "000001.SZ.csv"
             pd.DataFrame(
@@ -246,6 +277,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(_raw_latest_date(path), pd.Timestamp("2024-01-04"))
 
     def test_normalize_daily_basic_frame_keeps_market_cap_fields(self) -> None:
+        """函数说明：验证 test_normalize_daily_basic_frame_keeps_market_cap_fields 覆盖的行为场景。"""
         frame = normalize_daily_basic_frame(
             pd.DataFrame(
                 [
@@ -265,6 +297,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertIn("circ_mv", frame.columns)
 
     def test_symbol_normalizers_strip_whitespace_and_case(self) -> None:
+        """函数说明：验证 test_symbol_normalizers_strip_whitespace_and_case 覆盖的行为场景。"""
         daily = normalize_daily_frame(
             pd.DataFrame(
                 [
@@ -301,6 +334,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(st_calendar["ts_code"].tolist(), ["000001.SZ"])
 
     def test_normalize_st_calendar_frame_resolves_start_date_alias_conflicts(self) -> None:
+        """函数说明：验证 test_normalize_st_calendar_frame_resolves_start_date_alias_conflicts 覆盖的行为场景。"""
         frame = normalize_st_calendar_frame(
             pd.DataFrame(
                 [
@@ -320,6 +354,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(frame["st_start_date"].tolist(), [pd.Timestamp("2024-01-04")])
 
     def test_normalize_daily_frame_deduplicates_symbol_date_pairs(self) -> None:
+        """函数说明：验证 test_normalize_daily_frame_deduplicates_symbol_date_pairs 覆盖的行为场景。"""
         daily = normalize_daily_frame(
             pd.DataFrame(
                 [
@@ -354,6 +389,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertAlmostEqual(float(daily["adj_factor"].iloc[0]), 1.1)
 
     def test_fetch_daily_basic_requests_tushare_daily_basic_fields(self) -> None:
+        """函数说明：验证 test_fetch_daily_basic_requests_tushare_daily_basic_fields 覆盖的行为场景。"""
         client = DailyBasicClient()
 
         frame = fetch_daily_basic("2024-01-02", client=client, retries=1)
@@ -364,6 +400,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(frame["trade_date"].iloc[0], pd.Timestamp("2024-01-02"))
 
     def test_fetch_index_constituents_requests_tushare_index_weight_fields(self) -> None:
+        """函数说明：验证 test_fetch_index_constituents_requests_tushare_index_weight_fields 覆盖的行为场景。"""
         client = PointInTimeClient()
 
         frame = fetch_index_constituents("000300.SH", "2024-01-01", "2024-01-03", client=client, retries=1)
@@ -376,6 +413,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(frame["trade_date"].iloc[0], pd.Timestamp("2024-01-03"))
 
     def test_fetch_st_calendar_keeps_only_st_namechange_rows(self) -> None:
+        """函数说明：验证 test_fetch_st_calendar_keeps_only_st_namechange_rows 覆盖的行为场景。"""
         client = PointInTimeClient()
 
         frame = fetch_st_calendar(client=client, retries=1)
@@ -385,6 +423,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(frame["st_start_date"].iloc[0], pd.Timestamp("2024-01-02"))
 
     def test_update_daily_basic_data_writes_incremental_parquet_cache(self) -> None:
+        """函数说明：验证 test_update_daily_basic_data_writes_incremental_parquet_cache 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "daily_basic.parquet"
@@ -416,6 +455,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual([call[1]["trade_date"] for call in client.calls], ["20240102", "20240103"])
 
     def test_update_daily_basic_data_supports_history_start_and_max_dates(self) -> None:
+        """函数说明：验证 test_update_daily_basic_data_supports_history_start_and_max_dates 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "daily_basic.parquet"
@@ -448,6 +488,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual([call[1]["trade_date"] for call in client.calls], ["20210104"])
 
     def test_update_daily_basic_data_skips_failed_dates_by_default(self) -> None:
+        """函数说明：验证 test_update_daily_basic_data_skips_failed_dates_by_default 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "daily_basic.parquet"
@@ -478,6 +519,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(cached["trade_date"].dt.strftime("%Y%m%d").tolist(), ["20240102", "20240104"])
 
     def test_update_daily_basic_data_can_fail_on_date_error(self) -> None:
+        """函数说明：验证 test_update_daily_basic_data_can_fail_on_date_error 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "daily_basic.parquet"
@@ -506,6 +548,7 @@ class DataFetcherTests(unittest.TestCase):
                     update_daily_basic_data(client=client, skip_failed=False)
 
     def test_update_index_constituents_data_writes_point_in_time_csv(self) -> None:
+        """函数说明：验证 test_update_index_constituents_data_writes_point_in_time_csv 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "hs300_constituents.csv"
@@ -530,6 +573,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(client.calls[0][0], "index_weight")
 
     def test_update_index_constituents_data_defaults_to_month_sized_windows(self) -> None:
+        """函数说明：验证 test_update_index_constituents_data_defaults_to_month_sized_windows 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "hs300_constituents.csv"
@@ -554,6 +598,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual([call[1]["end_date"] for call in calls], ["20240131", "20240302"])
 
     def test_update_index_constituents_data_uses_fallback_code_when_primary_is_empty(self) -> None:
+        """函数说明：验证 test_update_index_constituents_data_uses_fallback_code_when_primary_is_empty 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "hs300_constituents.csv"
@@ -579,6 +624,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual([call[1]["index_code"] for call in client.calls if call[0] == "index_weight"], ["000300.SH", "399300.SZ"])
 
     def test_update_index_constituents_data_skips_failed_windows_by_default(self) -> None:
+        """函数说明：验证 test_update_index_constituents_data_skips_failed_windows_by_default 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "hs300_constituents.csv"
@@ -602,6 +648,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(cached["trade_date"].tolist(), ["2024-01-31", "2024-03-10"])
 
     def test_update_index_constituents_data_can_fail_on_window_error(self) -> None:
+        """函数说明：验证 test_update_index_constituents_data_can_fail_on_window_error 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "hs300_constituents.csv"
@@ -623,6 +670,7 @@ class DataFetcherTests(unittest.TestCase):
                     update_index_constituents_data(client=client, max_windows=3, skip_failed=False)
 
     def test_update_st_calendar_data_writes_st_rows(self) -> None:
+        """函数说明：验证 test_update_st_calendar_data_writes_st_rows 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out_file = root / "st_calendar.csv"
@@ -647,6 +695,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertIn("st_start_date", cached.columns)
 
     def test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait(self) -> None:
+        """函数说明：验证 test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait 覆盖的行为场景。"""
         client = FailingTushareClient()
 
         with patch("src.data_fetcher.random.uniform", return_value=0.0), patch("src.data_fetcher.time.sleep") as sleep:
@@ -657,6 +706,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [1.0, 1.5, 1.5, 1.5])
 
     def test_hs300_universe_uses_hs300_constituents_not_mainboard_file(self) -> None:
+        """函数说明：验证 test_hs300_universe_uses_hs300_constituents_not_mainboard_file 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             mainboard_file = root / "mainboard_a_stocks.csv"
@@ -688,6 +738,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(codes, ["000300.SZ", "600000.SH"])
 
     def test_fetch_hs300_stocks_filters_local_constituents_as_of_date(self) -> None:
+        """函数说明：验证 test_fetch_hs300_stocks_filters_local_constituents_as_of_date 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             hs300_file = Path(tmp) / "hs300_constituents.csv"
             pd.DataFrame(
@@ -704,6 +755,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(february, ["600519.SH"])
 
     def test_filter_universe_frame_excludes_delisted_before_as_of_date(self) -> None:
+        """函数说明：验证 test_filter_universe_frame_excludes_delisted_before_as_of_date 覆盖的行为场景。"""
         universe = pd.DataFrame(
             [
                 {"ts_code": "000001.SZ", "name": "PINGAN", "list_status": "L", "list_date": "19910403", "delist_date": ""},
@@ -717,6 +769,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(filtered["ts_code"].tolist(), ["000001.SZ", "000015.SZ"])
 
     def test_filter_universe_frame_normalizes_symbol_whitespace_and_case(self) -> None:
+        """函数说明：验证 test_filter_universe_frame_normalizes_symbol_whitespace_and_case 覆盖的行为场景。"""
         universe = pd.DataFrame(
             [
                 {"ts_code": " 000001.sz ", "name": "PINGAN", "list_status": " l ", "list_date": " 19910403 ", "delist_date": ""},
@@ -728,6 +781,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(filtered["ts_code"].tolist(), ["000001.SZ"])
 
     def test_filter_universe_frame_uses_point_in_time_st_calendar(self) -> None:
+        """函数说明：验证 test_filter_universe_frame_uses_point_in_time_st_calendar 覆盖的行为场景。"""
         universe = pd.DataFrame(
             [
                 {"ts_code": " 000001.sz ", "name": "ST_STATIC_NAME", "list_status": "L", "list_date": "19910403", "delist_date": ""},
@@ -759,6 +813,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertNotIn("000001.SZ", during["ts_code"].tolist())
 
     def test_fetch_daily_stocks_uses_comma_separated_batch_request(self) -> None:
+        """函数说明：验证 test_fetch_daily_stocks_uses_comma_separated_batch_request 覆盖的行为场景。"""
         client = FakeTushareClient()
 
         df = fetch_daily_stocks(["000001.SZ", "600519.SH"], "2024-01-01", "2024-01-03", client=client)
@@ -770,6 +825,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertIn("adj_factor", df.columns)
 
     def test_fetch_daily_stocks_splits_long_range_into_date_windows(self) -> None:
+        """函数说明：验证 test_fetch_daily_stocks_splits_long_range_into_date_windows 覆盖的行为场景。"""
         client = FakeTushareClient()
 
         fetch_daily_stocks(
@@ -786,6 +842,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual([call[1]["end_date"] for call in daily_calls], ["20240102", "20240104", "20240105"])
 
     def test_update_daily_data_writes_each_symbol_from_batched_response(self) -> None:
+        """函数说明：验证 test_update_daily_data_writes_each_symbol_from_batched_response 覆盖的行为场景。"""
         client = FakeTushareClient()
         config = {
             "data": {
@@ -823,6 +880,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(daily_calls[0][1]["ts_code"], "000001.SZ,600519.SH")
 
     def test_update_daily_data_defaults_to_history_start_date(self) -> None:
+        """函数说明：验证 test_update_daily_data_defaults_to_history_start_date 覆盖的行为场景。"""
         client = FakeTushareClient()
         config = {
             "data": {
@@ -851,6 +909,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(daily_calls[0][1]["start_date"], "20210101")
 
     def test_fetch_daily_stocks_skips_symbol_with_incomplete_adj_factor(self) -> None:
+        """函数说明：验证 test_fetch_daily_stocks_skips_symbol_with_incomplete_adj_factor 覆盖的行为场景。"""
         client = MissingAdjFactorClient()
 
         df = fetch_daily_stocks(["000001.SZ", "600519.SH"], "2024-01-01", "2024-01-03", client=client)
@@ -860,6 +919,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertFalse(df["adj_factor"].isna().any())
 
     def test_fetch_daily_stock_batch_sets_empty_failed_codes_when_not_skipping(self) -> None:
+        """函数说明：验证 test_fetch_daily_stock_batch_sets_empty_failed_codes_when_not_skipping 覆盖的行为场景。"""
         client = FakeTushareClient()
 
         df = _fetch_daily_stock_batch(
@@ -875,6 +935,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(sorted(df["ts_code"].unique().tolist()), ["000001.SZ", "600519.SH"])
 
     def test_fetch_daily_stock_drops_rows_with_missing_adj_factor(self) -> None:
+        """函数说明：验证 test_fetch_daily_stock_drops_rows_with_missing_adj_factor 覆盖的行为场景。"""
         client = MissingAdjFactorClient()
 
         df = fetch_daily_stock("600519.SH", "2024-01-01", "2024-01-03", client=client, retries=1)
@@ -883,6 +944,7 @@ class DataFetcherTests(unittest.TestCase):
         self.assertIn("adj_factor", df.columns)
 
     def test_update_daily_data_records_failed_symbol_when_adj_factor_is_incomplete(self) -> None:
+        """函数说明：验证 test_update_daily_data_records_failed_symbol_when_adj_factor_is_incomplete 覆盖的行为场景。"""
         client = MissingAdjFactorClient()
         config = {
             "data": {
@@ -915,6 +977,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(failed["reason"].tolist(), ["empty_or_failed_fetch"])
 
     def test_update_daily_data_limits_new_symbol_backfill_but_keeps_existing_incremental_updates(self) -> None:
+        """函数说明：验证 test_update_daily_data_limits_new_symbol_backfill_but_keeps_existing_incremental_updates 覆盖的行为场景。"""
         client = FakeTushareClient()
         config = {
             "data": {
@@ -962,6 +1025,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertFalse((raw_dir / "000002.SZ.csv").exists())
 
     def test_resumable_update_prioritizes_missing_symbols_and_writes_progress(self) -> None:
+        """函数说明：验证 test_resumable_update_prioritizes_missing_symbols_and_writes_progress 覆盖的行为场景。"""
         client = FakeTushareClient()
         config = {
             "data": {
@@ -1022,6 +1086,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertAlmostEqual(float(progress["latest_coverage"]), 2 / 3)
 
     def test_resumable_update_refreshes_stale_existing_symbols(self) -> None:
+        """函数说明：验证 test_resumable_update_refreshes_stale_existing_symbols 覆盖的行为场景。"""
         client = FakeTushareClient()
         config = {
             "data": {
@@ -1079,6 +1144,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(int(progress["remaining_symbols"]), 0)
 
     def test_resumable_update_marks_existing_empty_fetch_as_confirmed_no_new_data(self) -> None:
+        """函数说明：验证 test_resumable_update_marks_existing_empty_fetch_as_confirmed_no_new_data 覆盖的行为场景。"""
         client = EmptyTushareClient()
         config = {
             "data": {
@@ -1135,6 +1201,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(int(progress["latest_symbols"]), 0)
 
     def test_resumable_update_skips_previous_confirmed_no_new_data_symbols(self) -> None:
+        """函数说明：验证 test_resumable_update_skips_previous_confirmed_no_new_data_symbols 覆盖的行为场景。"""
         config = {
             "data": {
                 "start_date": "2024-01-01",
@@ -1167,9 +1234,14 @@ class DataFetcherTests(unittest.TestCase):
                     }
                 ]
             ).to_csv(raw_dir / "000001.SZ.csv", index=False)
-            progress_file.write_text(
-                '{"target_end_date":"2024-01-03","confirmed_no_new_data":["000001.SZ"]}',
-                encoding="utf-8",
+            _write_progress(
+                progress_file,
+                ["000001.SZ"],
+                raw_dir,
+                start_date="2024-01-01",
+                end_date="2024-01-03",
+                status="running",
+                confirmed_no_new_data=["000001.SZ"],
             )
 
             with patch("src.data_fetcher.load_config", return_value=config), patch(
@@ -1191,7 +1263,178 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(int(progress["confirmed_no_new_data_symbols"]), 1)
             self.assertEqual(int(progress["fresh_or_confirmed_symbols"]), 1)
 
+    def test_resumable_update_does_not_reuse_complete_progress_for_different_symbol_set_with_same_count(self) -> None:
+        """函数说明：验证 test_resumable_update_does_not_reuse_complete_progress_for_different_symbol_set_with_same_count 覆盖的行为场景。"""
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+        calls: list[list[str]] = []
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            pd.DataFrame({"ts_code": ["000001.SZ"], "trade_date": ["2024-01-03"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                raw_dir / "000001.SZ.csv", index=False
+            )
+            _write_progress(
+                progress_file,
+                ["000001.SZ", "600519.SH"],
+                raw_dir,
+                start_date="2024-01-01",
+                end_date="2024-01-03",
+                status="complete",
+                remaining_unconfirmed_symbols=0,
+            )
+
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                """函数说明：处理 fake_update_daily_data 主要逻辑。"""
+                codes = list(stock_codes)
+                calls.append(codes)
+                for code in codes:
+                    pd.DataFrame({"ts_code": [code], "trade_date": [end_date], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                        Path(raw_dir) / f"{code}.csv", index=False
+                    )
+                return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data):
+                written = update_daily_data_resumable(
+                    stock_codes=["000001.SZ", "000002.SZ"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                )
+
+            self.assertEqual(calls, [["000002.SZ"]])
+            self.assertEqual(set(written), {"000002.SZ"})
+            progress = pd.read_json(progress_file, typ="series")
+            self.assertEqual(progress["target_codes_hash"], _target_codes_hash(["000001.SZ", "000002.SZ"]))
+
+    def test_resumable_update_does_not_reuse_complete_progress_when_raw_file_was_deleted(self) -> None:
+        """函数说明：验证 test_resumable_update_does_not_reuse_complete_progress_when_raw_file_was_deleted 覆盖的行为场景。"""
+        config = {
+            "data": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+        calls: list[list[str]] = []
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            pd.DataFrame({"ts_code": ["000001.SZ"], "trade_date": ["2024-01-03"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                raw_dir / "000001.SZ.csv", index=False
+            )
+            _write_progress(
+                progress_file,
+                ["000001.SZ", "600519.SH"],
+                raw_dir,
+                start_date="2024-01-01",
+                end_date="2024-01-03",
+                status="complete",
+                remaining_unconfirmed_symbols=0,
+            )
+
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                """函数说明：处理 fake_update_daily_data 主要逻辑。"""
+                codes = list(stock_codes)
+                calls.append(codes)
+                for code in codes:
+                    pd.DataFrame({"ts_code": [code], "trade_date": [end_date], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                        Path(raw_dir) / f"{code}.csv", index=False
+                    )
+                return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data):
+                written = update_daily_data_resumable(
+                    stock_codes=["000001.SZ", "600519.SH"],
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                )
+
+            self.assertEqual(calls, [["600519.SH"]])
+            self.assertEqual(set(written), {"600519.SH"})
+
+    def test_resumable_update_does_not_reuse_confirmed_symbols_when_start_date_changes(self) -> None:
+        """函数说明：验证 test_resumable_update_does_not_reuse_confirmed_symbols_when_start_date_changes 覆盖的行为场景。"""
+        config = {
+            "data": {
+                "start_date": "2023-01-01",
+                "end_date": "2024-01-03",
+                "raw_dir": "unused",
+                "update_chunk_size": 10,
+                "update_sleep_seconds": 0,
+            },
+            "tushare": {"http_url": "http://example.test", "token": "", "timeout": 30},
+        }
+        calls: list[list[str]] = []
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            progress_file = root / "progress.json"
+            pd.DataFrame({"ts_code": ["000001.SZ"], "trade_date": ["2024-01-02"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                raw_dir / "000001.SZ.csv", index=False
+            )
+            _write_progress(
+                progress_file,
+                ["000001.SZ"],
+                raw_dir,
+                start_date="2024-01-01",
+                end_date="2024-01-03",
+                status="running",
+                confirmed_no_new_data=["000001.SZ"],
+            )
+
+            def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                """函数说明：处理 fake_update_daily_data 主要逻辑。"""
+                codes = list(stock_codes)
+                calls.append(codes)
+                for code in codes:
+                    pd.DataFrame({"ts_code": [code], "trade_date": [end_date], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                        Path(raw_dir) / f"{code}.csv", index=False
+                    )
+                return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
+
+            with patch("src.data_fetcher.load_config", return_value=config), patch(
+                "src.data_fetcher.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.data_fetcher.update_daily_data", side_effect=fake_update_daily_data):
+                update_daily_data_resumable(
+                    stock_codes=["000001.SZ"],
+                    start_date="2023-01-01",
+                    raw_dir=raw_dir,
+                    progress_file=progress_file,
+                    chunk_size=10,
+                    sleep_seconds=0,
+                )
+
+            self.assertEqual(calls, [["000001.SZ"]])
+
     def test_resumable_update_marks_error_when_symbol_is_not_written(self) -> None:
+        """函数说明：验证 test_resumable_update_marks_error_when_symbol_is_not_written 覆盖的行为场景。"""
         client = EmptyTushareClient()
         config = {
             "data": {
@@ -1231,6 +1474,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertIn("not_written", progress["last_error"])
 
     def test_resumable_update_calls_update_daily_data_once_per_chunk_start_group(self) -> None:
+        """函数说明：验证 test_resumable_update_calls_update_daily_data_once_per_chunk_start_group 覆盖的行为场景。"""
         config = {
             "data": {
                 "start_date": "2024-01-01",
@@ -1250,6 +1494,7 @@ class DataFetcherTests(unittest.TestCase):
             progress_file = root / "progress.json"
 
             def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                """函数说明：处理 fake_update_daily_data 主要逻辑。"""
                 codes = list(stock_codes)
                 calls.append(codes)
                 written = {}
@@ -1281,6 +1526,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(int(progress["completed_symbols"]), 3)
 
     def test_resumable_update_batches_existing_stale_symbols_despite_different_list_dates(self) -> None:
+        """函数说明：验证 test_resumable_update_batches_existing_stale_symbols_despite_different_list_dates 覆盖的行为场景。"""
         config = {
             "data": {
                 "start_date": "2024-01-01",
@@ -1304,6 +1550,7 @@ class DataFetcherTests(unittest.TestCase):
                 )
 
             def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                """函数说明：处理 fake_update_daily_data 主要逻辑。"""
                 codes = list(stock_codes)
                 calls.append((codes, start_date))
                 for code in codes:
@@ -1327,6 +1574,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(calls, [(["000001.SZ", "600519.SH"], "2024-01-01")])
 
     def test_resumable_update_force_full_batches_existing_symbols(self) -> None:
+        """函数说明：验证 test_resumable_update_force_full_batches_existing_symbols 覆盖的行为场景。"""
         config = {
             "data": {
                 "start_date": "2019-01-01",
@@ -1350,6 +1598,7 @@ class DataFetcherTests(unittest.TestCase):
                 )
 
             def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                """函数说明：处理 fake_update_daily_data 主要逻辑。"""
                 codes = list(stock_codes)
                 calls.append((codes, start_date, force_full))
                 return {code: Path(raw_dir) / f"{code}.csv" for code in codes}
@@ -1370,6 +1619,7 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(calls, [(["000001.SZ", "600519.SH"], "2019-01-01", True)])
 
     def test_resumable_update_include_existing_tracks_processed_symbols(self) -> None:
+        """函数说明：验证 test_resumable_update_include_existing_tracks_processed_symbols 覆盖的行为场景。"""
         config = {
             "data": {
                 "start_date": "2024-01-01",
@@ -1391,6 +1641,7 @@ class DataFetcherTests(unittest.TestCase):
                 (raw_dir / f"{code}.csv").write_text("", encoding="utf-8")
 
             def fake_update_daily_data(stock_codes, start_date=None, end_date=None, raw_dir=None, force_full=False):
+                """函数说明：处理 fake_update_daily_data 主要逻辑。"""
                 codes = list(stock_codes)
                 calls.append(codes)
                 for code in codes:
@@ -1419,6 +1670,36 @@ class DataFetcherTests(unittest.TestCase):
             self.assertEqual(progress["status"], "partial")
             self.assertEqual(int(progress["completed_symbols"]), 1)
             self.assertEqual(int(progress["remaining_symbols"]), 1)
+
+
+def _write_progress(
+    path: Path,
+    codes: list[str],
+    raw_dir: Path,
+    *,
+    start_date: str,
+    end_date: str,
+    status: str,
+    confirmed_no_new_data: list[str] | None = None,
+    remaining_unconfirmed_symbols: int = 1,
+) -> None:
+    """函数说明：写入 write_progress 的内部辅助逻辑。"""
+    payload = {
+        "status": status,
+        "target_end_date": end_date,
+        "target_symbols": len(codes),
+        "target_codes_hash": _target_codes_hash(codes),
+        "target_codes_count": len(codes),
+        "start_date": start_date,
+        "end_date": end_date,
+        "raw_dir": str(raw_dir.resolve()),
+        "include_existing": False,
+        "force_full": False,
+        "remaining_symbols": remaining_unconfirmed_symbols,
+        "remaining_unconfirmed_symbols": remaining_unconfirmed_symbols,
+        "confirmed_no_new_data": confirmed_no_new_data or [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 if __name__ == "__main__":

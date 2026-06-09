@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_run_risk_refine 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,25 +12,30 @@ from scripts.run_risk_refine import _combo_key, _completed_keys, _with_timing_ov
 
 
 class RunRiskRefineTests(unittest.TestCase):
+    """类说明：组织 RunRiskRefineTests 测试用例。"""
     def test_combo_key_includes_timing_exposure_and_drawdown_trigger(self) -> None:
+        """函数说明：验证 test_combo_key_includes_timing_exposure_and_drawdown_trigger 覆盖的行为场景。"""
         base = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
         changed = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.0, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_score_blend_weights(self) -> None:
+        """函数说明：验证 test_combo_key_includes_score_blend_weights 覆盖的行为场景。"""
         base = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
         changed = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.0, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_combo_key_includes_industry_weight_cap(self) -> None:
+        """函数说明：验证 test_combo_key_includes_industry_weight_cap 覆盖的行为场景。"""
         base = _combo_key("low", 0.35, 15, 20, None, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
         changed = _combo_key("low", 0.35, 15, 20, 0.25, None, 0.65, 0.12, 60, 0.3, 0.02, "enabled", 1.0, 0.6, 0.3, 0.08, 0.0, 0.5, 1.0)
 
         self.assertNotEqual(base, changed)
 
     def test_completed_keys_reads_extended_timing_columns(self) -> None:
+        """函数说明：验证 test_completed_keys_reads_extended_timing_columns 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "risk_refine.csv"
             pd.DataFrame(
@@ -63,6 +70,7 @@ class RunRiskRefineTests(unittest.TestCase):
         self.assertIn(expected, keys)
 
     def test_with_timing_overrides_applies_exposure_and_market_drawdown_trigger(self) -> None:
+        """函数说明：验证 test_with_timing_overrides_applies_exposure_and_market_drawdown_trigger 覆盖的行为场景。"""
         config = {"defensive_timing": {"enabled": False}, "market_regime": {}}
 
         result = _with_timing_overrides(config, "enabled", 1.0, 0.5, 0.1, 0.08)

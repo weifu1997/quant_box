@@ -1,3 +1,5 @@
+"""模块说明：提供用于参数筛选的快速月度回测。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,6 +14,7 @@ from src.strategy import select_stocks
 
 @dataclass
 class FastBacktestResult:
+    """类说明：封装 FastBacktestResult 相关数据和行为。"""
     equity_curve: pd.Series
     weights: pd.DataFrame
     metrics: dict[str, float]
@@ -19,6 +22,7 @@ class FastBacktestResult:
 
 @dataclass
 class FastPeriod:
+    """类说明：封装 FastPeriod 相关数据和行为。"""
     signal_date: pd.Timestamp
     trade_date: pd.Timestamp
     next_trade_date: pd.Timestamp
@@ -28,6 +32,7 @@ class FastPeriod:
 
 @dataclass
 class FastBacktestData:
+    """类说明：封装 FastBacktestData 相关数据和行为。"""
     periods: list[FastPeriod]
     price_dates: pd.DatetimeIndex
     initial_date: pd.Timestamp | None
@@ -63,6 +68,7 @@ def prepare_fast_period_data(
     end_date: str,
     trade_price_field: str = "close",
 ) -> FastBacktestData:
+    """函数说明：准备 prepare_fast_period_data 主要逻辑。"""
     scores = _ensure_score_panel(score_panel)
     trade_prices = _price_frame(price_df, trade_price_field)
     start = pd.Timestamp(start_date).normalize()
@@ -103,6 +109,7 @@ def prepare_fast_period_data(
 
 
 def run_fast_prepared_backtest(prepared: FastBacktestData, config: dict[str, Any]) -> FastBacktestResult:
+    """函数说明：运行 run_fast_prepared_backtest 相关流程。"""
     if not prepared.periods:
         if prepared.initial_date is None:
             empty = pd.Series(dtype=float, name="equity")
@@ -179,6 +186,7 @@ def run_fast_prepared_backtest(prepared: FastBacktestData, config: dict[str, Any
 
 
 def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
+    """函数说明：确保 ensure_score_panel 的内部辅助逻辑。"""
     if isinstance(score_panel, pd.DataFrame):
         if "score" in score_panel.columns:
             score_panel = score_panel["score"]
@@ -214,6 +222,7 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
 
 
 def _price_frame(price_df: pd.DataFrame, field: str = "close") -> pd.DataFrame:
+    """函数说明：处理 price_frame 的内部辅助逻辑。"""
     if price_df.empty:
         return pd.DataFrame()
     field = str(field or "close").strip().lower()
@@ -254,6 +263,7 @@ def _price_frame(price_df: pd.DataFrame, field: str = "close") -> pd.DataFrame:
 
 
 def _next_price_date(price_dates: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp | None:
+    """函数说明：处理 next_price_date 的内部辅助逻辑。"""
     pos = price_dates.searchsorted(pd.Timestamp(date).normalize(), side="right")
     if pos >= len(price_dates):
         return None
@@ -261,6 +271,7 @@ def _next_price_date(price_dates: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Ti
 
 
 def _exposure_schedule(value: object, price_dates: pd.DatetimeIndex) -> pd.Series:
+    """函数说明：处理 exposure_schedule 的内部辅助逻辑。"""
     if not isinstance(value, pd.Series):
         return pd.Series(1.0, index=price_dates, dtype=float)
     exposure = value.copy()
@@ -279,6 +290,7 @@ def _exposure_schedule(value: object, price_dates: pd.DatetimeIndex) -> pd.Serie
 
 
 def _scale_for_date(exposure: pd.Series, date: pd.Timestamp) -> float:
+    """函数说明：处理 scale_for_date 的内部辅助逻辑。"""
     if date in exposure.index:
         return float(exposure.loc[date])
     prior = exposure[exposure.index <= date]
@@ -286,6 +298,7 @@ def _scale_for_date(exposure: pd.Series, date: pd.Timestamp) -> float:
 
 
 def _target_weights(scores: pd.Series, holdings: list[str], score_weighted: bool, max_weight: float | None) -> pd.Series:
+    """函数说明：处理 target_weights 的内部辅助逻辑。"""
     if not holdings:
         return pd.Series(dtype=float)
     if score_weighted:
@@ -298,6 +311,7 @@ def _target_weights(scores: pd.Series, holdings: list[str], score_weighted: bool
 
 
 def _apply_weight_drift_threshold(target_weights: pd.Series, previous_weights: pd.Series, threshold: float) -> pd.Series:
+    """函数说明：应用 apply_weight_drift_threshold 的内部辅助逻辑。"""
     if target_weights.empty or previous_weights.empty or threshold <= 0:
         return target_weights
     adjusted = target_weights.copy()
@@ -311,6 +325,7 @@ def _apply_weight_drift_threshold(target_weights: pd.Series, previous_weights: p
 
 
 def _drift_weights_after_returns(weights: pd.Series, returns: pd.Series, portfolio_return: float) -> pd.Series:
+    """函数说明：处理 drift_weights_after_returns 的内部辅助逻辑。"""
     if weights.empty:
         return pd.Series(dtype=float)
     denominator = 1.0 + float(portfolio_return)
@@ -323,6 +338,7 @@ def _drift_weights_after_returns(weights: pd.Series, returns: pd.Series, portfol
 
 
 def _score_weights(scores: pd.Series, holdings: list[str]) -> pd.Series:
+    """函数说明：处理 score_weights 的内部辅助逻辑。"""
     selected = pd.to_numeric(scores.reindex(holdings), errors="coerce").replace([np.inf, -np.inf], np.nan)
     if selected.notna().sum() == 0:
         return pd.Series(1.0 / len(holdings), index=holdings, dtype=float)
@@ -336,6 +352,7 @@ def _score_weights(scores: pd.Series, holdings: list[str]) -> pd.Series:
 
 
 def _period_returns(close: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, instruments: pd.Index) -> pd.Series:
+    """函数说明：处理 period_returns 的内部辅助逻辑。"""
     start_date = _first_index_on_or_after(close.index, start)
     end_date = _last_index_on_or_before(close.index, end)
     if start_date is None or end_date is None or end_date <= start_date:
@@ -347,6 +364,7 @@ def _period_returns(close: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp,
 
 
 def _first_index_on_or_after(index: pd.Index, value: pd.Timestamp) -> pd.Timestamp | None:
+    """函数说明：处理 first_index_on_or_after 的内部辅助逻辑。"""
     dates = pd.DatetimeIndex(index).sort_values()
     pos = dates.searchsorted(pd.Timestamp(value), side="left")
     if pos >= len(dates):
@@ -355,6 +373,7 @@ def _first_index_on_or_after(index: pd.Index, value: pd.Timestamp) -> pd.Timesta
 
 
 def _last_index_on_or_before(index: pd.Index, value: pd.Timestamp) -> pd.Timestamp | None:
+    """函数说明：处理 last_index_on_or_before 的内部辅助逻辑。"""
     dates = pd.DatetimeIndex(index).sort_values()
     pos = dates.searchsorted(pd.Timestamp(value), side="right") - 1
     if pos < 0:
@@ -363,6 +382,7 @@ def _last_index_on_or_before(index: pd.Index, value: pd.Timestamp) -> pd.Timesta
 
 
 def _round_trip_cost_rate(config: dict[str, Any]) -> float:
+    """函数说明：处理 round_trip_cost_rate 的内部辅助逻辑。"""
     commission = float(config.get("commission", 0.0))
     transfer = float(config.get("transfer_fee", 0.0))
     stamp = float(config.get("stamp_tax", 0.0))
@@ -371,6 +391,7 @@ def _round_trip_cost_rate(config: dict[str, Any]) -> float:
 
 
 def _metrics(equity_curve: pd.Series, config: dict[str, Any]) -> dict[str, float]:
+    """函数说明：处理 metrics 的内部辅助逻辑。"""
     if equity_curve.empty:
         return {"total_return": 0.0, "annual_return": 0.0, "max_drawdown": 0.0, "sharpe": 0.0}
     equity = equity_curve.sort_index().astype(float)
@@ -392,6 +413,7 @@ def _metrics(equity_curve: pd.Series, config: dict[str, Any]) -> dict[str, float
 
 
 def _annual_weight_turnover(total_weight_turnover: float, equity_curve: pd.Series) -> float:
+    """函数说明：处理 annual_weight_turnover 的内部辅助逻辑。"""
     if equity_curve.empty or len(equity_curve) <= 1:
         return 0.0
     years = max((equity_curve.index[-1] - equity_curve.index[0]).days / 365.25, 1 / 252)

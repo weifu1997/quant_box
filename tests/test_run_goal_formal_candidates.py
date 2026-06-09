@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_run_goal_formal_candidates 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +20,9 @@ from scripts.run_goal_formal_candidates import (
 
 
 class RunGoalFormalCandidatesTests(unittest.TestCase):
+    """类说明：组织 RunGoalFormalCandidatesTests 测试用例。"""
     def test_quality_flags_require_return_drawdown_turnover_and_cost(self) -> None:
+        """函数说明：验证 test_quality_flags_require_return_drawdown_turnover_and_cost 覆盖的行为场景。"""
         quality = {
             "min_backtest_annual_return": 0.20,
             "max_backtest_drawdown_limit": -0.20,
@@ -50,6 +54,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertFalse(failing["drawdown_pass"])
 
     def test_yearly_pass_counts_use_quality_thresholds(self) -> None:
+        """函数说明：验证 test_yearly_pass_counts_use_quality_thresholds 覆盖的行为场景。"""
         yearly = pd.DataFrame(
             [
                 {"year": 2022, "annual_return": 0.17, "max_drawdown": -0.16},
@@ -68,6 +73,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertEqual(drawdown_passes, 1)
 
     def test_write_candidate_artifacts_persists_trades_and_holdings(self) -> None:
+        """函数说明：验证 test_write_candidate_artifacts_persists_trades_and_holdings 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
@@ -93,6 +99,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
             self.assertEqual(pd.read_csv(paths["trades_path"]).iloc[0]["instrument"], "A")
 
     def test_score_key_includes_regime_score_filter(self) -> None:
+        """函数说明：验证 test_score_key_includes_regime_score_filter 覆盖的行为场景。"""
         base = {
             "strategy": {"factor_group": "momentum"},
             "liquidity_filter": {"enabled": True, "side": "high", "quantile": 0.65},
@@ -108,6 +115,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertNotEqual(_score_key(base), _score_key(filtered))
 
     def test_load_existing_candidate_rows_returns_completed_names(self) -> None:
+        """函数说明：验证 test_load_existing_candidate_rows_returns_completed_names 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "summary.csv"
             pd.DataFrame(
@@ -123,6 +131,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
             self.assertEqual(completed, {"candidate_a", "candidate_b"})
 
     def test_candidate_specs_include_overlay_industry_cap_variants(self) -> None:
+        """函数说明：验证 test_candidate_specs_include_overlay_industry_cap_variants 覆盖的行为场景。"""
         candidates = {candidate["name"]: candidate for candidate in _candidate_specs()}
 
         indcap25 = candidates["momentum_lowliq_q35_no_blend_top15_take035_overlay_signal_ma90_side05_bear05_indcap25"]
@@ -134,6 +143,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertTrue(indcap20["backtest"]["equity_overlay"]["rebalance_on_signal_only"])
 
     def test_candidate_specs_include_market_drawdown_signal_only_schedule_variants(self) -> None:
+        """函数说明：验证 test_candidate_specs_include_market_drawdown_signal_only_schedule_variants 覆盖的行为场景。"""
         candidates = {candidate["name"]: candidate for candidate in _candidate_specs()}
         candidate = candidates[
             "momentum_lowliq_q35_no_blend_top15_take035_overlay_signal_ma90_side05_bear05_marketdd08_schedsig_side06_bear02"
@@ -151,6 +161,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertTrue(milder["backtest"]["exposure_schedule_rebalance_on_signal_only"])
 
     def test_candidate_specs_include_fast_drawdown_signal_only_schedule_variants(self) -> None:
+        """函数说明：验证 test_candidate_specs_include_fast_drawdown_signal_only_schedule_variants 覆盖的行为场景。"""
         candidates = {candidate["name"]: candidate for candidate in _candidate_specs()}
         candidate = candidates[
             "momentum_lowliq_q35_no_blend_top15_take035_overlay_signal_ma90_side05_bear05_fastdd20_12_schedsig_side1_bear03"
@@ -164,6 +175,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertTrue(candidate["backtest"]["exposure_schedule_rebalance_on_signal_only"])
 
     def test_candidate_specs_include_selection_risk_filter_variants(self) -> None:
+        """函数说明：验证 test_candidate_specs_include_selection_risk_filter_variants 覆盖的行为场景。"""
         candidates = {candidate["name"]: candidate for candidate in _candidate_specs()}
         candidate = candidates[
             "momentum_lowliq_q35_no_blend_top15_take035_overlay_signal_ma90_side05_bear05_ma90_schedsig_bear06_selrisk5"

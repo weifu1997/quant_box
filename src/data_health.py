@@ -1,3 +1,5 @@
+"""模块说明：生成数据健康报告并检查行情、因子和基础数据。"""
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +19,7 @@ from src.trading_calendar import resolve_target_date_value
 
 @dataclass
 class DataHealthReport:
+    """类说明：封装 DataHealthReport 相关数据和行为。"""
     generated_at: str
     requested_end_date: str
     target_symbols: int
@@ -46,6 +49,7 @@ class DataHealthReport:
     issues: list[str]
 
     def to_dict(self) -> dict[str, Any]:
+        """函数说明：处理 to_dict 主要逻辑。"""
         return asdict(self)
 
 
@@ -54,6 +58,7 @@ def build_data_health_report(
     price_df: pd.DataFrame | None = None,
     factor_df: pd.DataFrame | None = None,
 ) -> DataHealthReport:
+    """函数说明：构建 build_data_health_report 主要逻辑。"""
     cfg = config or load_config()
     data_cfg = cfg.get("data", {})
     quality_cfg = cfg.get("quality", {})
@@ -148,6 +153,7 @@ def build_data_health_report(
 
 
 def write_data_health_report(report: DataHealthReport, out_dir: str | Path) -> tuple[Path, Path]:
+    """函数说明：写入 write_data_health_report 主要逻辑。"""
     output_dir = resolve_path(out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "data_health_report.json"
@@ -160,6 +166,7 @@ def write_data_health_report(report: DataHealthReport, out_dir: str | Path) -> t
 
 
 def _target_symbols(config: dict) -> set[str]:
+    """函数说明：处理 target_symbols 的内部辅助逻辑。"""
     data_cfg = config.get("data", {})
     universe_file = resolve_path(data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
     if not universe_file.exists():
@@ -181,16 +188,19 @@ def _target_symbols(config: dict) -> set[str]:
 
 
 def _raw_symbols(raw_dir: Path) -> set[str]:
+    """函数说明：处理 raw_symbols 的内部辅助逻辑。"""
     if not raw_dir.exists():
         return set()
     return {path.stem.upper() for path in raw_dir.glob("*.csv") if _is_stock_csv(path)}
 
 
 def _raw_latest_dates(raw_dir: Path, symbols: set[str]) -> dict[str, pd.Timestamp]:
+    """函数说明：处理 raw_latest_dates 的内部辅助逻辑。"""
     latest_dates: dict[str, pd.Timestamp] = {}
     symbol_list = list(symbols)
 
     def latest_for_symbol(symbol: str) -> tuple[str, pd.Timestamp | None]:
+        """函数说明：处理 latest_for_symbol 主要逻辑。"""
         return symbol, _raw_latest_date(raw_dir / f"{symbol}.csv")
 
     if len(symbol_list) >= 100:
@@ -208,12 +218,14 @@ def _raw_latest_dates(raw_dir: Path, symbols: set[str]) -> dict[str, pd.Timestam
 
 
 def _read_parquet_if_exists(path: Path) -> pd.DataFrame | None:
+    """函数说明：读取 read_parquet_if_exists 的内部辅助逻辑。"""
     if not path.exists():
         return None
     return pd.read_parquet(path)
 
 
 def _frame_symbols(frame: pd.DataFrame | None) -> set[str]:
+    """函数说明：处理 frame_symbols 的内部辅助逻辑。"""
     if frame is None or frame.empty:
         return set()
     if isinstance(frame.columns, pd.MultiIndex):
@@ -224,12 +236,14 @@ def _frame_symbols(frame: pd.DataFrame | None) -> set[str]:
 
 
 def _factor_symbols(frame: pd.DataFrame | None) -> set[str]:
+    """函数说明：处理 factor_symbols 的内部辅助逻辑。"""
     if frame is None or frame.empty or not isinstance(frame.index, pd.MultiIndex):
         return set()
     return _normalize_symbols(frame.index.get_level_values(1))
 
 
 def _price_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[str, pd.Timestamp]:
+    """函数说明：处理 price_latest_dates 的内部辅助逻辑。"""
     close = _close_price_frame(frame)
     if close.empty:
         return {}
@@ -256,6 +270,7 @@ def _price_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[s
 
 
 def _close_price_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
+    """函数说明：处理 close_price_frame 的内部辅助逻辑。"""
     if frame is None or frame.empty:
         return pd.DataFrame()
     if isinstance(frame.columns, pd.MultiIndex):
@@ -283,6 +298,7 @@ def _close_price_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
 
 
 def _factor_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[str, pd.Timestamp]:
+    """函数说明：处理 factor_latest_dates 的内部辅助逻辑。"""
     if frame is None or frame.empty or not isinstance(frame.index, pd.MultiIndex):
         return {}
     dates = pd.to_datetime(frame.index.get_level_values(0), errors="coerce")
@@ -297,25 +313,30 @@ def _factor_latest_dates(frame: pd.DataFrame | None, symbols: set[str]) -> dict[
 
 
 def _normalize_symbols(values: Any) -> set[str]:
+    """函数说明：规范化 normalize_symbols 的内部辅助逻辑。"""
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
 
 
 def _normalize_symbol(value: object) -> str:
+    """函数说明：规范化 normalize_symbol 的内部辅助逻辑。"""
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
 
 
 def _ratio(part: int, whole: int) -> float:
+    """函数说明：处理 ratio 的内部辅助逻辑。"""
     return float(part / whole) if whole else 0.0
 
 
 def _date_text(value: pd.Timestamp | None) -> str:
+    """函数说明：处理 date_text 的内部辅助逻辑。"""
     return "" if value is None else str(pd.Timestamp(value).date())
 
 
 def _json_dumps(value: dict[str, Any]) -> str:
+    """函数说明：处理 json_dumps 的内部辅助逻辑。"""
     import json
 
     return json.dumps(value, indent=2, ensure_ascii=False)

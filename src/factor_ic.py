@@ -1,3 +1,5 @@
+"""模块说明：计算因子 IC、滚动 IC 和 IC 权重。"""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -7,6 +9,7 @@ from src.common import normalize_instrument as _normalize_instrument
 
 
 def make_forward_returns(price_df: pd.DataFrame, horizon: int = 1) -> pd.Series:
+    """函数说明：生成 make_forward_returns 主要逻辑。"""
     prices = _close_prices(price_df)
     forward = prices.shift(-horizon) / prices - 1
     stacked = forward.stack(future_stack=True).rename("forward_return")
@@ -21,6 +24,7 @@ def calculate_factor_ic(
     method: str = "spearman",
     min_obs: int = 20,
 ) -> pd.DataFrame:
+    """函数说明：计算 calculate_factor_ic 主要逻辑。"""
     if not isinstance(factor_df.index, pd.MultiIndex):
         raise ValueError("factor_df must use MultiIndex: datetime/instrument.")
 
@@ -73,6 +77,7 @@ def calculate_rolling_ic(
     min_periods: int = 60,
     min_obs: int = 20,
 ) -> pd.DataFrame:
+    """函数说明：计算 calculate_rolling_ic 主要逻辑。"""
     daily_ic = calculate_factor_ic(factor_df, price_df, horizon=horizon, method=method, min_obs=min_obs)
     realized_lag = max(1, int(horizon))
     rolling_ic = daily_ic.shift(realized_lag).rolling(window=window, min_periods=min_periods).mean()
@@ -84,6 +89,7 @@ def calculate_rolling_ic(
 
 
 def summarize_ic(ic_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：汇总 summarize_ic 主要逻辑。"""
     mean_ic = ic_df.mean()
     std_ic = ic_df.std(ddof=0)
     summary = pd.DataFrame(
@@ -104,6 +110,7 @@ def make_ic_weights(
     top_k: int = 30,
     min_abs_ic: float = 0.02,
 ) -> pd.Series:
+    """函数说明：生成 make_ic_weights 主要逻辑。"""
     scores = ic_summary["ic_ir"].copy()
     if min_abs_ic > 0:
         scores = scores[ic_summary["mean_ic"].abs() >= min_abs_ic]
@@ -121,6 +128,7 @@ def make_rolling_ic_weights(
     weight_smoothing: float = 0.0,
     max_weight_turnover: float | None = None,
 ) -> dict[pd.Timestamp, pd.Series]:
+    """函数说明：生成 make_rolling_ic_weights 主要逻辑。"""
     if rolling_ic_df.empty:
         return {}
 
@@ -176,6 +184,7 @@ def make_rolling_ic_weights(
 
 
 def _daily_target_factor_corr(factors: pd.DataFrame, target: pd.Series, method: str, min_obs: int) -> pd.Series:
+    """函数说明：处理 daily_target_factor_corr 的内部辅助逻辑。"""
     x = factors.astype(float)
     y = target.astype(float)
     valid = x.notna()
@@ -207,6 +216,7 @@ def _daily_target_factor_corr(factors: pd.DataFrame, target: pd.Series, method: 
 
 
 def cluster_correlated_factors(rolling_ic_df: pd.DataFrame, threshold: float = 0.7) -> dict[str, list[str]]:
+    """函数说明：处理 cluster_correlated_factors 主要逻辑。"""
     clean = rolling_ic_df.dropna(axis=1, how="all")
     clean = clean.loc[:, clean.std(ddof=0).fillna(0) > 0]
     if clean.empty:
@@ -242,6 +252,7 @@ def cluster_correlated_factors(rolling_ic_df: pd.DataFrame, threshold: float = 0
 
 
 def _safe_corr(x: pd.Series, y: pd.Series, method: str, min_obs: int) -> float:
+    """函数说明：处理 safe_corr 的内部辅助逻辑。"""
     pair = pd.concat([x, y], axis=1).dropna()
     if len(pair) < min_obs:
         return float("nan")
@@ -254,6 +265,7 @@ def _stabilize_weights(
     weight_smoothing: float = 0.0,
     max_weight_turnover: float | None = None,
 ) -> pd.Series:
+    """函数说明：处理 stabilize_weights 的内部辅助逻辑。"""
     current = weights.astype(float)
     if previous is None or previous.empty:
         return _normalize_abs_weights(current)
@@ -278,6 +290,7 @@ def _stabilize_weights(
 
 
 def _normalize_abs_weights(weights: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_abs_weights 的内部辅助逻辑。"""
     clean = weights.replace([np.inf, -np.inf], np.nan).dropna()
     denom = clean.abs().sum()
     if denom <= 0:
@@ -286,6 +299,7 @@ def _normalize_abs_weights(weights: pd.Series) -> pd.Series:
 
 
 def _close_prices(price_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 close_prices 的内部辅助逻辑。"""
     if isinstance(price_df.columns, pd.MultiIndex):
         field_level = 0
         fields = price_df.columns.get_level_values(field_level).astype(str).str.strip().str.lower()
@@ -304,6 +318,7 @@ def _close_prices(price_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_close_frame 的内部辅助逻辑。"""
     result = close.copy()
     raw_dates = pd.DatetimeIndex(pd.to_datetime(result.index, errors="coerce"))
     valid_dates = ~pd.isna(raw_dates)
@@ -327,6 +342,7 @@ def _normalize_close_frame(close: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_instrument_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_instrument_frame 的内部辅助逻辑。"""
     result = frame.copy()
     result.index = pd.Index([_normalize_instrument(value) for value in result.index], name=frame.index.name)
     result = result[result.index != ""]
@@ -336,6 +352,7 @@ def _normalize_instrument_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_daily_factor_frame(frame: pd.DataFrame, date_level: str | int) -> pd.DataFrame:
+    """函数说明：规范化 normalize_daily_factor_frame 的内部辅助逻辑。"""
     if frame.empty:
         return frame.droplevel(date_level)
     instrument_level = _instrument_level(frame.index, date_level)
@@ -359,6 +376,7 @@ def _normalize_daily_factor_frame(frame: pd.DataFrame, date_level: str | int) ->
 
 
 def _instrument_level(index: pd.MultiIndex, date_level: str | int) -> str | int:
+    """函数说明：处理 instrument_level 的内部辅助逻辑。"""
     if index.nlevels != 2:
         raise ValueError("factor_df must use two index levels: datetime/instrument.")
     date_position = index.names.index(date_level) if isinstance(date_level, str) else int(date_level)
@@ -366,6 +384,7 @@ def _instrument_level(index: pd.MultiIndex, date_level: str | int) -> str | int:
 
 
 def _normalize_instrument_series(series: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_instrument_series 的内部辅助逻辑。"""
     result = series.copy()
     result.index = pd.Index([_normalize_instrument(value) for value in result.index], name=series.index.name)
     result = result[result.index != ""]

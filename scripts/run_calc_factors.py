@@ -1,3 +1,5 @@
+"""模块说明：提供 run_calc_factors 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Compute and cache Qlib Alpha158 factors.")
     parser.add_argument("--start-date", default=config["data"].get("history_start_date", config["data"]["start_date"]))

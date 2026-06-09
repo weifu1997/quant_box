@@ -1,8 +1,11 @@
+"""模块说明：覆盖 test_research_diagnostics 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import warnings
 
 import pandas as pd
 
@@ -10,7 +13,9 @@ from src.research_diagnostics import build_research_diagnostics, write_research_
 
 
 class ResearchDiagnosticsTests(unittest.TestCase):
+    """类说明：组织 ResearchDiagnosticsTests 测试用例。"""
     def test_build_research_diagnostics_reports_benchmark_cost_attribution_and_exposure(self) -> None:
+        """函数说明：验证 test_build_research_diagnostics_reports_benchmark_cost_attribution_and_exposure 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             universe_file = root / "universe.csv"
@@ -169,6 +174,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
             self.assertIn("research_turnover_by_status_reason", paths)
 
     def test_write_research_diagnostics_handles_unrecovered_drawdown(self) -> None:
+        """函数说明：验证 test_write_research_diagnostics_handles_unrecovered_drawdown 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
@@ -188,6 +194,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
             self.assertIn("research_diagnostics", paths)
 
     def test_benchmark_comparison_includes_first_price_return(self) -> None:
+        """函数说明：验证 test_benchmark_comparison_includes_first_price_return 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
         equity = pd.Series([100.0, 100.0, 100.0], index=dates, name="equity")
         prices = pd.concat({"close": pd.DataFrame({"000001.SZ": [100.0, 200.0, 200.0]}, index=dates)}, axis=1)
@@ -202,7 +209,27 @@ class ResearchDiagnosticsTests(unittest.TestCase):
 
         self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 1.0)
 
+    def test_benchmark_comparison_handles_constant_returns_without_runtime_warning(self) -> None:
+        """函数说明：验证 test_benchmark_comparison_handles_constant_returns_without_runtime_warning 覆盖的行为场景。"""
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"])
+        equity = pd.Series([100.0, 100.0, 100.0, 100.0], index=dates, name="equity")
+        prices = pd.concat({"close": pd.DataFrame({"000001.SZ": [10.0, 10.0, 10.0, 10.0]}, index=dates)}, axis=1)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RuntimeWarning)
+            diagnostics, _tables = build_research_diagnostics(
+                equity,
+                pd.DataFrame(),
+                pd.DataFrame(),
+                prices,
+                {"backtest": {"annual_trading_days": 252}, "research": {"benchmark": {"method": "equal_weight_universe"}}},
+            )
+
+        self.assertEqual([warning for warning in caught if issubclass(warning.category, RuntimeWarning)], [])
+        self.assertIsNone(diagnostics["benchmark"]["correlation"])
+
     def test_benchmark_uses_last_intraday_close_per_trade_date(self) -> None:
+        """函数说明：验证 test_benchmark_uses_last_intraday_close_per_trade_date 覆盖的行为场景。"""
         equity_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         equity = pd.Series([100.0, 105.0, 110.0], index=equity_dates, name="equity")
         price_dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00", "2024-01-04 15:00"])
@@ -229,6 +256,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
         self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 1.0)
 
     def test_research_diagnostics_accepts_plain_close_price_panel(self) -> None:
+        """函数说明：验证 test_research_diagnostics_accepts_plain_close_price_panel 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
         equity = pd.Series([100.0, 101.0, 103.0], index=dates, name="equity")
         prices = pd.DataFrame(
@@ -262,6 +290,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
         self.assertIn("holding_contributions", tables)
 
     def test_research_diagnostics_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_research_diagnostics_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
         equity = pd.Series([100.0, 101.0, 103.0], index=dates, name="equity")
         prices = pd.DataFrame(
@@ -283,6 +312,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
             )
 
     def test_hs300_equal_weight_benchmark_deduplicates_constituent_snapshots(self) -> None:
+        """函数说明：验证 test_hs300_equal_weight_benchmark_deduplicates_constituent_snapshots 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             constituents = root / "hs300_constituents.csv"
@@ -322,6 +352,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
         self.assertAlmostEqual(diagnostics["benchmark"]["benchmark_total_return"], 0.5)
 
     def test_regime_return_drawdown_counts_first_negative_return(self) -> None:
+        """函数说明：验证 test_regime_return_drawdown_counts_first_negative_return 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
         equity = pd.Series([100.0, 90.0], index=dates, name="equity")
         prices = pd.concat({"close": pd.DataFrame({"000001.SZ": [10.0, 9.0]}, index=dates)}, axis=1)
@@ -349,6 +380,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
         self.assertAlmostEqual(records[0]["strategy_max_drawdown"], -0.10)
 
     def test_market_cap_exposure_uses_point_in_time_asof_snapshot(self) -> None:
+        """函数说明：验证 test_market_cap_exposure_uses_point_in_time_asof_snapshot 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             daily_basic_file = root / "daily_basic.parquet"
@@ -405,6 +437,7 @@ class ResearchDiagnosticsTests(unittest.TestCase):
             self.assertIn("market_cap_exposure", tables)
 
     def test_market_cap_exposure_uses_latest_intraday_snapshot(self) -> None:
+        """函数说明：验证 test_market_cap_exposure_uses_latest_intraday_snapshot 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             daily_basic_file = root / "daily_basic.parquet"

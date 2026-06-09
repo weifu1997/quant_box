@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_rolling_ic 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -17,6 +19,7 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 def _math_factor_price_fixture(days: int = 12, instruments: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """函数说明：处理 math_factor_price_fixture 的内部辅助逻辑。"""
     dates = pd.date_range("2024-01-01", periods=days, freq="D")
     names = [f"S{i}" for i in range(instruments)]
     factors = []
@@ -34,7 +37,9 @@ def _math_factor_price_fixture(days: int = 12, instruments: int = 5) -> tuple[pd
 
 
 class RollingICTests(unittest.TestCase):
+    """类说明：组织 RollingICTests 测试用例。"""
     def test_calculate_rolling_ic_with_real_market_data(self) -> None:
+        """函数说明：验证 test_calculate_rolling_ic_with_real_market_data 覆盖的行为场景。"""
         market = require_real_market_data(
             start="2024-01-02",
             end="2024-04-30",
@@ -48,6 +53,7 @@ class RollingICTests(unittest.TestCase):
         self.assertGreater(int(rolling_ic.notna().sum().sum()), 0)
 
     def test_rolling_ic_uses_prior_window(self) -> None:
+        """函数说明：验证 test_rolling_ic_uses_prior_window 覆盖的行为场景。"""
         factors, prices = _math_factor_price_fixture()
         daily_ic = calculate_factor_ic(factors, prices, min_obs=3)
         rolling_ic = calculate_rolling_ic(factors, prices, window=5, min_periods=3, min_obs=3)
@@ -57,6 +63,7 @@ class RollingICTests(unittest.TestCase):
         self.assertAlmostEqual(float(rolling_ic.iloc[5]["F1"]), float(expected))
 
     def test_rolling_ic_does_not_use_same_day_ic(self) -> None:
+        """函数说明：验证 test_rolling_ic_does_not_use_same_day_ic 覆盖的行为场景。"""
         factors, prices = _math_factor_price_fixture()
         changed = factors.copy()
         date = pd.Timestamp("2024-01-06")
@@ -68,6 +75,7 @@ class RollingICTests(unittest.TestCase):
         self.assertAlmostEqual(float(original.loc[date, "F1"]), float(mutated.loc[date, "F1"]))
 
     def test_rolling_ic_lags_by_forward_horizon(self) -> None:
+        """函数说明：验证 test_rolling_ic_lags_by_forward_horizon 覆盖的行为场景。"""
         factors, prices = _math_factor_price_fixture(days=14)
         daily_ic = calculate_factor_ic(factors, prices, horizon=3, min_obs=3)
         rolling_ic = calculate_rolling_ic(factors, prices, horizon=3, window=5, min_periods=3, min_obs=3)
@@ -76,6 +84,7 @@ class RollingICTests(unittest.TestCase):
         self.assertAlmostEqual(float(rolling_ic.iloc[5]["F1"]), float(expected))
 
     def test_cluster_correlated_factors_keeps_one_representative(self) -> None:
+        """函数说明：验证 test_cluster_correlated_factors_keeps_one_representative 覆盖的行为场景。"""
         frame = pd.DataFrame(
             {
                 "A": [0.02, 0.03, 0.04, 0.05, 0.06],
@@ -89,6 +98,7 @@ class RollingICTests(unittest.TestCase):
         self.assertEqual(len({"A", "B"} & set(clusters)), 1)
 
     def test_rolling_weights_filter_weak_and_correlated_factors(self) -> None:
+        """函数说明：验证 test_rolling_weights_filter_weak_and_correlated_factors 覆盖的行为场景。"""
         dates = pd.date_range("2024-01-01", periods=8, freq="D")
         daily_ic = pd.DataFrame(
             {
@@ -110,12 +120,14 @@ class RollingICTests(unittest.TestCase):
         self.assertAlmostEqual(float(latest.abs().sum()), 1.0)
 
     def test_rolling_weights_require_daily_ic_attrs(self) -> None:
+        """函数说明：验证 test_rolling_weights_require_daily_ic_attrs 覆盖的行为场景。"""
         rolling_ic = pd.DataFrame({"F1": [0.03, 0.04]}, index=pd.date_range("2024-01-01", periods=2))
 
         with self.assertRaises(ValueError):
             make_rolling_ic_weights(rolling_ic, min_periods=1)
 
     def test_rolling_weights_smoothing_and_turnover_cap_reduce_weight_jumps(self) -> None:
+        """函数说明：验证 test_rolling_weights_smoothing_and_turnover_cap_reduce_weight_jumps 覆盖的行为场景。"""
         dates = pd.date_range("2024-01-01", periods=10, freq="D")
         daily_ic = pd.DataFrame(
             {
@@ -148,6 +160,7 @@ class RollingICTests(unittest.TestCase):
         self.assertLess(_max_weight_delta(stable), _max_weight_delta(raw))
 
     def test_rolling_weights_reuses_correlation_clusters_between_rebalance_sessions(self) -> None:
+        """函数说明：验证 test_rolling_weights_reuses_correlation_clusters_between_rebalance_sessions 覆盖的行为场景。"""
         dates = pd.date_range("2024-01-01", periods=9, freq="D")
         daily_ic = pd.DataFrame(
             {
@@ -174,6 +187,7 @@ class RollingICTests(unittest.TestCase):
         self.assertEqual(len(weights), len(dates) - 2)
 
     def test_composite_factor_accepts_dynamic_weights(self) -> None:
+        """函数说明：验证 test_composite_factor_accepts_dynamic_weights 覆盖的行为场景。"""
         dates = pd.date_range("2024-01-01", periods=2, freq="D")
         index = pd.MultiIndex.from_product([dates, ["A", "B", "C", "D", "E"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": range(10), "F2": range(10, 20)}, index=index)
@@ -185,6 +199,7 @@ class RollingICTests(unittest.TestCase):
         self.assertEqual(len(scores), len(index))
 
 def _max_weight_delta(weights_by_date: dict[pd.Timestamp, pd.Series]) -> float:
+    """函数说明：处理 max_weight_delta 的内部辅助逻辑。"""
     previous: pd.Series | None = None
     max_delta = 0.0
     for date in sorted(weights_by_date):

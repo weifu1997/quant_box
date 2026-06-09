@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_backtest 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import gc
@@ -12,7 +14,9 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class BacktestTests(unittest.TestCase):
+    """类说明：组织 BacktestTests 测试用例。"""
     def test_calculate_metrics_turnover_ignores_blocked_sells(self) -> None:
+        """函数说明：验证 test_calculate_metrics_turnover_ignores_blocked_sells 覆盖的行为场景。"""
         equity = pd.Series([100000.0, 100100.0, 100200.0], index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]))
         trades = pd.DataFrame(
             [
@@ -29,6 +33,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(metrics["turnover_count"], 3.0)
 
     def test_run_backtest_accepts_string_score_dates(self) -> None:
+        """函数说明：验证 test_run_backtest_accepts_string_score_dates 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         stock = "000001.SZ"
         scores = pd.Series(
@@ -49,6 +54,7 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue((result.trades["side"] == "BUY").any())
 
     def test_run_backtest_normalizes_intraday_price_timestamps_to_trade_dates(self) -> None:
+        """函数说明：验证 test_run_backtest_normalizes_intraday_price_timestamps_to_trade_dates 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-03 15:00"])
         stock = "000001.SZ"
         scores = pd.Series(
@@ -72,6 +78,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.equity_curve.index.tolist(), [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")])
 
     def test_run_backtest_uses_latest_intraday_price_per_trade_date(self) -> None:
+        """函数说明：验证 test_run_backtest_uses_latest_intraday_price_per_trade_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01 15:00", "2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"])
         stock = "000001.SZ"
         scores = pd.Series(
@@ -100,6 +107,7 @@ class BacktestTests(unittest.TestCase):
         self.assertAlmostEqual(float(buy["price"]), 10.0)
 
     def test_run_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
+        """函数说明：验证 test_run_backtest_matches_score_and_price_instruments_case_insensitively 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         scores = pd.Series(
             [1.0],
@@ -121,6 +129,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(buys.iloc[0]["instrument"], "000001.SZ")
 
     def test_run_backtest_keeps_highest_score_when_normalized_codes_duplicate(self) -> None:
+        """函数说明：验证 test_run_backtest_keeps_highest_score_when_normalized_codes_duplicate 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         scores = pd.Series(
             [10.0, 1.0, 5.0],
@@ -150,6 +159,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(buys["instrument"].tolist(), ["A"])
 
     def test_run_backtest_uses_latest_intraday_score_per_trade_date(self) -> None:
+        """函数说明：验证 test_run_backtest_uses_latest_intraday_score_per_trade_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         scores = pd.Series(
             [100.0, 1.0, 1.0, 50.0],
@@ -184,6 +194,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(buys["instrument"].tolist(), ["B"])
 
     def test_run_backtest_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_run_backtest_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         scores = pd.Series(
             [1.0],
@@ -203,6 +214,7 @@ class BacktestTests(unittest.TestCase):
             run_backtest(scores, prices, "2024-01-02", "2024-01-03", {"initial_capital": 100000, "top_n": 1})
 
     def test_calculate_metrics_sortino_uses_downside_deviation_over_all_returns(self) -> None:
+        """函数说明：验证 test_calculate_metrics_sortino_uses_downside_deviation_over_all_returns 覆盖的行为场景。"""
         equity = pd.Series(
             [100.0, 110.0, 104.5, 104.5],
             index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]),
@@ -216,11 +228,13 @@ class BacktestTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["sortino"], float(expected))
 
     def test_max_drawdown_duration_matches_longest_underwater_run(self) -> None:
+        """函数说明：验证 test_max_drawdown_duration_matches_longest_underwater_run 覆盖的行为场景。"""
         equity = pd.Series([100.0, 90.0, 95.0, 101.0, 99.0, 98.0, 102.0])
 
         self.assertEqual(_max_drawdown_duration(equity), 2)
 
     def test_lot_size_keeps_non_star_boards_at_default_lot(self) -> None:
+        """函数说明：验证 test_lot_size_keeps_non_star_boards_at_default_lot 覆盖的行为场景。"""
         config = {"lot_size": 100, "star_market_lot_size": 200}
 
         self.assertEqual(_lot_size("688001.SH", config), 200)
@@ -228,6 +242,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(_lot_size("830001.BJ", config), 100)
 
     def test_price_field_cache_prunes_dead_price_frames(self) -> None:
+        """函数说明：验证 test_price_field_cache_prunes_dead_price_frames 覆盖的行为场景。"""
         dead_key = -12345
         dead_frame = pd.DataFrame({"A": [1.0]})
         _PRICE_FIELD_CACHE[dead_key] = (weakref.ref(dead_frame), set(), {})
@@ -247,6 +262,7 @@ class BacktestTests(unittest.TestCase):
             _PRICE_FIELD_CACHE.pop(dead_key, None)
 
     def test_run_backtest_produces_equity_curve(self) -> None:
+        """函数说明：验证 test_run_backtest_produces_equity_curve 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-01-12")
         scores = market.factors["LOW0"].rename("score")
 
@@ -277,6 +293,7 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue(set(result.trades["instrument"]).issubset(set(market.instruments)))
 
     def test_limit_up_blocks_buy(self) -> None:
+        """函数说明：验证 test_limit_up_blocks_buy 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10, 10], index=index, name="score")
@@ -306,6 +323,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.equity_curve.iloc[-1], 100000)
 
     def test_growth_board_uses_twenty_percent_limit_threshold(self) -> None:
+        """函数说明：验证 test_growth_board_uses_twenty_percent_limit_threshold 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         stock = "300001.SZ"
         index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
@@ -331,6 +349,7 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse((result.trades["reason"] == "not_buyable").any())
 
     def test_growth_board_uses_growth_limit_threshold_when_star_threshold_differs(self) -> None:
+        """函数说明：验证 test_growth_board_uses_growth_limit_threshold_when_star_threshold_differs 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         stock = "300001.SZ"
         index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
@@ -362,6 +381,7 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse((result.trades["reason"] == "not_buyable").any())
 
     def test_st_uses_five_percent_limit_threshold(self) -> None:
+        """函数说明：验证 test_st_uses_five_percent_limit_threshold 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         stock = "600000.SH"
         index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
@@ -383,6 +403,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(blocked.iloc[0]["reason"], "not_buyable")
 
     def test_capacity_limit_uses_prior_amount_not_trade_day_amount(self) -> None:
+        """函数说明：验证 test_capacity_limit_uses_prior_amount_not_trade_day_amount 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -417,6 +438,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(blocked.iloc[0]["reason"], "capacity_limited")
 
     def test_stop_loss_forces_exit(self) -> None:
+        """函数说明：验证 test_stop_loss_forces_exit 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -442,6 +464,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(risk_trades.iloc[0]["reason"], "stop_loss")
 
     def test_stop_loss_exit_respects_capacity_limit_and_keeps_remaining_shares(self) -> None:
+        """函数说明：验证 test_stop_loss_exit_respects_capacity_limit_and_keeps_remaining_shares 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -484,6 +507,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(int(final_holding["shares"]), 9000)
 
     def test_stop_loss_uses_intraday_trigger_not_close_fill(self) -> None:
+        """函数说明：验证 test_stop_loss_uses_intraday_trigger_not_close_fill 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -521,6 +545,7 @@ class BacktestTests(unittest.TestCase):
         self.assertLess(float(risk_trade["price"]), 9.5)
 
     def test_gap_down_stop_loss_uses_open_price(self) -> None:
+        """函数说明：验证 test_gap_down_stop_loss_uses_open_price 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -556,6 +581,7 @@ class BacktestTests(unittest.TestCase):
         self.assertAlmostEqual(float(risk_trade["price"]), 9.0)
 
     def test_capacity_warning_is_recorded(self) -> None:
+        """函数说明：验证 test_capacity_warning_is_recorded 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -586,6 +612,7 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue(bool(filled.iloc[0]["capacity_warning"]))
 
     def test_dynamic_slippage_increases_with_adv_participation(self) -> None:
+        """函数说明：验证 test_dynamic_slippage_increases_with_adv_participation 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -623,6 +650,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(trade["slippage_model"], "dynamic_adv")
 
     def test_min_commission_and_transfer_fee_are_recorded(self) -> None:
+        """函数说明：验证 test_min_commission_and_transfer_fee_are_recorded 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -649,6 +677,7 @@ class BacktestTests(unittest.TestCase):
         self.assertGreater(result.metrics["transfer_fee_cost"], 0.0)
 
     def test_stale_price_exit_applies_haircut(self) -> None:
+        """函数说明：验证 test_stale_price_exit_applies_haircut 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -682,6 +711,7 @@ class BacktestTests(unittest.TestCase):
         self.assertAlmostEqual(float(stale_trade["price"]), 5.0)
 
     def test_stale_price_exit_haircuts_by_default(self) -> None:
+        """函数说明：验证 test_stale_price_exit_haircuts_by_default 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -713,6 +743,7 @@ class BacktestTests(unittest.TestCase):
         self.assertAlmostEqual(float(stale_trade["price"]), 5.0)
 
     def test_stale_price_exit_does_not_require_missing_volume_field(self) -> None:
+        """函数说明：验证 test_stale_price_exit_does_not_require_missing_volume_field 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -736,6 +767,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.holdings[result.holdings["date"] == dates[-1]]["instrument"].tolist(), ["A"])
 
     def test_circuit_breaker_cooldown_allows_reentry(self) -> None:
+        """函数说明：验证 test_circuit_breaker_cooldown_allows_reentry 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09"])
         index = pd.MultiIndex.from_product([dates[:-1], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series(10, index=index, name="score")
@@ -773,6 +805,7 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(later_buys.empty)
 
     def test_circuit_breaker_cooldown_keeps_historical_peak_for_second_drawdown(self) -> None:
+        """函数说明：验证 test_circuit_breaker_cooldown_keeps_historical_peak_for_second_drawdown 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10"])
         index = pd.MultiIndex.from_product([[dates[0], dates[4]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series(10, index=index, name="score")
@@ -813,6 +846,7 @@ class BacktestTests(unittest.TestCase):
         )
 
     def test_circuit_breaker_keeps_historical_peak_after_cooldown(self) -> None:
+        """函数说明：验证 test_circuit_breaker_keeps_historical_peak_after_cooldown 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09"])
         signal_dates = pd.to_datetime(["2024-01-02", "2024-01-05"])
         index = pd.MultiIndex.from_product([signal_dates, ["A"]], names=["datetime", "instrument"])
@@ -848,6 +882,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(pd.to_datetime(circuit_sells["date"]).tolist(), [pd.Timestamp("2024-01-04"), pd.Timestamp("2024-01-09")])
 
     def test_circuit_breaker_target_exposure_reduces_instead_of_liquidates(self) -> None:
+        """函数说明：验证 test_circuit_breaker_target_exposure_reduces_instead_of_liquidates 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series(10, index=index, name="score")
@@ -886,6 +921,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(int(final_holding["shares"]), 3000)
 
     def test_circuit_breaker_allows_null_cooldown_days(self) -> None:
+        """函数说明：验证 test_circuit_breaker_allows_null_cooldown_days 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series(10, index=index, name="score")
@@ -919,6 +955,7 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(result.trades.empty)
 
     def test_circuit_breaker_rejects_invalid_cooldown_days(self) -> None:
+        """函数说明：验证 test_circuit_breaker_rejects_invalid_cooldown_days 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         scores = pd.Series(
             [10],
@@ -948,6 +985,7 @@ class BacktestTests(unittest.TestCase):
             )
 
     def test_annual_drawdown_guard_resets_next_year(self) -> None:
+        """函数说明：验证 test_annual_drawdown_guard_resets_next_year 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2025-01-02", "2025-01-03"])
         index = pd.MultiIndex.from_product([[dates[0], dates[3]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10, 10], index=index, name="score")
@@ -987,6 +1025,7 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(later_buys.empty)
 
     def test_annual_drawdown_guard_release_allows_same_year_reentry(self) -> None:
+        """函数说明：验证 test_annual_drawdown_guard_release_allows_same_year_reentry 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08"])
         index = pd.MultiIndex.from_product([[dates[0], dates[3]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10, 10], index=index, name="score")
@@ -1030,6 +1069,7 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(later_buys.empty)
 
     def test_exposure_schedule_change_rebalances_with_latest_signal(self) -> None:
+        """函数说明：验证 test_exposure_schedule_change_rebalances_with_latest_signal 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -1066,6 +1106,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(pd.Timestamp(sells.iloc[0]["date"]), dates[-1])
 
     def test_exposure_schedule_uses_latest_intraday_value_per_trade_date(self) -> None:
+        """函数说明：验证 test_exposure_schedule_uses_latest_intraday_value_per_trade_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -1102,6 +1143,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(int(buy["shares"]), 5000)
 
     def test_exposure_schedule_signal_only_does_not_rebalance_between_signals(self) -> None:
+        """函数说明：验证 test_exposure_schedule_signal_only_does_not_rebalance_between_signals 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([10], index=index, name="score")
@@ -1137,6 +1179,7 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue(result.trades[result.trades["side"] == "SELL"].empty)
 
     def test_rebalance_drift_threshold_skips_small_weight_trades(self) -> None:
+        """函数说明：验证 test_rebalance_drift_threshold_skips_small_weight_trades 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates[:2], ["A", "B"]], names=["datetime", "instrument"])
         scores = pd.Series([2.0, 1.0, 2.0, 1.0], index=index, name="score")
@@ -1161,6 +1204,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(result.trades["side"].tolist(), ["BUY", "BUY"])
 
     def test_equity_overlay_rebalances_from_last_signal_after_drawdown(self) -> None:
+        """函数说明：验证 test_equity_overlay_rebalances_from_last_signal_after_drawdown 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([1.0], index=index, name="score")
@@ -1197,6 +1241,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(pd.Timestamp(sells.iloc[0]["date"]), dates[-1])
 
     def test_equity_overlay_signal_only_does_not_rebalance_between_signals(self) -> None:
+        """函数说明：验证 test_equity_overlay_signal_only_does_not_rebalance_between_signals 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A"]], names=["datetime", "instrument"])
         scores = pd.Series([1.0], index=index, name="score")
@@ -1231,6 +1276,7 @@ class BacktestTests(unittest.TestCase):
         self.assertTrue(result.trades[result.trades["side"] == "SELL"].empty)
 
     def test_rebalance_drift_threshold_does_not_keep_dropped_holding(self) -> None:
+        """函数说明：验证 test_rebalance_drift_threshold_does_not_keep_dropped_holding 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates[:2], ["A", "B", "C"]], names=["datetime", "instrument"])
         scores = pd.Series([3.0, 2.0, 1.0, 1.0, 3.0, 2.0], index=index, name="score")
@@ -1258,6 +1304,7 @@ class BacktestTests(unittest.TestCase):
         self.assertIn("C", buys["instrument"].tolist())
 
     def test_score_weighted_backtest_allocates_more_to_higher_scores(self) -> None:
+        """函数说明：验证 test_score_weighted_backtest_allocates_more_to_higher_scores 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A", "B"]], names=["datetime", "instrument"])
         scores = pd.Series([10.0, 1.0], index=index, name="score")
@@ -1283,6 +1330,7 @@ class BacktestTests(unittest.TestCase):
         self.assertGreater(int(buys.loc["A", "shares"]), int(buys.loc["B", "shares"]))
 
     def test_backtest_applies_max_industry_weight_to_selection(self) -> None:
+        """函数说明：验证 test_backtest_applies_max_industry_weight_to_selection 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([[dates[0]], ["A", "B", "C", "D"]], names=["datetime", "instrument"])
         scores = pd.Series([10.0, 9.0, 8.0, 7.0], index=index, name="score")
@@ -1309,6 +1357,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(bought, ["A", "C", "D"])
 
     def test_backtest_applies_selection_risk_filter_on_signal_date(self) -> None:
+        """函数说明：验证 test_backtest_applies_selection_risk_filter_on_signal_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([[dates[1]], ["A", "B"]], names=["datetime", "instrument"])
         scores = pd.Series([2.0, 1.0], index=index, name="score")

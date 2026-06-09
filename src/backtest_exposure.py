@@ -1,3 +1,5 @@
+"""模块说明：处理回测仓位比例和择时调仓规则。"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -7,6 +9,7 @@ import pandas as pd
 
 
 def _exposure_scale(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> float:
+    """函数说明：处理 exposure_scale 的内部辅助逻辑。"""
     target_vol = config.get("target_vol")
     overlay_scale = _equity_overlay_exposure(equity_rows, config)
     if target_vol is None:
@@ -24,6 +27,7 @@ def _exposure_scale(equity_rows: list[tuple[pd.Timestamp, float]], config: dict)
 
 
 def _equity_overlay_rebalance_needed(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> bool:
+    """函数说明：处理 equity_overlay_rebalance_needed 的内部辅助逻辑。"""
     if not _equity_overlay_enabled(config) or len(equity_rows) < 2:
         return False
     cfg = config.get("equity_overlay", {})
@@ -36,6 +40,7 @@ def _equity_overlay_rebalance_needed(equity_rows: list[tuple[pd.Timestamp, float
 
 
 def _equity_overlay_exposure(equity_rows: list[tuple[pd.Timestamp, float]], config: dict) -> float:
+    """函数说明：处理 equity_overlay_exposure 的内部辅助逻辑。"""
     if not _equity_overlay_enabled(config) or len(equity_rows) < 2:
         return 1.0
     cfg = config.get("equity_overlay", {})
@@ -77,11 +82,13 @@ def _equity_overlay_exposure(equity_rows: list[tuple[pd.Timestamp, float]], conf
 
 
 def _equity_overlay_enabled(config: dict) -> bool:
+    """函数说明：处理 equity_overlay_enabled 的内部辅助逻辑。"""
     overlay = config.get("equity_overlay", {})
     return isinstance(overlay, dict) and bool(overlay.get("enabled", False))
 
 
 def _normalize_exposure_schedule(schedule: object, price_dates: pd.Index) -> pd.Series | None:
+    """函数说明：规范化 normalize_exposure_schedule 的内部辅助逻辑。"""
     if schedule is None:
         return None
     if isinstance(schedule, pd.Series):
@@ -117,6 +124,7 @@ def _normalize_exposure_schedule(schedule: object, price_dates: pd.Index) -> pd.
 
 
 def _scheduled_exposure_scale(exposure_schedule: pd.Series | None, trade_date: pd.Timestamp) -> float:
+    """函数说明：处理 scheduled_exposure_scale 的内部辅助逻辑。"""
     if exposure_schedule is None or exposure_schedule.empty:
         return 1.0
     date = pd.Timestamp(trade_date).normalize()
@@ -132,6 +140,7 @@ def _scheduled_exposure_rebalance_needed(
     previous_date: pd.Timestamp | None,
     config: dict,
 ) -> bool:
+    """函数说明：处理 scheduled_exposure_rebalance_needed 的内部辅助逻辑。"""
     if exposure_schedule is None or previous_date is None:
         return False
     if bool(config.get("exposure_schedule_rebalance_on_signal_only", False)):

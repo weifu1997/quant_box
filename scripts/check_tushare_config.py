@@ -1,3 +1,5 @@
+"""模块说明：提供 check_tushare_config 命令行入口。"""
+
 from __future__ import annotations
 
 import json
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     client = TushareHttpClient.from_config()
     preview = client.redacted_request_preview(
         api_name="daily",

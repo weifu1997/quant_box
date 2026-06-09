@@ -1,3 +1,5 @@
+"""模块说明：计算、缓存和读取策略因子面板。"""
+
 from __future__ import annotations
 
 import json
@@ -22,6 +24,7 @@ def compute_alpha158_factors(
     instruments: str | list[str] | None = None,
     provider_uri: str | Path | None = None,
 ) -> pd.DataFrame:
+    """函数说明：计算 compute_alpha158_factors 主要逻辑。"""
     try:
         import qlib
         from qlib.contrib.data.handler import Alpha158
@@ -55,6 +58,7 @@ def compute_alpha158_factors(
 
 
 def _ensure_qlib_initialized(qlib_module, provider: Path, region: str) -> None:
+    """函数说明：确保 ensure_qlib_initialized 的内部辅助逻辑。"""
     global _QLIB_INIT_STATE
     state = (str(provider), str(region))
     if _QLIB_INIT_STATE == state:
@@ -83,6 +87,7 @@ def load_or_compute_factors(
     force: bool = False,
     columns: list[str] | None = None,
 ) -> pd.DataFrame:
+    """函数说明：加载 load_or_compute_factors 主要逻辑。"""
     config = load_config()
     end = resolve_target_date_value(end_date, config=config)
     path = resolve_path(cache_file or config["factors"]["cache_file"])
@@ -108,6 +113,7 @@ def load_or_compute_factors(
 
 
 def factor_cache_columns(cache_file: str | Path | None = None) -> list[str]:
+    """函数说明：处理 factor_cache_columns 主要逻辑。"""
     config = load_config()
     path = resolve_path(cache_file or config["factors"]["cache_file"])
     if not path.exists():
@@ -125,6 +131,7 @@ def factor_cache_columns(cache_file: str | Path | None = None) -> list[str]:
 
 
 def _read_factor_cache(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
+    """函数说明：读取 read_factor_cache 的内部辅助逻辑。"""
     if columns is None:
         return pd.read_parquet(path)
     requested = [str(column) for column in columns]
@@ -144,6 +151,7 @@ def _factor_cache_matches_request(
     cache_file: str | Path | None = None,
     columns: list[str] | None = None,
 ) -> bool:
+    """函数说明：处理 factor_cache_matches_request 的内部辅助逻辑。"""
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         return False
     if columns is not None:
@@ -181,6 +189,7 @@ def _factor_cache_matches_request(
 
 
 def _slice_factor_cache(factors: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    """函数说明：处理 slice_factor_cache 的内部辅助逻辑。"""
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         return factors
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
@@ -190,6 +199,7 @@ def _slice_factor_cache(factors: pd.DataFrame, start_date: str, end_date: str) -
 
 
 def _price_cache_state(config: dict, start_date: str, end_date: str) -> tuple[pd.DatetimeIndex, set[str]]:
+    """函数说明：处理 price_cache_state 的内部辅助逻辑。"""
     price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
     if not price_path.exists() and price_path.name in {"ohlcv.parquet", "ohlcv_adjusted.parquet"}:
         fallback_name = "close_adjusted.parquet" if price_path.name == "ohlcv_adjusted.parquet" else "close.parquet"
@@ -214,11 +224,13 @@ def _price_cache_state(config: dict, start_date: str, end_date: str) -> tuple[pd
 
 
 def _factor_cache_meta_path(cache_path: str | Path | None, config: dict) -> Path:
+    """函数说明：处理 factor_cache_meta_path 的内部辅助逻辑。"""
     path = resolve_path(cache_path or config["factors"]["cache_file"])
     return path.with_name(f"{path.name}.meta.json")
 
 
 def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cache_file: str | Path | None = None) -> bool:
+    """函数说明：处理 factor_cache_meta_matches 的内部辅助逻辑。"""
     meta_path = _factor_cache_meta_path(cache_file or config["factors"]["cache_file"], config)
     if not meta_path.exists():
         return "qlib" not in config
@@ -246,6 +258,7 @@ def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cac
 
 
 def _write_factor_cache(path: Path, factors: pd.DataFrame, start_date: str, end_date: str, config: dict) -> None:
+    """函数说明：写入 write_factor_cache 的内部辅助逻辑。"""
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_meta_path = path.with_name(f"{path.name}.tmp.meta.json")
     meta_path = path.with_name(f"{path.name}.meta.json")
@@ -261,6 +274,7 @@ def _write_factor_cache(path: Path, factors: pd.DataFrame, start_date: str, end_
 
 
 def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, end_date: str, config: dict) -> dict[str, object]:
+    """函数说明：处理 factor_cache_meta_payload 的内部辅助逻辑。"""
     qlib_cfg = config.get("qlib", {})
     payload: dict[str, object] = {
         "provider_uri": str(resolve_path(qlib_cfg.get("provider_uri", "data/qlib_data"))),
@@ -277,11 +291,13 @@ def _factor_cache_meta_payload(factors: pd.DataFrame | None, start_date: str, en
 
 
 def _normalize_symbols(values: object) -> set[str]:
+    """函数说明：规范化 normalize_symbols 的内部辅助逻辑。"""
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)
 
 
 def _should_write_factor_cache(path: Path, start_date: str, end_date: str, config: dict) -> bool:
+    """函数说明：处理 should_write_factor_cache 的内部辅助逻辑。"""
     if not _is_default_factor_cache(path, config):
         return True
     data_cfg = config.get("data", {})
@@ -301,6 +317,7 @@ def _should_write_factor_cache(path: Path, start_date: str, end_date: str, confi
 
 
 def _is_default_factor_cache(path: Path, config: dict) -> bool:
+    """函数说明：判断 is_default_factor_cache 是否成立。"""
     default_value = config.get("factors", {}).get("cache_file")
     if default_value is None:
         return False
@@ -311,6 +328,7 @@ def _is_default_factor_cache(path: Path, config: dict) -> bool:
 
 
 def _default_data_end_date(config: dict, default_start: str) -> pd.Timestamp | None:
+    """函数说明：处理 default_data_end_date 的内部辅助逻辑。"""
     data_cfg = config.get("data", {})
     configured_end = data_cfg.get("end_date")
     if configured_end not in {None, "", "auto"}:

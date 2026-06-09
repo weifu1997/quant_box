@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_scripts_docs 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,7 +14,9 @@ MOJIBAKE_MARKERS = ("鍙傛暟", "蹇", "鑷", "璋", "鐢", "淇")
 
 
 class ScriptsDocsTests(unittest.TestCase):
+    """类说明：组织 ScriptsDocsTests 测试用例。"""
     def test_quick_signal_bat_is_documented(self) -> None:
+        """函数说明：验证 test_quick_signal_bat_is_documented 覆盖的行为场景。"""
         quick = (ROOT / "02_快速更新并生成信号.bat").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -25,6 +29,7 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("data/raw/failed_fetches.csv", readme)
 
     def test_all_bat_files_are_documented(self) -> None:
+        """函数说明：验证 test_all_bat_files_are_documented 覆盖的行为场景。"""
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
         for path in BAT_FILES:
@@ -35,6 +40,7 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("不含 walk-forward 参数优化", readme)
 
     def test_run_all_bat_is_explicit_about_optimization(self) -> None:
+        """函数说明：验证 test_run_all_bat_is_explicit_about_optimization 覆盖的行为场景。"""
         run_all = (ROOT / "run_all.bat").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -50,6 +56,7 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("data health", readme)
 
     def test_supervised_auto_signal_entrypoint_is_documented(self) -> None:
+        """函数说明：验证 test_supervised_auto_signal_entrypoint_is_documented 覆盖的行为场景。"""
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("scripts\\run_auto_signal_supervised.py start", readme)
@@ -68,6 +75,7 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("Start and inspect long-running auto signal jobs", proc.stdout)
 
     def test_convert_data_help_does_not_start_conversion(self) -> None:
+        """函数说明：验证 test_convert_data_help_does_not_start_conversion 覆盖的行为场景。"""
         proc = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "run_convert_data.py"), "--help"],
             cwd=ROOT,
@@ -80,6 +88,7 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertIn("Convert raw stock CSV files", proc.stdout)
 
     def test_bat_files_are_utf8_and_use_crlf_line_endings(self) -> None:
+        """函数说明：验证 test_bat_files_are_utf8_and_use_crlf_line_endings 覆盖的行为场景。"""
         for path in BAT_FILES:
             data = path.read_bytes()
             data.decode("utf-8")
@@ -87,6 +96,7 @@ class ScriptsDocsTests(unittest.TestCase):
             self.assertEqual(data.count(b"\n"), data.count(b"\r\n"))
 
     def test_chinese_bat_output_switches_to_utf8_before_echo(self) -> None:
+        """函数说明：验证 test_chinese_bat_output_switches_to_utf8_before_echo 覆盖的行为场景。"""
         for path in BAT_FILES:
             text = path.read_text(encoding="utf-8")
             if not any(ord(char) > 127 for char in text):
@@ -98,6 +108,7 @@ class ScriptsDocsTests(unittest.TestCase):
             self.assertIn("chcp 65001 >nul", lines[:3])
 
     def test_scripts_and_docs_do_not_contain_mojibake_markers(self) -> None:
+        """函数说明：验证 test_scripts_and_docs_do_not_contain_mojibake_markers 覆盖的行为场景。"""
         files = [*BAT_FILES, ROOT / "README.md"]
         combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
 

@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_neutralization 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -10,7 +12,9 @@ from src.neutralization import load_daily_basic, load_industry_map, neutralize_s
 
 
 class NeutralizationTests(unittest.TestCase):
+    """类说明：组织 NeutralizationTests 测试用例。"""
     def test_neutralize_score_panel_respects_disabled_config(self) -> None:
+        """函数说明：验证 test_neutralize_score_panel_respects_disabled_config 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [pd.to_datetime(["2024-01-31"]), ["A", "B"]],
             names=["datetime", "instrument"],
@@ -29,6 +33,7 @@ class NeutralizationTests(unittest.TestCase):
         self.assertEqual(summary["dates_neutralized"], 0)
 
     def test_neutralize_score_panel_removes_industry_means(self) -> None:
+        """函数说明：验证 test_neutralize_score_panel_removes_industry_means 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [pd.to_datetime(["2024-01-31"]), ["A", "B", "C", "D"]],
             names=["datetime", "instrument"],
@@ -50,6 +55,7 @@ class NeutralizationTests(unittest.TestCase):
         self.assertEqual(summary["industry_dates"], 1)
 
     def test_neutralize_score_panel_matches_industry_case_insensitively(self) -> None:
+        """函数说明：验证 test_neutralize_score_panel_matches_industry_case_insensitively 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
             [pd.to_datetime(["2024-01-31"]), [" a ", "b", " c ", "d"]],
             names=["datetime", "instrument"],
@@ -71,6 +77,7 @@ class NeutralizationTests(unittest.TestCase):
         self.assertEqual(summary["industry_dates"], 1)
 
     def test_neutralize_score_panel_uses_latest_intraday_scores_per_date(self) -> None:
+        """函数说明：验证 test_neutralize_score_panel_uses_latest_intraday_scores_per_date 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         scores = pd.Series(
             [100.0, 1.0, 1.0, 100.0],
@@ -99,6 +106,7 @@ class NeutralizationTests(unittest.TestCase):
         self.assertGreater(float(daily.loc["B"]), float(daily.loc["A"]))
 
     def test_neutralize_score_panel_can_residualize_market_cap(self) -> None:
+        """函数说明：验证 test_neutralize_score_panel_can_residualize_market_cap 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         instruments = ["A", "B", "C", "D"]
         index = pd.MultiIndex.from_product([[date], instruments], names=["datetime", "instrument"])
@@ -120,6 +128,7 @@ class NeutralizationTests(unittest.TestCase):
         self.assertEqual(summary["market_cap_dates"], 1)
 
     def test_neutralize_score_panel_matches_market_cap_case_insensitively(self) -> None:
+        """函数说明：验证 test_neutralize_score_panel_matches_market_cap_case_insensitively 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         score_instruments = [" a ", "b", " c ", "d"]
         basic_instruments = ["A", " B ", "C", " D "]
@@ -142,6 +151,7 @@ class NeutralizationTests(unittest.TestCase):
         self.assertEqual(summary["market_cap_dates"], 1)
 
     def test_load_neutralization_sources_normalize_symbols(self) -> None:
+        """函数说明：验证 test_load_neutralization_sources_normalize_symbols 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             industry_file = root / "industry.csv"

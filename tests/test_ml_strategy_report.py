@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_ml_strategy_report 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -8,7 +10,9 @@ from scripts.run_ml_strategy import _markdown_report, _resolve_training_start_da
 
 
 class MLStrategyReportTests(unittest.TestCase):
+    """类说明：组织 MLStrategyReportTests 测试用例。"""
     def test_markdown_report_documents_factor_source_regime_and_coverage(self) -> None:
+        """函数说明：验证 test_markdown_report_documents_factor_source_regime_and_coverage 覆盖的行为场景。"""
         diagnostics = pd.DataFrame(
             [
                 {
@@ -136,6 +140,7 @@ class MLStrategyReportTests(unittest.TestCase):
         self.assertNotIn("future fundamental factors", report)
 
     def test_resolve_training_start_date_supports_auto_and_override(self) -> None:
+        """函数说明：验证 test_resolve_training_start_date_supports_auto_and_override 覆盖的行为场景。"""
         self.assertEqual(
             _resolve_training_start_date("2015-01-01", {"train_years": 3, "training_start_date": "auto"}),
             "2012-01-01",

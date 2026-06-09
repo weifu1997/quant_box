@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_factor_ic 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -9,7 +11,9 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class FactorICTests(unittest.TestCase):
+    """类说明：组织 FactorICTests 测试用例。"""
     def test_calculate_factor_ic_and_weights(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_and_weights 覆盖的行为场景。"""
         market = require_real_market_data(
             start="2024-01-02",
             end="2024-04-30",
@@ -26,6 +30,7 @@ class FactorICTests(unittest.TestCase):
         self.assertTrue(set(weights.index).issubset(set(market.factors.columns)))
 
     def test_calculate_factor_ic_respects_min_obs_after_vectorized_corr(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_respects_min_obs_after_vectorized_corr 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates, ["a", "b", "c"]], names=["datetime", "instrument"])
         factors = pd.DataFrame(
@@ -49,6 +54,7 @@ class FactorICTests(unittest.TestCase):
         self.assertTrue(ic[["F1", "F2"]].isna().all().all())
 
     def test_calculate_factor_ic_matches_pairwise_spearman_with_missing_values(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_matches_pairwise_spearman_with_missing_values 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         instruments = ["a", "b", "c", "d"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -84,6 +90,7 @@ class FactorICTests(unittest.TestCase):
                     self.assertAlmostEqual(float(actual), float(expected))
 
     def test_calculate_factor_ic_normalizes_price_instruments_and_dates(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_normalizes_price_instruments_and_dates 覆盖的行为场景。"""
         factor_dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product(
             [factor_dates, ["000001.SZ", "600519.SH"]],
@@ -105,6 +112,7 @@ class FactorICTests(unittest.TestCase):
         self.assertTrue(ic["F1"].notna().all())
 
     def test_make_forward_returns_uses_last_intraday_close_per_trade_date(self) -> None:
+        """函数说明：验证 test_make_forward_returns_uses_last_intraday_close_per_trade_date 覆盖的行为场景。"""
         prices = pd.DataFrame(
             {
                 "A": [10.0, 30.0, 20.0],
@@ -120,6 +128,7 @@ class FactorICTests(unittest.TestCase):
         self.assertAlmostEqual(float(by_code.loc["B"]), 1.0)
 
     def test_calculate_factor_ic_deduplicates_normalized_factor_instruments(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_deduplicates_normalized_factor_instruments 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_tuples(
             [
@@ -145,6 +154,7 @@ class FactorICTests(unittest.TestCase):
         self.assertAlmostEqual(float(ic.loc[dates[0], "F1"]), 1.0)
 
     def test_calculate_factor_ic_groups_factor_rows_by_normalized_date(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_groups_factor_rows_by_normalized_date 覆盖的行为场景。"""
         base_date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_tuples(
             [
@@ -170,6 +180,7 @@ class FactorICTests(unittest.TestCase):
         self.assertAlmostEqual(float(ic.loc[base_date, "F1"]), 1.0)
 
     def test_calculate_factor_ic_uses_latest_intraday_factor_per_instrument(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_uses_latest_intraday_factor_per_instrument 覆盖的行为场景。"""
         base_date = pd.Timestamp("2024-01-02")
         index = pd.MultiIndex.from_tuples(
             [
@@ -196,6 +207,7 @@ class FactorICTests(unittest.TestCase):
         self.assertAlmostEqual(float(ic.loc[base_date, "F1"]), 1.0)
 
     def test_calculate_factor_ic_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_calculate_factor_ic_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates[:2], ["a", "b", "c"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": range(6)}, index=index)

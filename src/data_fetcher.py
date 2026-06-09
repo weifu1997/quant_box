@@ -1,8 +1,11 @@
+"""模块说明：通过 Tushare 拉取、更新和补齐市场数据。"""
+
 from __future__ import annotations
 
 import csv
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import hashlib
 import io
 import json
 import logging
@@ -48,6 +51,58 @@ from src.tushare_client import (
 
 logger = logging.getLogger(__name__)
 
+
+class ResumableUpdateResult(dict):
+    """类说明：封装 ResumableUpdateResult 相关数据和行为。"""
+    def __init__(
+        self,
+        written: dict[str, Path] | None = None,
+        *,
+        status: str = "",
+        progress_path: str | Path | None = None,
+        failed_symbols: int = 0,
+        remaining_symbols: int = 0,
+        latest_symbols: int = 0,
+        fresh_or_confirmed_symbols: int = 0,
+        last_error: str = "",
+    ) -> None:
+        """函数说明：初始化实例状态。"""
+        super().__init__(written or {})
+        self.status = status
+        self.progress_path = Path(progress_path) if progress_path is not None else None
+        self.failed_symbols = int(failed_symbols)
+        self.remaining_symbols = int(remaining_symbols)
+        self.latest_symbols = int(latest_symbols)
+        self.fresh_or_confirmed_symbols = int(fresh_or_confirmed_symbols)
+        self.last_error = str(last_error or "")
+
+    def to_status_dict(self) -> dict[str, object]:
+        """函数说明：处理 to_status_dict 主要逻辑。"""
+        return {
+            "status": self.status,
+            "progress_path": str(self.progress_path) if self.progress_path is not None else "",
+            "failed_symbols": self.failed_symbols,
+            "remaining_symbols": self.remaining_symbols,
+            "latest_symbols": self.latest_symbols,
+            "fresh_or_confirmed_symbols": self.fresh_or_confirmed_symbols,
+            "last_error": self.last_error,
+            "written_symbols": len(self),
+        }
+
+
+def _resumable_result_from_progress(written: dict[str, Path], progress_path: Path, progress: dict[str, object]) -> ResumableUpdateResult:
+    """函数说明：处理 resumable_result_from_progress 的内部辅助逻辑。"""
+    return ResumableUpdateResult(
+        written,
+        status=str(progress.get("status", "")),
+        progress_path=progress_path,
+        failed_symbols=_safe_int(progress.get("failed_symbols"), 0),
+        remaining_symbols=_safe_int(progress.get("remaining_symbols"), 0),
+        latest_symbols=_safe_int(progress.get("latest_symbols"), 0),
+        fresh_or_confirmed_symbols=_safe_int(progress.get("fresh_or_confirmed_symbols"), 0),
+        last_error=str(progress.get("last_error", "")),
+    )
+
 def fetch_daily_stock(
     ts_code: str,
     start_date: str | datetime,
@@ -56,6 +111,7 @@ def fetch_daily_stock(
     retries: int = 5,
     retry_max_wait: float | None = None,
 ) -> pd.DataFrame:
+    """函数说明：拉取 fetch_daily_stock 主要逻辑。"""
     ts_code = _normalize_symbol(ts_code)
     client = client or TushareHttpClient.from_config()
     last_error: Exception | None = None
@@ -90,6 +146,7 @@ def fetch_daily_stocks(
     window_days: int | None = None,
     skip_failed: bool = True,
 ) -> pd.DataFrame:
+    """函数说明：拉取 fetch_daily_stocks 主要逻辑。"""
     codes = _unique_normalized_symbols(ts_codes)
     if not codes:
         return pd.DataFrame(columns=[*DAILY_FIELDS, "adj_factor"])
@@ -158,6 +215,7 @@ def fetch_daily_basic(
     retries: int = 5,
     retry_max_wait: float | None = None,
 ) -> pd.DataFrame:
+    """函数说明：拉取 fetch_daily_basic 主要逻辑。"""
     client = client or TushareHttpClient.from_config()
     params = {"trade_date": _format_tushare_date(trade_date)}
     requested_fields = fields or DAILY_BASIC_FIELDS
@@ -184,6 +242,7 @@ def fetch_index_constituents(
     retries: int = 5,
     retry_max_wait: float | None = None,
 ) -> pd.DataFrame:
+    """函数说明：拉取 fetch_index_constituents 主要逻辑。"""
     client = client or TushareHttpClient.from_config()
     params = {"index_code": index_code}
     if start_date is not None:
@@ -219,6 +278,7 @@ def update_index_constituents_data(
     skip_failed: bool = True,
     fallback_index_codes: Iterable[str] | None = None,
 ) -> Path:
+    """函数说明：更新 update_index_constituents_data 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     gov_cfg = config.get("data_governance", {})
@@ -276,6 +336,7 @@ def fetch_st_calendar(
     retries: int = 5,
     retry_max_wait: float | None = None,
 ) -> pd.DataFrame:
+    """函数说明：拉取 fetch_st_calendar 主要逻辑。"""
     client = client or TushareHttpClient.from_config()
     requested_fields = fields or NAMECHANGE_FIELDS
     last_error: Exception | None = None
@@ -298,6 +359,7 @@ def update_st_calendar_data(
     retries: int | None = None,
     retry_max_wait: float | None = None,
 ) -> Path:
+    """函数说明：更新 update_st_calendar_data 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     gov_cfg = config.get("data_governance", {})
@@ -312,6 +374,7 @@ def update_st_calendar_data(
 
 
 def _index_candidate_codes(index_code: str, fallback_index_codes: Iterable[str] | str | None) -> list[str]:
+    """函数说明：处理 index_candidate_codes 的内部辅助逻辑。"""
     values: list[str] = [str(index_code).strip().upper()]
     if isinstance(fallback_index_codes, str):
         fallback_values = [item.strip() for item in fallback_index_codes.split(",")]
@@ -332,6 +395,7 @@ def _fetch_index_window_with_fallback(
     retries: int,
     retry_max_wait: float | None,
 ) -> tuple[pd.DataFrame, Exception | None]:
+    """函数说明：拉取 fetch_index_window_with_fallback 的内部辅助逻辑。"""
     last_error: Exception | None = None
     for pos, code in enumerate(index_codes):
         try:
@@ -365,6 +429,7 @@ def update_daily_basic_data(
     max_dates: int | None = None,
     skip_failed: bool = True,
 ) -> Path:
+    """函数说明：更新 update_daily_basic_data 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     start = pd.Timestamp(start_date or data_cfg.get("history_start_date") or data_cfg["start_date"]).normalize()
@@ -420,6 +485,7 @@ def _fetch_daily_stock_batch(
     retry_max_wait: float | None = None,
     skip_failed: bool = True,
 ) -> pd.DataFrame:
+    """函数说明：拉取 fetch_daily_stock_batch 的内部辅助逻辑。"""
     params = {
         "ts_code": ",".join(ts_codes),
         "start_date": _format_tushare_date(start_date),
@@ -487,6 +553,7 @@ def _fetch_adj_factor_batch(
     end_date: str | datetime,
     client: TushareHttpClient,
 ) -> pd.DataFrame:
+    """函数说明：拉取 fetch_adj_factor_batch 的内部辅助逻辑。"""
     params = {
         "ts_code": ",".join(ts_codes),
         "start_date": _format_tushare_date(start_date),
@@ -517,6 +584,7 @@ def _complete_missing_adj_factors(
     retries: int,
     skip_failed: bool,
 ) -> pd.DataFrame:
+    """函数说明：处理 complete_missing_adj_factors 的内部辅助逻辑。"""
     if daily.empty:
         return adj
     daily_norm = normalize_daily_frame(daily)
@@ -554,6 +622,7 @@ def _complete_missing_adj_factors(
 
 
 def _drop_incomplete_adj_symbols(daily: pd.DataFrame, adj_factor: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """函数说明：处理 drop_incomplete_adj_symbols 的内部辅助逻辑。"""
     daily_norm = normalize_daily_frame(daily)
     adj_norm = _normalize_adj_factor_frame(adj_factor)
     if daily_norm.empty:
@@ -573,6 +642,7 @@ def _drop_incomplete_adj_symbols(daily: pd.DataFrame, adj_factor: pd.DataFrame) 
 
 
 def _normalize_adj_factor_frame(adj_factor: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
+    """函数说明：规范化 normalize_adj_factor_frame 的内部辅助逻辑。"""
     adj = adj_factor.rename(columns={"date": "trade_date"}).copy()
     if "ts_code" not in adj.columns and default_ts_code:
         adj["ts_code"] = default_ts_code
@@ -592,6 +662,7 @@ def _normalize_adj_factor_frame(adj_factor: pd.DataFrame, default_ts_code: str |
 
 
 def merge_adj_factor(daily: pd.DataFrame, adj_factor: pd.DataFrame, default_ts_code: str | None = None) -> pd.DataFrame:
+    """函数说明：处理 merge_adj_factor 主要逻辑。"""
     daily = normalize_daily_frame(daily, default_ts_code=default_ts_code)
     if daily.empty:
         result = daily.copy()
@@ -617,6 +688,7 @@ def fetch_hs300_stocks(
     client: TushareHttpClient | None = None,
     local_file: str | Path | None = None,
 ) -> list[str]:
+    """函数说明：拉取 fetch_hs300_stocks 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     local_path = resolve_path(local_file or data_cfg.get("hs300_constituents_file", "data/raw/hs300_constituents.csv"))
@@ -650,6 +722,7 @@ def fetch_stock_universe(
     local_file: str | Path | None = None,
     save_metadata: bool = True,
 ) -> list[str]:
+    """函数说明：拉取 fetch_stock_universe 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     universe = (universe or data_cfg.get("universe", "mainboard_a")).lower()
@@ -680,6 +753,7 @@ def fetch_stock_universe(
 
 
 def _fetch_stock_basic_history(client: TushareHttpClient) -> pd.DataFrame:
+    """函数说明：拉取 fetch_stock_basic_history 的内部辅助逻辑。"""
     frames: list[pd.DataFrame] = []
     for status in ["L", "D"]:
         df = client.call(
@@ -701,6 +775,7 @@ def filter_universe_frame(
     exclude_st: bool = True,
     st_calendar: pd.DataFrame | str | Path | None = None,
 ) -> pd.DataFrame:
+    """函数说明：过滤 filter_universe_frame 主要逻辑。"""
     if df.empty:
         return df
     result = df.copy()
@@ -742,6 +817,7 @@ def filter_universe_frame(
 
 
 def _load_st_calendar(path_value: str | Path | None) -> pd.DataFrame | None:
+    """函数说明：加载 load_st_calendar 的内部辅助逻辑。"""
     if not path_value:
         return None
     path = resolve_path(path_value)
@@ -757,6 +833,7 @@ def _exclude_point_in_time_st(
     as_of_date: str | datetime,
     st_calendar: pd.DataFrame | str | Path,
 ) -> pd.DataFrame:
+    """函数说明：处理 exclude_point_in_time_st 的内部辅助逻辑。"""
     calendar = pd.read_csv(resolve_path(st_calendar)) if isinstance(st_calendar, (str, Path)) else st_calendar.copy()
     if calendar.empty:
         return df
@@ -778,11 +855,13 @@ def _exclude_point_in_time_st(
 
 
 def _parse_calendar_dates(series: pd.Series) -> pd.Series:
+    """函数说明：解析 parse_calendar_dates 的内部辅助逻辑。"""
     text = series.astype("string").str.strip().str.replace("-", "", regex=False).str.replace("/", "", regex=False)
     return pd.to_datetime(text, format="%Y%m%d", errors="coerce")
 
 
 def _code_column(df: pd.DataFrame) -> str:
+    """函数说明：处理 code_column 的内部辅助逻辑。"""
     for col in ["ts_code", "con_code", "instrument", "code"]:
         if col in df.columns:
             return col
@@ -790,6 +869,7 @@ def _code_column(df: pd.DataFrame) -> str:
 
 
 def _is_mainboard_code(code: str) -> bool:
+    """函数说明：判断 is_mainboard_code 是否成立。"""
     symbol = code.split(".", 1)[0]
     exchange_ok = code.endswith((".SH", ".SZ"))
     return exchange_ok and symbol.startswith(MAINBOARD_PREFIXES)
@@ -802,6 +882,7 @@ def update_daily_data(
     raw_dir: str | Path | None = None,
     force_full: bool = False,
 ) -> dict[str, Path]:
+    """函数说明：更新 update_daily_data 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     duplicate_keep = str(data_cfg.get("duplicate_keep", "first"))
@@ -894,7 +975,8 @@ def update_daily_data_resumable(
     max_chunks: int | None = None,
     include_existing: bool = False,
     force_full: bool = False,
-) -> dict[str, Path]:
+) -> ResumableUpdateResult:
+    """函数说明：更新 update_daily_data_resumable 主要逻辑。"""
     config = load_config()
     data_cfg = config.get("data", {})
     target_dir = resolve_path(raw_dir or data_cfg.get("raw_dir", "data/raw"))
@@ -909,27 +991,48 @@ def update_daily_data_resumable(
     progress_path = resolve_path(progress_file or data_cfg.get("update_progress_file", "outputs/data_update_progress.json"))
 
     target_code_set = set(codes)
+    progress_context = _update_progress_context(
+        codes=codes,
+        start_date=start,
+        end_date=end,
+        raw_dir=target_dir,
+        include_existing=include_existing,
+        force_full=force_full,
+    )
     previous_progress = _read_update_progress(progress_path)
-    if _can_reuse_complete_update_progress(previous_progress, end, len(codes), include_existing, force_full):
-        refreshed_progress = dict(previous_progress or {})
-        refreshed_progress.update(
-            {
-                "status": "complete",
-                "updated_at": datetime.now().isoformat(timespec="seconds"),
-                "chunk_size": chunk_size,
-                "sleep_seconds": sleep_seconds,
-                "force_full": force_full,
-                "last_chunk": [],
-                "current_symbol": "",
-                "last_error": "",
-            }
-        )
-        _write_update_progress(progress_path, refreshed_progress)
-        logger.info("Resumable update already complete for %s; reused %s.", end, progress_path)
-        return {}
+    initial_latest_for_reuse: set[str] | None = None
+    if _can_reuse_complete_update_progress(previous_progress, progress_context):
+        initial_latest_for_reuse = _fresh_stock_codes(target_dir, target_code_set, end)
+        previous_confirmed = _confirmed_no_new_data_from_progress(previous_progress, target_code_set, initial_latest_for_reuse)
+        if len(initial_latest_for_reuse | previous_confirmed) < len(codes):
+            previous_progress = None
+        else:
+            refreshed_progress = dict(previous_progress or {})
+            refreshed_progress.update(
+                {
+                    **progress_context,
+                    "status": "complete",
+                    "updated_at": datetime.now().isoformat(timespec="seconds"),
+                    "chunk_size": chunk_size,
+                    "sleep_seconds": sleep_seconds,
+                    "last_chunk": [],
+                    "current_symbol": "",
+                    "last_error": "",
+                    "latest_symbols": len(initial_latest_for_reuse),
+                    "stale_or_missing_symbols": len(codes) - len(initial_latest_for_reuse),
+                    "latest_coverage": _coverage_ratio(len(initial_latest_for_reuse), len(codes)),
+                    "fresh_or_confirmed_symbols": len(initial_latest_for_reuse | previous_confirmed),
+                    "remaining_unconfirmed_symbols": 0,
+                }
+            )
+            _write_update_progress(progress_path, refreshed_progress)
+            logger.info("Resumable update already complete for %s; reused %s.", end, progress_path)
+            return _resumable_result_from_progress({}, progress_path, refreshed_progress)
+    if previous_progress and not _progress_context_matches(previous_progress, progress_context):
+        previous_progress = None
 
     initial_existing = _existing_stock_codes(target_dir) & target_code_set
-    initial_latest = _fresh_stock_codes(target_dir, target_code_set, end)
+    initial_latest = initial_latest_for_reuse if initial_latest_for_reuse is not None else _fresh_stock_codes(target_dir, target_code_set, end)
     initial_history_complete = _history_complete_stock_codes(target_dir, target_code_set, start, end) if force_full else set()
     latest_codes = set(initial_latest)
     confirmed_no_new_data: set[str] = set()
@@ -972,11 +1075,13 @@ def update_daily_data_resumable(
     _write_update_progress(
         progress_path,
         {
+            **progress_context,
             "status": "running",
             "started_at": started_at,
             "updated_at": started_at,
             "target_end_date": end,
             "target_symbols": len(codes),
+            "target_codes_count": len(codes),
             "initial_existing": len(initial_existing),
             "initial_latest_symbols": len(initial_latest),
             "initial_history_complete_symbols": len(initial_history_complete),
@@ -1057,11 +1162,13 @@ def update_daily_data_resumable(
             _write_update_progress(
                 progress_path,
                 {
+                    **progress_context,
                     "status": "running",
                     "started_at": started_at,
                     "updated_at": datetime.now().isoformat(timespec="seconds"),
                     "target_end_date": end,
                     "target_symbols": len(codes),
+                    "target_codes_count": len(codes),
                     "initial_existing": len(initial_existing),
                     "initial_latest_symbols": len(initial_latest),
                     "pending_symbols": len(pending_codes),
@@ -1105,11 +1212,13 @@ def update_daily_data_resumable(
     _write_update_progress(
         progress_path,
         {
+            **progress_context,
             "status": status,
             "started_at": started_at,
             "updated_at": datetime.now().isoformat(timespec="seconds"),
             "target_end_date": end,
             "target_symbols": len(codes),
+            "target_codes_count": len(codes),
             "initial_existing": len(initial_existing),
             "initial_latest_symbols": len(initial_latest),
             "pending_symbols": len(pending_codes),
@@ -1131,10 +1240,22 @@ def update_daily_data_resumable(
             "last_error": last_error,
         },
     )
-    return written
+    return _resumable_result_from_progress(
+        written,
+        progress_path,
+        {
+            "status": status,
+            "failed_symbols": len(failed),
+            "remaining_symbols": remaining_final,
+            "latest_symbols": len(latest_final),
+            "fresh_or_confirmed_symbols": len(latest_final | confirmed_no_new_data),
+            "last_error": last_error,
+        },
+    )
 
 
 def _group_codes_by_start(pending: dict[str, tuple[Path, str, bool]]) -> dict[str, list[str]]:
+    """函数说明：处理 group_codes_by_start 的内部辅助逻辑。"""
     grouped: dict[str, list[str]] = {}
     for code, (_path, actual_start, _needs_adj_backfill) in pending.items():
         grouped.setdefault(actual_start, []).append(code)
@@ -1142,6 +1263,7 @@ def _group_codes_by_start(pending: dict[str, tuple[Path, str, bool]]) -> dict[st
 
 
 def _group_chunk_codes_by_start(chunk_starts: dict[str, str]) -> dict[str, list[str]]:
+    """函数说明：处理 group_chunk_codes_by_start 的内部辅助逻辑。"""
     grouped: dict[str, list[str]] = {}
     for code, actual_start in chunk_starts.items():
         grouped.setdefault(actual_start, []).append(code)
@@ -1152,6 +1274,7 @@ def _limit_new_symbols_per_run(
     pending: dict[str, tuple[Path, str, bool]],
     max_new_symbols: int | None,
 ) -> dict[str, tuple[Path, str, bool]]:
+    """函数说明：处理 limit_new_symbols_per_run 的内部辅助逻辑。"""
     if max_new_symbols is None or max_new_symbols < 0:
         return pending
     existing = {code: item for code, item in pending.items() if item[0].exists()}
@@ -1165,11 +1288,13 @@ def _limit_new_symbols_per_run(
 
 
 def _batched(values: list[str], batch_size: int) -> Iterable[list[str]]:
+    """函数说明：处理 batched 的内部辅助逻辑。"""
     for index in range(0, len(values), batch_size):
         yield values[index : index + batch_size]
 
 
 def _existing_stock_codes(raw_dir: Path) -> set[str]:
+    """函数说明：处理 existing_stock_codes 的内部辅助逻辑。"""
     return {
         path.stem.upper()
         for path in raw_dir.glob("*.csv")
@@ -1178,10 +1303,12 @@ def _existing_stock_codes(raw_dir: Path) -> set[str]:
 
 
 def _fresh_stock_codes(raw_dir: Path, codes: set[str], end_date: str) -> set[str]:
+    """函数说明：处理 fresh_stock_codes 的内部辅助逻辑。"""
     target = pd.Timestamp(end_date).normalize()
     code_list = list(codes)
 
     def latest_for_code(code: str) -> tuple[str, pd.Timestamp | None]:
+        """函数说明：处理 latest_for_code 主要逻辑。"""
         return code, _raw_latest_date(raw_dir / f"{code}.csv")
 
     fresh: set[str] = set()
@@ -1199,11 +1326,13 @@ def _fresh_stock_codes(raw_dir: Path, codes: set[str], end_date: str) -> set[str
 
 
 def _history_complete_stock_codes(raw_dir: Path, codes: set[str], start_date: str, end_date: str) -> set[str]:
+    """函数说明：处理 history_complete_stock_codes 的内部辅助逻辑。"""
     start_target = pd.Timestamp(start_date).normalize()
     start_tolerance = start_target + pd.Timedelta(days=31)
     end_target = pd.Timestamp(end_date).normalize()
 
     def coverage_for_code(code: str) -> tuple[str, pd.Timestamp | None, pd.Timestamp | None]:
+        """函数说明：处理 coverage_for_code 主要逻辑。"""
         path = raw_dir / f"{code}.csv"
         return code, _raw_earliest_date(path), _raw_latest_date(path)
 
@@ -1225,6 +1354,7 @@ def _history_complete_stock_codes(raw_dir: Path, codes: set[str], start_date: st
 
 
 def _raw_earliest_date(path: Path) -> pd.Timestamp | None:
+    """函数说明：处理 raw_earliest_date 的内部辅助逻辑。"""
     if not path.exists():
         return None
     try:
@@ -1240,6 +1370,7 @@ def _raw_earliest_date(path: Path) -> pd.Timestamp | None:
 
 
 def _raw_latest_date(path: Path) -> pd.Timestamp | None:
+    """函数说明：处理 raw_latest_date 的内部辅助逻辑。"""
     if not path.exists():
         return None
     latest = _raw_latest_date_from_tail(path)
@@ -1258,6 +1389,7 @@ def _raw_latest_date(path: Path) -> pd.Timestamp | None:
 
 
 def _raw_latest_date_from_tail(path: Path, tail_bytes: int = 16384) -> pd.Timestamp | None:
+    """函数说明：处理 raw_latest_date_from_tail 的内部辅助逻辑。"""
     try:
         with path.open("rb") as handle:
             header_bytes = handle.readline()
@@ -1293,6 +1425,7 @@ def _raw_latest_date_from_tail(path: Path, tail_bytes: int = 16384) -> pd.Timest
 
 
 def _parse_trade_date_value(value: object) -> pd.Timestamp | None:
+    """函数说明：解析 parse_trade_date_value 的内部辅助逻辑。"""
     text = str(value).strip()
     compact = text.replace("-", "")
     if len(compact) >= 8 and compact[:8].isdigit():
@@ -1308,11 +1441,13 @@ def _parse_trade_date_value(value: object) -> pd.Timestamp | None:
 
 
 def _write_update_progress(path: Path, payload: dict[str, object]) -> None:
+    """函数说明：写入 write_update_progress 的内部辅助逻辑。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _read_update_progress(path: Path) -> dict[str, object] | None:
+    """函数说明：读取 read_update_progress 的内部辅助逻辑。"""
     if not path.exists():
         return None
     try:
@@ -1322,22 +1457,85 @@ def _read_update_progress(path: Path) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _can_reuse_complete_update_progress(
-    progress: dict[str, object] | None,
-    target_end: str,
-    target_symbols: int,
+def _update_progress_context(
+    *,
+    codes: list[str],
+    start_date: str,
+    end_date: str,
+    raw_dir: Path,
     include_existing: bool,
     force_full: bool,
+) -> dict[str, object]:
+    """函数说明：更新 update_progress_context 的内部辅助逻辑。"""
+    return {
+        "target_codes_hash": _target_codes_hash(codes),
+        "target_codes_count": len(codes),
+        "start_date": str(pd.Timestamp(start_date).date()),
+        "end_date": str(pd.Timestamp(end_date).date()),
+        "raw_dir": str(raw_dir.resolve()),
+        "include_existing": bool(include_existing),
+        "force_full": bool(force_full),
+    }
+
+
+def _target_codes_hash(codes: Iterable[str]) -> str:
+    """函数说明：处理 target_codes_hash 的内部辅助逻辑。"""
+    normalized = sorted(str(code).strip().upper() for code in codes if str(code).strip())
+    payload = "\n".join(normalized).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _confirmed_no_new_data_from_progress(
+    progress: dict[str, object] | None,
+    target_code_set: set[str],
+    latest_codes: set[str],
+) -> set[str]:
+    """函数说明：处理 confirmed_no_new_data_from_progress 的内部辅助逻辑。"""
+    if not progress:
+        return set()
+    previous_confirmed = progress.get("confirmed_no_new_data", [])
+    if not isinstance(previous_confirmed, list):
+        return set()
+    return {
+        str(code).upper()
+        for code in previous_confirmed
+        if str(code).upper() in target_code_set and str(code).upper() not in latest_codes
+    }
+
+
+def _can_reuse_complete_update_progress(
+    progress: dict[str, object] | None,
+    expected_context: dict[str, object],
 ) -> bool:
-    if include_existing or force_full or not progress:
+    """函数说明：处理 can_reuse_complete_update_progress 的内部辅助逻辑。"""
+    if not progress:
+        return False
+    if bool(expected_context.get("include_existing")) or bool(expected_context.get("force_full")):
         return False
     if str(progress.get("status", "")) != "complete":
         return False
-    if str(progress.get("target_end_date", "")) != target_end:
+    if not _progress_context_matches(progress, expected_context):
         return False
-    if int(progress.get("target_symbols", -1)) != target_symbols:
+    target_symbols = _safe_int(expected_context.get("target_codes_count"), -1)
+    if _safe_int(progress.get("target_symbols"), -1) != target_symbols:
         return False
-    return int(progress.get("remaining_unconfirmed_symbols", progress.get("remaining_symbols", 1))) == 0
+    return _safe_int(progress.get("remaining_unconfirmed_symbols", progress.get("remaining_symbols", 1)), 1) == 0
+
+
+def _progress_context_matches(progress: dict[str, object], expected_context: dict[str, object]) -> bool:
+    """函数说明：处理 progress_context_matches 的内部辅助逻辑。"""
+    for key in ["target_codes_hash", "target_codes_count", "start_date", "end_date", "raw_dir", "include_existing", "force_full"]:
+        if progress.get(key) != expected_context.get(key):
+            return False
+    return True
+
+
+def _safe_int(value: object, default: int) -> int:
+    """函数说明：处理 safe_int 的内部辅助逻辑。"""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
 
 
 def _daily_basic_trade_dates(
@@ -1345,6 +1543,7 @@ def _daily_basic_trade_dates(
     end: pd.Timestamp,
     trade_dates: Iterable[str | datetime] | None,
 ) -> list[pd.Timestamp]:
+    """函数说明：处理 daily_basic_trade_dates 的内部辅助逻辑。"""
     if trade_dates is not None:
         dates = pd.DatetimeIndex(pd.to_datetime(list(trade_dates), errors="coerce")).dropna().normalize().unique().sort_values()
         return [pd.Timestamp(date) for date in dates if start <= pd.Timestamp(date) <= end]
@@ -1366,6 +1565,7 @@ def _daily_basic_trade_dates(
 
 
 def _incremental_start(path: Path, configured_start: str) -> str:
+    """函数说明：处理 incremental_start 的内部辅助逻辑。"""
     latest = _raw_latest_date(path)
     if latest is None:
         return configured_start
@@ -1373,6 +1573,7 @@ def _incremental_start(path: Path, configured_start: str) -> str:
 
 
 def _needs_adj_factor_backfill(path: Path) -> bool:
+    """函数说明：处理 needs_adj_factor_backfill 的内部辅助逻辑。"""
     if not path.exists():
         return False
     columns = pd.read_csv(path, nrows=0).columns

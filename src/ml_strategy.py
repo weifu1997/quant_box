@@ -1,3 +1,5 @@
+"""模块说明：训练机器学习策略模型并生成预测分数。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,12 +15,14 @@ from src.factor_ic import calculate_factor_ic, make_ic_weights
 
 @dataclass
 class MLStrategyResult:
+    """类说明：封装 MLStrategyResult 相关数据和行为。"""
     scores: pd.Series
     diagnostics: pd.DataFrame
 
 
 @dataclass
 class TrainedMLModel:
+    """类说明：封装 TrainedMLModel 相关数据和行为。"""
     model: Any
     model_type: str
     feature_columns: list[str]
@@ -30,14 +34,17 @@ class TrainedMLModel:
 
 @dataclass
 class RidgeNumpyModel:
+    """类说明：封装 RidgeNumpyModel 相关数据和行为。"""
     coef: np.ndarray
 
     def predict(self, X: np.ndarray) -> np.ndarray:
+        """函数说明：处理 predict 主要逻辑。"""
         X_pred_design = np.column_stack([np.ones(len(X), dtype=np.float32), X])
         return (X_pred_design @ self.coef).astype(float)
 
 
 def ml_strategy_enabled(config: dict[str, Any]) -> bool:
+    """函数说明：处理 ml_strategy_enabled 主要逻辑。"""
     return bool(config.get("ml_strategy", {}).get("enabled", False))
 
 
@@ -49,6 +56,7 @@ def build_ml_scores(
     industry_map: pd.Series | None = None,
     daily_basic: pd.DataFrame | None = None,
 ) -> MLStrategyResult:
+    """函数说明：构建 build_ml_scores 主要逻辑。"""
     cfg = config.get("ml_strategy", {})
     if factors.empty:
         raise ValueError("factors is empty.")
@@ -94,6 +102,7 @@ def build_ml_scores(
     ensemble_window = max(1, int(cfg.get("ensemble_window", 3)))
     ranking_objective = _is_ranking_objective(cfg)
     ic_evolution_enabled = bool(cfg.get("feature_ic_evolution", False))
+    requested_model_type = _requested_model_type(cfg)
     feature_ic_weights_by_date = _precompute_feature_ic_weights(
         numeric,
         close,
@@ -140,6 +149,7 @@ def build_ml_scores(
                     "skipped",
                     max_label_end >= signal_date,
                     "insufficient_train_rows",
+                    requested_model_type=requested_model_type,
                 )
             )
             continue
@@ -195,11 +205,12 @@ def build_ml_scores(
                     [model.model_type for model in model_buffer],
                     len(active_features),
                     feature_evolved,
+                    requested_model_type=requested_model_type,
                 )
             )
             continue
 
-        model, model_used = _fit_train_model(
+        model, model_used, fallback_reason = _fit_train_model(
             prepared["X_train"],
             prepared["y"],
             cfg,
@@ -239,6 +250,7 @@ def build_ml_scores(
                     [model.model_type for model in model_buffer],
                     len(active_features),
                     feature_evolved,
+                    requested_model_type=requested_model_type,
                 )
             )
             continue
@@ -264,6 +276,8 @@ def build_ml_scores(
                 [model.model_type for model in model_buffer],
                 len(active_features),
                 feature_evolved,
+                requested_model_type=requested_model_type,
+                fallback_reason=fallback_reason,
             )
         )
 
@@ -274,6 +288,7 @@ def build_ml_scores(
 
 
 def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_factor_index 的内部辅助逻辑。"""
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
     instruments = [_normalize_instrument(value) for value in factors.index.get_level_values(1)]
     normalized_index = pd.MultiIndex.from_arrays([dates, instruments], names=["datetime", "instrument"])
@@ -286,6 +301,7 @@ def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
 
 
 def _feature_columns(numeric: pd.DataFrame, cfg: dict[str, Any]) -> list[str]:
+    """函数说明：处理 feature_columns 的内部辅助逻辑。"""
     configured = cfg.get("feature_columns")
     available = [str(column) for column in numeric.columns]
     if configured:
@@ -303,10 +319,12 @@ def _feature_columns(numeric: pd.DataFrame, cfg: dict[str, Any]) -> list[str]:
 
 
 def _close_frame(prices: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 close_frame 的内部辅助逻辑。"""
     return _common_close_price_frame(prices, normalize_symbols=True)
 
 
 def _price_history_counts(close: pd.DataFrame, target_index: pd.MultiIndex, min_sessions: int) -> pd.Series | None:
+    """函数说明：处理 price_history_counts 的内部辅助逻辑。"""
     if min_sessions <= 0:
         return None
     history = close.notna().rolling(min_sessions, min_periods=1).sum()
@@ -328,6 +346,7 @@ def _resolve_signal_dates(
     cfg: dict[str, Any],
     signal_dates: Iterable[pd.Timestamp | str] | None,
 ) -> list[pd.Timestamp]:
+    """函数说明：解析 resolve_signal_dates 的内部辅助逻辑。"""
     if signal_dates is not None:
         return sorted({pd.Timestamp(date).normalize() for date in signal_dates})
 
@@ -355,6 +374,7 @@ def _resolve_signal_dates(
 
 
 def _training_start_date(signal_date: pd.Timestamp, train_years: float) -> pd.Timestamp:
+    """函数说明：处理 training_start_date 的内部辅助逻辑。"""
     years = max(float(train_years), 0.0)
     whole_years = int(np.floor(years))
     fractional_years = years - whole_years
@@ -371,6 +391,7 @@ def _prepare_training_matrix(
     feature_weights: pd.Series | None,
     cfg: dict[str, Any],
 ) -> dict[str, Any] | None:
+    """函数说明：准备 prepare_training_matrix 的内部辅助逻辑。"""
     train_counts = train_frame.notna().sum(axis=1).to_numpy()
     train_mask = (train_counts >= min_feature_count) & np.isfinite(labels)
     if not train_mask.any():
@@ -397,6 +418,7 @@ def _prepare_training_matrix(
 
 
 def _is_ranking_objective(cfg: dict[str, Any]) -> bool:
+    """函数说明：判断 is_ranking_objective 是否成立。"""
     objective = str(cfg.get("model_objective", "regression")).strip().lower()
     return objective in {"ranking", "rank", "lambdarank"}
 
@@ -408,6 +430,7 @@ def _sample_train_positions(
     rng: np.random.Generator,
     ranking_objective: bool,
 ) -> np.ndarray:
+    """函数说明：处理 sample_train_positions 的内部辅助逻辑。"""
     if not ranking_objective:
         return np.sort(rng.choice(candidate_positions, size=max_train_rows, replace=False))
 
@@ -431,6 +454,7 @@ def _sample_train_positions(
 
 
 def _ranking_groups(index: pd.MultiIndex, y: np.ndarray, cfg: dict[str, Any]) -> list[int] | None:
+    """函数说明：处理 ranking_groups 的内部辅助逻辑。"""
     if not _is_ranking_objective(cfg):
         return None
     dates = pd.to_datetime(index.get_level_values(0)).normalize()
@@ -442,6 +466,7 @@ def _ranking_groups(index: pd.MultiIndex, y: np.ndarray, cfg: dict[str, Any]) ->
 
 
 def _ranking_relevance_labels(index: pd.MultiIndex, y: np.ndarray, cfg: dict[str, Any]) -> np.ndarray:
+    """函数说明：处理 ranking_relevance_labels 的内部辅助逻辑。"""
     dates = pd.to_datetime(index.get_level_values(0)).normalize()
     labels = pd.Series(y, index=pd.Index(dates, name="datetime"), dtype=float)
     ranked = labels.groupby(level=0, sort=False).rank(method="average", pct=True)
@@ -451,6 +476,7 @@ def _ranking_relevance_labels(index: pd.MultiIndex, y: np.ndarray, cfg: dict[str
 
 
 def _transform_label_frame(forward_returns: pd.DataFrame, cfg: dict[str, Any]) -> pd.DataFrame:
+    """函数说明：处理 transform_label_frame 的内部辅助逻辑。"""
     mode = str(cfg.get("label_mode", "raw_return")).strip().lower()
     min_obs = max(1, int(cfg.get("label_min_cross_section_obs", 20)))
     if mode in {"raw", "raw_return", "return"}:
@@ -495,6 +521,7 @@ def _adjust_label_returns(
     horizon: int,
     cfg: dict[str, Any],
 ) -> pd.DataFrame:
+    """函数说明：处理 adjust_label_returns 的内部辅助逻辑。"""
     mode = str(cfg.get("label_return_adjustment", "raw")).strip().lower()
     if mode in {"", "none", "raw"}:
         return forward_returns
@@ -516,6 +543,7 @@ def _neutralize_label_frame(
     industry_map: pd.Series | None = None,
     daily_basic: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
+    """函数说明：处理 neutralize_label_frame 的内部辅助逻辑。"""
     neutral_cfg = cfg.get("training_neutralization", {})
     if labels.empty or not bool(neutral_cfg.get("enabled", False)):
         return labels
@@ -546,6 +574,7 @@ def _market_cap_neutralize_label_frame(
     field: str,
     min_obs: int,
 ) -> pd.DataFrame:
+    """函数说明：处理 market_cap_neutralize_label_frame 的内部辅助逻辑。"""
     basics = daily_basic.copy()
     if isinstance(basics.index, pd.MultiIndex):
         names = list(basics.index.names)
@@ -581,6 +610,7 @@ def _normalize_daily_basic_frame(
     dates: object,
     instruments: object,
 ) -> pd.DataFrame:
+    """函数说明：规范化 normalize_daily_basic_frame 的内部辅助逻辑。"""
     raw_dates = _parse_datetime_values(dates)
     normalized_instruments = [_normalize_instrument(value) for value in instruments]
     rows = pd.DataFrame(
@@ -607,6 +637,7 @@ def _normalize_daily_basic_frame(
 
 
 def _residualize_row_by_market_cap(row: pd.Series, cap: pd.Series, min_obs: int) -> pd.Series | None:
+    """函数说明：处理 residualize_row_by_market_cap 的内部辅助逻辑。"""
     y = pd.to_numeric(row, errors="coerce").astype(float)
     x = np.log1p(pd.to_numeric(cap, errors="coerce").astype(float))
     x.index = y.index
@@ -630,6 +661,7 @@ def _prepare_prediction_matrix(
     min_feature_count: int,
     feature_weights: pd.Series | None,
 ) -> dict[str, Any]:
+    """函数说明：准备 prepare_prediction_matrix 的内部辅助逻辑。"""
     predict_counts = predict_frame.notna().sum(axis=1).to_numpy()
     predict_mask = predict_counts >= min_feature_count
     X_predict = _scale_features(predict_frame.loc[predict_mask], medians, stds, feature_weights)
@@ -642,6 +674,7 @@ def _scale_features(
     stds: pd.Series,
     feature_weights: pd.Series | None = None,
 ) -> np.ndarray:
+    """函数说明：处理 scale_features 的内部辅助逻辑。"""
     scaled = frame.fillna(medians).sub(medians, axis=1).div(stds, axis=1)
     if feature_weights is not None and not feature_weights.empty:
         weights = feature_weights.reindex(scaled.columns).fillna(0.0)
@@ -650,6 +683,7 @@ def _scale_features(
 
 
 def _predict_ensemble(model_buffer: list[TrainedMLModel], predict_features: pd.DataFrame) -> pd.Series:
+    """函数说明：处理 predict_ensemble 的内部辅助逻辑。"""
     if not model_buffer or predict_features.empty:
         return pd.Series(dtype=float, name="score")
     predictions: list[pd.Series] = []
@@ -679,6 +713,7 @@ def _evolve_features(
     train_end_date: pd.Timestamp,
     feature_ic_weights_by_date: dict[pd.Timestamp, pd.Series],
 ) -> tuple[list[str], pd.Series | None, bool]:
+    """函数说明：处理 evolve_features 的内部辅助逻辑。"""
     if not feature_ic_weights_by_date:
         return list(base_feature_columns), None, False
 
@@ -701,6 +736,7 @@ def _precompute_feature_ic_weights(
     cfg: dict[str, Any],
     enabled: bool,
 ) -> dict[pd.Timestamp, pd.Series]:
+    """函数说明：处理 precompute_feature_ic_weights 的内部辅助逻辑。"""
     if not enabled:
         return {}
 
@@ -752,39 +788,50 @@ def _precompute_feature_ic_weights(
     return weights_by_date
 
 
+def _requested_model_type(cfg: dict[str, Any]) -> str:
+    """函数说明：处理 requested_model_type 的内部辅助逻辑。"""
+    return str(cfg.get("model_type", "auto")).strip().lower()
+
+
 def _fit_train_model(
     X_train: np.ndarray,
     y: np.ndarray,
     cfg: dict[str, Any],
     seed: int,
     group: list[int] | None = None,
-) -> tuple[Any, str]:
-    requested = str(cfg.get("model_type", "auto")).strip().lower()
+) -> tuple[Any, str, str]:
+    """函数说明：处理 fit_train_model 的内部辅助逻辑。"""
+    requested = _requested_model_type(cfg)
     candidates = [requested] if requested != "auto" else ["lightgbm", "xgboost", "sklearn_gbdt", "ridge_numpy"]
+    fallback_reasons: list[str] = []
     for candidate in candidates:
         try:
             if candidate in {"lightgbm", "lgbm"}:
-                return _fit_lightgbm_model(X_train, y, cfg, seed, group=group), "lightgbm"
+                return _fit_lightgbm_model(X_train, y, cfg, seed, group=group), "lightgbm", ";".join(fallback_reasons)
             if candidate in {"xgboost", "xgb"}:
-                return _fit_xgboost_model(X_train, y, cfg, seed), "xgboost"
+                return _fit_xgboost_model(X_train, y, cfg, seed), "xgboost", ";".join(fallback_reasons)
             if candidate in {"sklearn_gbdt", "gbdt", "hist_gradient_boosting"}:
-                return _fit_sklearn_gbdt_model(X_train, y, cfg, seed), "sklearn_gbdt"
+                return _fit_sklearn_gbdt_model(X_train, y, cfg, seed), "sklearn_gbdt", ";".join(fallback_reasons)
             if candidate in {"ridge", "ridge_numpy", "linear"}:
-                return _fit_ridge_numpy_model(X_train, y, cfg), "ridge_numpy"
+                return _fit_ridge_numpy_model(X_train, y, cfg), "ridge_numpy", ";".join(fallback_reasons)
+            fallback_reasons.append(f"unsupported_model_type:{candidate}")
         except (ImportError, ModuleNotFoundError):
-            if requested != "auto" and not bool(cfg.get("fallback_on_missing_model", True)):
+            fallback_reasons.append(f"missing_dependency:{candidate}")
+            if requested != "auto" and not bool(cfg.get("fallback_on_missing_model", False)):
                 raise
             continue
         except Exception as exc:
             if not _is_missing_model_dependency(exc) or (
-                requested != "auto" and not bool(cfg.get("fallback_on_missing_model", True))
+                requested != "auto" and not bool(cfg.get("fallback_on_missing_model", False))
             ):
                 raise
+            fallback_reasons.append(f"missing_dependency:{candidate}")
             continue
-    return _fit_ridge_numpy_model(X_train, y, cfg), "ridge_numpy"
+    return _fit_ridge_numpy_model(X_train, y, cfg), "ridge_numpy", ";".join(fallback_reasons)
 
 
 def _predict_model(model: Any, X_predict: np.ndarray) -> np.ndarray:
+    """函数说明：处理 predict_model 的内部辅助逻辑。"""
     if len(X_predict) == 0:
         return np.array([], dtype=float)
     with warnings.catch_warnings():
@@ -797,6 +844,7 @@ def _predict_model(model: Any, X_predict: np.ndarray) -> np.ndarray:
 
 
 def _is_missing_model_dependency(exc: Exception) -> bool:
+    """函数说明：判断 is_missing_model_dependency 是否成立。"""
     text = f"{type(exc).__name__}: {exc}".lower()
     patterns = [
         "no module named",
@@ -815,6 +863,7 @@ def _fit_lightgbm_model(
     seed: int,
     group: list[int] | None = None,
 ):
+    """函数说明：处理 fit_lightgbm_model 的内部辅助逻辑。"""
     objective = str(cfg.get("model_objective", "regression")).strip().lower()
     if objective in {"ranking", "rank", "lambdarank"}:
         if not group:
@@ -885,6 +934,7 @@ def _fit_xgboost_model(
     cfg: dict[str, Any],
     seed: int,
 ):
+    """函数说明：处理 fit_xgboost_model 的内部辅助逻辑。"""
     objective = str(cfg.get("model_objective", "regression")).strip().lower()
     if objective in {"classification", "binary", "binary_classification"}:
         from xgboost import XGBClassifier
@@ -929,6 +979,7 @@ def _fit_sklearn_gbdt_model(
     cfg: dict[str, Any],
     seed: int,
 ):
+    """函数说明：处理 fit_sklearn_gbdt_model 的内部辅助逻辑。"""
     objective = str(cfg.get("model_objective", "regression")).strip().lower()
     if objective in {"classification", "binary", "binary_classification"}:
         from sklearn.ensemble import HistGradientBoostingClassifier
@@ -961,6 +1012,7 @@ def _fit_ridge_numpy_model(
     y: np.ndarray,
     cfg: dict[str, Any],
 ) -> RidgeNumpyModel:
+    """函数说明：处理 fit_ridge_numpy_model 的内部辅助逻辑。"""
     alpha = float(cfg.get("ridge_alpha", 10.0))
     X_design = np.column_stack([np.ones(len(X_train), dtype=np.float32), X_train])
     reg = np.eye(X_design.shape[1], dtype=np.float64) * alpha
@@ -975,6 +1027,7 @@ def _fit_ridge_numpy_model(
 
 
 def _skipped_row(signal_date: pd.Timestamp, reason: str) -> dict[str, object]:
+    """函数说明：处理 skipped_row 的内部辅助逻辑。"""
     return {
         "signal_date": pd.Timestamp(signal_date).date().isoformat(),
         "train_start": "",
@@ -984,7 +1037,9 @@ def _skipped_row(signal_date: pd.Timestamp, reason: str) -> dict[str, object]:
         "train_rows_available": 0,
         "train_rows_used": 0,
         "predict_rows": 0,
+        "requested_model_type": "",
         "model_used": "skipped",
+        "fallback_reason": "",
         "no_lookahead": False,
         "skip_reason": reason,
         "ensemble_size": 0,
@@ -1010,7 +1065,10 @@ def _diagnostic_row(
     ensemble_models: list[str] | None = None,
     feature_count: int = 0,
     feature_ic_evolved: bool = False,
+    requested_model_type: str = "",
+    fallback_reason: str = "",
 ) -> dict[str, object]:
+    """函数说明：处理 diagnostic_row 的内部辅助逻辑。"""
     return {
         "signal_date": pd.Timestamp(signal_date).date().isoformat(),
         "train_start": pd.Timestamp(train_start).date().isoformat(),
@@ -1020,7 +1078,9 @@ def _diagnostic_row(
         "train_rows_available": int(available_rows),
         "train_rows_used": int(used_rows),
         "predict_rows": int(predict_rows),
+        "requested_model_type": requested_model_type,
         "model_used": model_used,
+        "fallback_reason": fallback_reason,
         "no_lookahead": not bool(lookahead_breached),
         "skip_reason": reason,
         "ensemble_size": int(ensemble_size),

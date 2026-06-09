@@ -1,3 +1,5 @@
+"""模块说明：提供 run_regime_blend_probe 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Run a fast approximate probe for regime score-blend weights.")
     parser.add_argument("--start-date", default=config["data"].get("start_date", "2015-01-01"))
@@ -171,6 +174,7 @@ def _with_probe_overrides(
     sideways_defensive_weight: float,
     bear_defensive_weight: float,
 ) -> dict[str, Any]:
+    """函数说明：处理 with_probe_overrides 的内部辅助逻辑。"""
     result = deepcopy(config)
     result.setdefault("liquidity_filter", {})
     result["liquidity_filter"]["enabled"] = True
@@ -185,6 +189,7 @@ def _with_probe_overrides(
 
 
 def _with_timing_probe(config: dict[str, Any], sideways_exposure: float, bear_exposure: float) -> dict[str, Any]:
+    """函数说明：处理 with_timing_probe 的内部辅助逻辑。"""
     result = deepcopy(config)
     result.setdefault("defensive_timing", {})
     result["defensive_timing"]["sideways_exposure"] = float(sideways_exposure)
@@ -200,6 +205,7 @@ def _score_key(
     sideways_weight: float,
     bear_weight: float,
 ) -> tuple[Any, ...]:
+    """函数说明：处理 score_key 的内部辅助逻辑。"""
     return (
         str(liquidity_side).strip().lower(),
         round(float(liquidity_quantile), 6),
@@ -211,10 +217,12 @@ def _score_key(
 
 
 def _csv_values(value: str, cast):
+    """函数说明：处理 csv_values 的内部辅助逻辑。"""
     return [cast(item.strip()) for item in str(value).split(",") if item.strip()]
 
 
 def _csv_optional_values(value: str, cast):
+    """函数说明：处理 csv_optional_values 的内部辅助逻辑。"""
     values: list[Any] = []
     for item in str(value).split(","):
         item = item.strip()
@@ -228,6 +236,7 @@ def _csv_optional_values(value: str, cast):
 
 
 def _optional_key(value: object) -> float | None:
+    """函数说明：处理 optional_key 的内部辅助逻辑。"""
     if value is None or pd.isna(value):
         return None
     return round(float(value), 6)

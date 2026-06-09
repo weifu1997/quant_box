@@ -1,3 +1,5 @@
+"""模块说明：构建研究诊断报告以解释回测、基准和风险暴露表现。"""
+
 from __future__ import annotations
 
 import json
@@ -83,6 +85,7 @@ def write_research_diagnostics(
     out_dir: str | Path,
     prefix: str = "auto_research",
 ) -> dict[str, str]:
+    """函数说明：写入 write_research_diagnostics 主要逻辑。"""
     output_dir = resolve_path(out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     paths: dict[str, str] = {}
@@ -99,6 +102,7 @@ def write_research_diagnostics(
 
 
 def _equity_series(equity_curve: pd.Series | pd.DataFrame) -> pd.Series:
+    """函数说明：处理 equity_series 的内部辅助逻辑。"""
     if isinstance(equity_curve, pd.DataFrame):
         if equity_curve.empty:
             return pd.Series(dtype=float, name="equity")
@@ -115,6 +119,7 @@ def _equity_series(equity_curve: pd.Series | pd.DataFrame) -> pd.Series:
 
 
 def _benchmark_curve(price_df: pd.DataFrame, config: dict[str, Any], target_index: pd.Index) -> pd.Series | None:
+    """函数说明：处理 benchmark_curve 的内部辅助逻辑。"""
     research_cfg = config.get("research", {})
     benchmark_cfg = research_cfg.get("benchmark", {})
     benchmark_file = benchmark_cfg.get("file") or config.get("market_regime", {}).get("benchmark_file")
@@ -155,6 +160,7 @@ def _benchmark_curve(price_df: pd.DataFrame, config: dict[str, Any], target_inde
 
 
 def _read_benchmark_series(path: Path, target_index: pd.Index) -> pd.Series:
+    """函数说明：读取 read_benchmark_series 的内部辅助逻辑。"""
     if path.suffix.lower() == ".csv":
         frame = pd.read_csv(path)
         date_col = next((col for col in ["date", "trade_date", "datetime"] if col in frame.columns), frame.columns[0])
@@ -171,6 +177,7 @@ def _read_benchmark_series(path: Path, target_index: pd.Index) -> pd.Series:
 
 
 def _normalize_curve(series: pd.Series, target_index: pd.Index) -> pd.Series:
+    """函数说明：规范化 normalize_curve 的内部辅助逻辑。"""
     result = pd.to_numeric(series, errors="coerce").dropna().astype(float)
     result.index = pd.to_datetime(result.index).normalize()
     result = result[~result.index.duplicated(keep="last")].sort_index()
@@ -185,6 +192,7 @@ def _normalize_curve(series: pd.Series, target_index: pd.Index) -> pd.Series:
 
 
 def _benchmark_comparison(equity: pd.Series, benchmark: pd.Series | None, annual_days: int) -> dict[str, Any]:
+    """函数说明：处理 benchmark_comparison 的内部辅助逻辑。"""
     strategy_returns = equity.pct_change(fill_method=None).dropna()
     summary: dict[str, Any] = {
         "strategy_total_return": _total_return(equity),
@@ -217,7 +225,7 @@ def _benchmark_comparison(equity: pd.Series, benchmark: pd.Series | None, annual
             "tracking_error": float(active.std(ddof=0) * np.sqrt(annual_days)) if len(active) else None,
             "information_ratio": _information_ratio(active, annual_days),
             "beta": beta,
-            "correlation": float(strategy_ret.corr(bench_ret)) if len(strategy_ret) and len(bench_ret) else None,
+            "correlation": _correlation(strategy_ret, bench_ret),
         }
     )
     return summary
@@ -228,6 +236,7 @@ def _drawdown_diagnostics(
     benchmark: pd.Series | None,
     trades: pd.DataFrame,
 ) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """函数说明：处理 drawdown_diagnostics 的内部辅助逻辑。"""
     if equity.empty:
         return {"enabled": False, "issues": ["empty_equity_curve"]}, {}
     episodes = _drawdown_episodes(equity, benchmark, trades)
@@ -265,6 +274,7 @@ def _drawdown_diagnostics(
 
 
 def _max_drawdown_trade_tables(trades: pd.DataFrame, peak_date: object, trough_date: object) -> dict[str, pd.DataFrame]:
+    """函数说明：处理 max_drawdown_trade_tables 的内部辅助逻辑。"""
     if trades.empty or "date" not in trades.columns or pd.isna(peak_date) or pd.isna(trough_date):
         return {}
     start = pd.Timestamp(peak_date).normalize()
@@ -308,6 +318,7 @@ def _max_drawdown_trade_tables(trades: pd.DataFrame, peak_date: object, trough_d
 
 
 def _drawdown_episodes(equity: pd.Series, benchmark: pd.Series | None, trades: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 drawdown_episodes 的内部辅助逻辑。"""
     series = equity.sort_index().astype(float)
     running_peak = series.cummax()
     drawdown = series / running_peak - 1.0
@@ -336,6 +347,7 @@ def _drawdown_episode_row(
     start_date: pd.Timestamp,
     recovery_date: pd.Timestamp | None,
 ) -> dict[str, Any]:
+    """函数说明：处理 drawdown_episode_row 的内部辅助逻辑。"""
     end_date = recovery_date if recovery_date is not None else pd.Timestamp(equity.index[-1])
     period_drawdown = drawdown.loc[(drawdown.index >= start_date) & (drawdown.index <= end_date)]
     trough_date = pd.Timestamp(period_drawdown.idxmin())
@@ -360,6 +372,7 @@ def _drawdown_episode_row(
 
 
 def _trade_counts_between(trades: pd.DataFrame, start_date: pd.Timestamp, end_date: pd.Timestamp) -> dict[str, int]:
+    """函数说明：处理 trade_counts_between 的内部辅助逻辑。"""
     if trades.empty or "date" not in trades.columns:
         return {
             "trades_peak_to_trough": 0,
@@ -383,6 +396,7 @@ def _trade_counts_between(trades: pd.DataFrame, start_date: pd.Timestamp, end_da
 
 
 def _benchmark_return_between(benchmark: pd.Series | None, start_date: pd.Timestamp, end_date: pd.Timestamp) -> float | None:
+    """函数说明：处理 benchmark_return_between 的内部辅助逻辑。"""
     if benchmark is None or benchmark.empty:
         return None
     series = benchmark.sort_index().astype(float)
@@ -393,18 +407,21 @@ def _benchmark_return_between(benchmark: pd.Series | None, start_date: pd.Timest
 
 
 def _date_text(value: object) -> str | None:
+    """函数说明：处理 date_text 的内部辅助逻辑。"""
     if value is None or pd.isna(value):
         return None
     return str(pd.Timestamp(value).date())
 
 
 def _optional_int(value: object) -> int | None:
+    """函数说明：处理 optional_int 的内部辅助逻辑。"""
     if value is None or pd.isna(value):
         return None
     return int(value)
 
 
 def _optional_float(value: object) -> float | None:
+    """函数说明：处理 optional_float 的内部辅助逻辑。"""
     if value is None or pd.isna(value):
         return None
     return float(value)
@@ -417,6 +434,7 @@ def _regime_return_diagnostics(
     config: dict[str, Any],
     annual_days: int,
 ) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """函数说明：处理 regime_return_diagnostics 的内部辅助逻辑。"""
     if equity.empty or price_df.empty:
         return {"enabled": False, "issues": ["regime_returns_unavailable"]}, {}
     regimes = detect_reporting_regime(price_df, config)
@@ -476,6 +494,7 @@ def _regime_return_diagnostics(
 
 
 def _compound_returns(returns: pd.Series) -> float | None:
+    """函数说明：处理 compound_returns 的内部辅助逻辑。"""
     clean = pd.to_numeric(returns, errors="coerce").dropna()
     if clean.empty:
         return None
@@ -483,6 +502,7 @@ def _compound_returns(returns: pd.Series) -> float | None:
 
 
 def _annualized_return_from_returns(returns: pd.Series, annual_days: int) -> float | None:
+    """函数说明：处理 annualized_return_from_returns 的内部辅助逻辑。"""
     total = _compound_returns(returns)
     clean = pd.to_numeric(returns, errors="coerce").dropna()
     if total is None or clean.empty:
@@ -491,6 +511,7 @@ def _annualized_return_from_returns(returns: pd.Series, annual_days: int) -> flo
 
 
 def _max_drawdown_from_returns(returns: pd.Series) -> float | None:
+    """函数说明：处理 max_drawdown_from_returns 的内部辅助逻辑。"""
     clean = pd.to_numeric(returns, errors="coerce").dropna()
     if clean.empty:
         return None
@@ -504,6 +525,7 @@ def _regime_trade_diagnostics(
     price_df: pd.DataFrame,
     config: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """函数说明：处理 regime_trade_diagnostics 的内部辅助逻辑。"""
     if trades.empty or "date" not in trades.columns or price_df.empty:
         return {"enabled": False, "issues": ["regime_trade_costs_unavailable"]}, {}
     regimes = detect_reporting_regime(price_df, config)
@@ -572,6 +594,7 @@ def _regime_trade_diagnostics(
 
 
 def _cost_attribution(trades: pd.DataFrame, equity: pd.Series) -> dict[str, Any]:
+    """函数说明：处理 cost_attribution 的内部辅助逻辑。"""
     initial = float(equity.iloc[0]) if not equity.empty else 0.0
     summary: dict[str, Any] = {"trade_count": int(len(trades)), "initial_equity": initial}
     cost_columns = ["commission_cost", "tax_cost", "transfer_fee_cost", "slippage_cost"]
@@ -596,6 +619,7 @@ def _turnover_attribution(
     config: dict[str, Any],
     annual_days: int,
 ) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """函数说明：处理 turnover_attribution 的内部辅助逻辑。"""
     if trades.empty or "side" not in trades.columns:
         return {"enabled": False, "issues": ["trades_unavailable"]}, {}
 
@@ -695,6 +719,7 @@ def _turnover_attribution(
 
 
 def _turnover_categories(frame: pd.DataFrame, positions_after_trade: set[tuple[pd.Timestamp, str]]) -> pd.Series:
+    """函数说明：处理 turnover_categories 的内部辅助逻辑。"""
     categories = pd.Series("other", index=frame.index, dtype=object)
     buy = frame["side"] == "BUY"
     sell = frame["side"] == "SELL"
@@ -716,6 +741,7 @@ def _turnover_categories(frame: pd.DataFrame, positions_after_trade: set[tuple[p
 
 
 def _category_metrics(by_category: pd.DataFrame, initial_equity: float) -> dict[str, Any]:
+    """函数说明：处理 category_metrics 的内部辅助逻辑。"""
     metrics: dict[str, Any] = {}
     if by_category.empty:
         return metrics
@@ -734,6 +760,7 @@ def _category_metrics(by_category: pd.DataFrame, initial_equity: float) -> dict[
 
 
 def _positions_after_trade(holdings: pd.DataFrame) -> set[tuple[pd.Timestamp, str]]:
+    """函数说明：处理 positions_after_trade 的内部辅助逻辑。"""
     frame = _normalize_holdings(holdings)
     if frame.empty:
         return set()
@@ -741,6 +768,7 @@ def _positions_after_trade(holdings: pd.DataFrame) -> set[tuple[pd.Timestamp, st
 
 
 def _column_or_default(frame: pd.DataFrame, column: str, default: Any) -> pd.Series:
+    """函数说明：处理 column_or_default 的内部辅助逻辑。"""
     if column in frame.columns:
         return frame[column]
     return pd.Series([default] * len(frame), index=frame.index)
@@ -752,6 +780,7 @@ def _holding_return_attribution(
     config: dict[str, Any],
     drawdown_summary: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """函数说明：处理 holding_return_attribution 的内部辅助逻辑。"""
     if holdings.empty:
         return {"enabled": False, "issues": ["empty_holdings"]}, {}
     close = _price_field(price_df, "close")
@@ -842,6 +871,7 @@ def _max_drawdown_contribution_attribution(
     contribution: pd.DataFrame,
     drawdown_summary: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """函数说明：处理 max_drawdown_contribution_attribution 的内部辅助逻辑。"""
     start, end = _drawdown_contribution_window(drawdown_summary)
     if start is None or end is None:
         return {"max_drawdown_contribution_enabled": False}, {}
@@ -883,6 +913,7 @@ def _max_drawdown_contribution_attribution(
 
 
 def _drawdown_contribution_window(drawdown_summary: dict[str, Any] | None) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """函数说明：处理 drawdown_contribution_window 的内部辅助逻辑。"""
     if not drawdown_summary or not bool(drawdown_summary.get("enabled", False)):
         return None, None
     peak = drawdown_summary.get("max_drawdown_peak_date")
@@ -893,6 +924,7 @@ def _drawdown_contribution_window(drawdown_summary: dict[str, Any] | None) -> tu
 
 
 def _attach_regime_to_contributions(contribution: pd.DataFrame, price_df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+    """函数说明：处理 attach_regime_to_contributions 的内部辅助逻辑。"""
     if contribution.empty or "next_date" not in contribution.columns or price_df.empty:
         return contribution
     regimes = detect_reporting_regime(price_df, config)
@@ -906,6 +938,7 @@ def _attach_regime_to_contributions(contribution: pd.DataFrame, price_df: pd.Dat
 
 
 def _group_contribution_by_regime(contribution: pd.DataFrame, column: str) -> pd.DataFrame:
+    """函数说明：处理 group_contribution_by_regime 的内部辅助逻辑。"""
     if contribution.empty or "regime" not in contribution.columns or column not in contribution.columns:
         return pd.DataFrame()
     frame = contribution.dropna(subset=["regime"])
@@ -919,6 +952,7 @@ def _group_contribution_by_regime(contribution: pd.DataFrame, column: str) -> pd
 
 
 def _top_records_by_regime(frame: pd.DataFrame, column: str, ascending: bool, limit: int = 3) -> list[dict[str, Any]]:
+    """函数说明：处理 top_records_by_regime 的内部辅助逻辑。"""
     if frame.empty or "regime" not in frame.columns or column not in frame.columns:
         return []
     rows: list[dict[str, Any]] = []
@@ -930,6 +964,7 @@ def _top_records_by_regime(frame: pd.DataFrame, column: str, ascending: bool, li
 
 
 def _exposure_diagnostics(holdings: pd.DataFrame, config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """函数说明：处理 exposure_diagnostics 的内部辅助逻辑。"""
     frame = _normalize_holdings(holdings)
     if frame.empty:
         return {"enabled": False, "issues": ["empty_holdings"]}, {}
@@ -969,6 +1004,7 @@ def _exposure_diagnostics(holdings: pd.DataFrame, config: dict[str, Any]) -> tup
 
 
 def _market_cap_exposure(latest_holdings: pd.DataFrame, latest_date: pd.Timestamp, config: dict[str, Any]) -> pd.DataFrame:
+    """函数说明：处理 market_cap_exposure 的内部辅助逻辑。"""
     research_cfg = config.get("research", {}).get("exposure", {})
     daily_basic_path = resolve_path(
         research_cfg.get("daily_basic_file")
@@ -1035,6 +1071,7 @@ def _market_cap_exposure(latest_holdings: pd.DataFrame, latest_date: pd.Timestam
 
 
 def _market_cap_exposure_summary(cap_exposure: pd.DataFrame, latest_date: pd.Timestamp, config: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 market_cap_exposure_summary 的内部辅助逻辑。"""
     if cap_exposure.empty:
         return {}
     issues: list[str] = []
@@ -1070,12 +1107,14 @@ def _market_cap_exposure_summary(cap_exposure: pd.DataFrame, latest_date: pd.Tim
 
 
 def _numeric_column_sum(frame: pd.DataFrame, column: str) -> float:
+    """函数说明：处理 numeric_column_sum 的内部辅助逻辑。"""
     if column not in frame.columns:
         return 0.0
     return float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
 
 
 def _normalize_holdings(holdings: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_holdings 的内部辅助逻辑。"""
     required = {"date", "instrument", "value"}
     if holdings.empty or not required.issubset(set(holdings.columns)):
         return pd.DataFrame()
@@ -1089,6 +1128,7 @@ def _normalize_holdings(holdings: pd.DataFrame) -> pd.DataFrame:
 
 
 def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
+    """函数说明：处理 price_field 的内部辅助逻辑。"""
     if price_df.empty:
         return pd.DataFrame()
     field = str(field).strip().lower()
@@ -1127,6 +1167,7 @@ def _price_field(price_df: pd.DataFrame, field: str) -> pd.DataFrame:
 
 
 def _load_industry_map(config: dict[str, Any]) -> pd.Series:
+    """函数说明：加载 load_industry_map 的内部辅助逻辑。"""
     research_cfg = config.get("research", {}).get("exposure", {})
     path = resolve_path(research_cfg.get("industry_file") or config.get("data", {}).get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
     if not path.exists():
@@ -1146,6 +1187,7 @@ def _load_industry_map(config: dict[str, Any]) -> pd.Series:
 
 
 def _total_return(curve: pd.Series) -> float | None:
+    """函数说明：处理 total_return 的内部辅助逻辑。"""
     if curve.empty:
         return None
     first = float(curve.iloc[0])
@@ -1155,6 +1197,7 @@ def _total_return(curve: pd.Series) -> float | None:
 
 
 def _annual_return(curve: pd.Series, annual_days: int) -> float | None:
+    """函数说明：处理 annual_return 的内部辅助逻辑。"""
     total = _total_return(curve)
     if total is None or len(curve) <= 1:
         return None
@@ -1162,6 +1205,7 @@ def _annual_return(curve: pd.Series, annual_days: int) -> float | None:
 
 
 def _max_drawdown(curve: pd.Series) -> float | None:
+    """函数说明：处理 max_drawdown 的内部辅助逻辑。"""
     if curve.empty:
         return None
     drawdown = curve / curve.cummax() - 1.0
@@ -1169,6 +1213,7 @@ def _max_drawdown(curve: pd.Series) -> float | None:
 
 
 def _sharpe(returns: pd.Series, annual_days: int) -> float | None:
+    """函数说明：处理 sharpe 的内部辅助逻辑。"""
     returns = returns.dropna()
     if returns.empty:
         return None
@@ -1179,6 +1224,7 @@ def _sharpe(returns: pd.Series, annual_days: int) -> float | None:
 
 
 def _information_ratio(active_returns: pd.Series, annual_days: int) -> float | None:
+    """函数说明：处理 information_ratio 的内部辅助逻辑。"""
     active_returns = active_returns.dropna()
     if active_returns.empty:
         return None
@@ -1189,6 +1235,7 @@ def _information_ratio(active_returns: pd.Series, annual_days: int) -> float | N
 
 
 def _beta(strategy_returns: pd.Series, benchmark_returns: pd.Series) -> float | None:
+    """函数说明：处理 beta 的内部辅助逻辑。"""
     aligned = pd.concat([strategy_returns.rename("strategy"), benchmark_returns.rename("benchmark")], axis=1).dropna()
     if len(aligned) < 3:
         return None
@@ -1198,25 +1245,42 @@ def _beta(strategy_returns: pd.Series, benchmark_returns: pd.Series) -> float | 
     return float(aligned["strategy"].cov(aligned["benchmark"], ddof=0) / benchmark_var)
 
 
+def _correlation(strategy_returns: pd.Series, benchmark_returns: pd.Series) -> float | None:
+    """函数说明：处理 correlation 的内部辅助逻辑。"""
+    aligned = pd.concat([strategy_returns.rename("strategy"), benchmark_returns.rename("benchmark")], axis=1).dropna()
+    if len(aligned) < 3:
+        return None
+    strategy_std = float(aligned["strategy"].std(ddof=0))
+    benchmark_std = float(aligned["benchmark"].std(ddof=0))
+    if strategy_std <= 0 or benchmark_std <= 0:
+        return None
+    return float(aligned["strategy"].corr(aligned["benchmark"]))
+
+
 def _top_records(frame: pd.DataFrame, column: str, ascending: bool) -> list[dict[str, Any]]:
+    """函数说明：处理 top_records 的内部辅助逻辑。"""
     if frame.empty or column not in frame.columns:
         return []
     return frame.sort_values(column, ascending=ascending).head(5).to_dict(orient="records")
 
 
 def _normalize_trade_side(values: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_trade_side 的内部辅助逻辑。"""
     return values.fillna("").astype(str).str.strip().str.upper()
 
 
 def _normalize_trade_status(values: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_trade_status 的内部辅助逻辑。"""
     return values.fillna("").astype(str).str.strip().str.lower()
 
 
 def _normalize_trade_reason(values: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_trade_reason 的内部辅助逻辑。"""
     return values.fillna("").astype(str).str.strip()
 
 
 def _json_safe(value: Any) -> Any:
+    """函数说明：处理 json_safe 的内部辅助逻辑。"""
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, list):

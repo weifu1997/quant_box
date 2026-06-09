@@ -1,3 +1,5 @@
+"""模块说明：提供 run_ml_strategy 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -41,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Run rolling Alpha158 ML stock-selection backtest.")
     parser.add_argument("--start-date", default=config["data"]["start_date"])
@@ -252,6 +255,7 @@ def main() -> None:
 
 
 def _requested_ml_factor_columns(factor_file: str, ml_cfg: dict) -> list[str] | None:
+    """函数说明：处理 requested_ml_factor_columns 的内部辅助逻辑。"""
     available = factor_cache_columns(factor_file)
     if not available:
         return None
@@ -271,6 +275,7 @@ def _load_cached_or_compute_factors(
     factor_file: str,
     factor_columns: list[str] | None,
 ) -> pd.DataFrame:
+    """函数说明：加载 load_cached_or_compute_factors 的内部辅助逻辑。"""
     factor_path = resolve_path(factor_file)
     if factor_path.exists():
         columns = None if factor_columns is None else [*factor_columns, "datetime", "instrument"]
@@ -285,6 +290,7 @@ def _load_cached_or_compute_factors(
 
 
 def _resolve_training_start_date(backtest_start_date: str, ml_cfg: dict) -> str:
+    """函数说明：解析 resolve_training_start_date 的内部辅助逻辑。"""
     configured = str(ml_cfg.get("training_start_date", "auto")).strip()
     if configured and configured.lower() not in {"auto", "none", "null"}:
         return pd.Timestamp(configured).date().isoformat()
@@ -293,6 +299,7 @@ def _resolve_training_start_date(backtest_start_date: str, ml_cfg: dict) -> str:
 
 
 def _actual_price_start(prices: pd.DataFrame, start_date: str, end_date: str) -> str:
+    """函数说明：处理 actual_price_start 的内部辅助逻辑。"""
     if prices.empty:
         return ""
     dates = pd.to_datetime(prices.index).normalize()
@@ -304,6 +311,7 @@ def _actual_price_start(prices: pd.DataFrame, start_date: str, end_date: str) ->
 
 
 def _actual_factor_start(factors: pd.DataFrame) -> str:
+    """函数说明：处理 actual_factor_start 的内部辅助逻辑。"""
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         return ""
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
@@ -313,6 +321,7 @@ def _actual_factor_start(factors: pd.DataFrame) -> str:
 
 
 def _slice_factor_dates(factors: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    """函数说明：处理 slice_factor_dates 的内部辅助逻辑。"""
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         return factors
     dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
@@ -321,6 +330,7 @@ def _slice_factor_dates(factors: pd.DataFrame, start_date: str, end_date: str) -
 
 
 def _yearly_stats(equity_curve: pd.Series, config: dict) -> pd.DataFrame:
+    """函数说明：处理 yearly_stats 的内部辅助逻辑。"""
     if equity_curve.empty:
         return pd.DataFrame(columns=["year", "start", "end", "days", "total_return", "annual_return", "max_drawdown"])
     annual_days = int(config.get("annual_trading_days", 252))
@@ -349,6 +359,7 @@ def _yearly_stats(equity_curve: pd.Series, config: dict) -> pd.DataFrame:
 
 
 def _write_equity_svg(equity_curve: pd.Series, path: Path) -> None:
+    """函数说明：写入 write_equity_svg 的内部辅助逻辑。"""
     width, height = 960, 360
     margin = 36
     if equity_curve.empty or len(equity_curve) < 2:
@@ -388,6 +399,7 @@ def _markdown_report(
     config: dict,
     equity_svg_name: str,
 ) -> str:
+    """函数说明：处理 markdown_report 的内部辅助逻辑。"""
     completed = diagnostics[pd.to_numeric(diagnostics.get("train_rows_used", 0), errors="coerce").fillna(0) > 0]
     no_lookahead = bool(completed["no_lookahead"].all()) if not completed.empty and "no_lookahead" in completed else False
     model_counts = completed["model_used"].value_counts().to_dict() if "model_used" in completed else {}
@@ -543,6 +555,7 @@ def _markdown_report(
 
 
 def _ensemble_summary(completed: pd.DataFrame) -> dict[str, object]:
+    """函数说明：处理 ensemble_summary 的内部辅助逻辑。"""
     if completed.empty:
         return {"average_size": 0.0, "model_counts": {}}
     average_size = float(pd.to_numeric(completed.get("ensemble_size", 0), errors="coerce").fillna(0).mean())
@@ -555,6 +568,7 @@ def _ensemble_summary(completed: pd.DataFrame) -> dict[str, object]:
 
 
 def _feature_evolution_summary(completed: pd.DataFrame) -> dict[str, object]:
+    """函数说明：处理 feature_evolution_summary 的内部辅助逻辑。"""
     if completed.empty:
         return {"average_feature_count": 0.0, "evolved_fits": 0}
     feature_count = pd.to_numeric(completed.get("feature_count", 0), errors="coerce").fillna(0)
@@ -563,6 +577,7 @@ def _feature_evolution_summary(completed: pd.DataFrame) -> dict[str, object]:
 
 
 def _feature_extension_summary(daily_basic: dict[str, object], price_derived: dict[str, object]) -> dict[str, object]:
+    """函数说明：处理 feature_extension_summary 的内部辅助逻辑。"""
     return {
         "enabled": bool(daily_basic.get("enabled", False) or price_derived.get("enabled", False)),
         "daily_basic_features_added": int(daily_basic.get("features_added", 0) or 0),
@@ -577,6 +592,7 @@ def _feature_extension_summary(daily_basic: dict[str, object], price_derived: di
 
 
 def _warmup_summary(diagnostics: pd.DataFrame, coverage_summary: dict[str, object], config: dict) -> dict[str, object]:
+    """函数说明：处理 warmup_summary 的内部辅助逻辑。"""
     ml_cfg = config.get("ml_strategy", {})
     requested_start = pd.Timestamp(coverage_summary.get("start_date", config.get("data", {}).get("start_date", ""))).normalize()
     actual_price_start_raw = (
@@ -617,6 +633,7 @@ def _warmup_summary(diagnostics: pd.DataFrame, coverage_summary: dict[str, objec
 
 
 def _quality_gate(metrics: dict[str, float], yearly_gate: dict[str, object], config: dict) -> dict[str, object]:
+    """函数说明：处理 quality_gate 的内部辅助逻辑。"""
     ml_cfg = config.get("ml_strategy", {})
     quality_cfg = config.get("quality", {})
     target_return = float(ml_cfg.get("target_annual_return", quality_cfg.get("target_annual_return", 0.20)))
@@ -643,6 +660,7 @@ def _quality_gate(metrics: dict[str, float], yearly_gate: dict[str, object], con
 
 
 def _yearly_quality_gate(yearly: pd.DataFrame, config: dict) -> dict[str, object]:
+    """函数说明：处理 yearly_quality_gate 的内部辅助逻辑。"""
     ml_cfg = config.get("ml_strategy", {})
     min_return = float(ml_cfg.get("min_yearly_annual_return", ml_cfg.get("target_annual_return", 0.20)))
     drawdown_limit = float(ml_cfg.get("max_drawdown_limit", -0.20))
@@ -665,6 +683,7 @@ def _yearly_quality_gate(yearly: pd.DataFrame, config: dict) -> dict[str, object
 
 
 def _skip_reason_counts(skipped_months: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 skip_reason_counts 的内部辅助逻辑。"""
     if skipped_months.empty or "skip_reason" not in skipped_months.columns:
         return pd.DataFrame(columns=["skip_reason", "months"])
     counts = skipped_months["skip_reason"].fillna("").astype(str).str.strip()
@@ -673,6 +692,7 @@ def _skip_reason_counts(skipped_months: pd.DataFrame) -> pd.DataFrame:
 
 
 def _markdown_table(frame: pd.DataFrame) -> str:
+    """函数说明：处理 markdown_table 的内部辅助逻辑。"""
     if frame.empty:
         return ""
     headers = [str(column) for column in frame.columns]

@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_market_regime 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -22,7 +24,9 @@ from src.market_regime import (
 
 
 class MarketRegimeTests(unittest.TestCase):
+    """类说明：组织 MarketRegimeTests 测试用例。"""
     def test_detect_market_regime_uses_realtime_lagged_indicators(self) -> None:
+        """函数说明：验证 test_detect_market_regime_uses_realtime_lagged_indicators 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=12)
         close = pd.DataFrame({"A": [10, 10.2, 10.4, 10.7, 11.0, 11.2, 11.5, 11.8, 12.1, 12.3, 12.6, 12.9]}, index=dates)
         prices = pd.concat({"close": close}, axis=1)
@@ -44,6 +48,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertIn(REGIME_BULL, set(regimes))
 
     def test_detect_market_regime_normalizes_benchmark_file_columns(self) -> None:
+        """函数说明：验证 test_detect_market_regime_normalizes_benchmark_file_columns 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=6)
         with TemporaryDirectory() as tmp:
             benchmark_file = Path(tmp) / "benchmark.csv"
@@ -72,6 +77,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertIn(REGIME_BULL, set(regimes))
 
     def test_reporting_regime_uses_objective_unlagged_labels(self) -> None:
+        """函数说明：验证 test_reporting_regime_uses_objective_unlagged_labels 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=12)
         close = pd.DataFrame({"A": [10, 10.2, 10.4, 10.7, 11.0, 11.2, 11.5, 11.8, 12.1, 12.3, 12.6, 12.9]}, index=dates)
         prices = pd.concat({"close": close}, axis=1)
@@ -96,6 +102,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertIn(REGIME_BULL, set(reporting.iloc[:4]))
 
     def test_detect_market_regime_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_detect_market_regime_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=6)
         prices = pd.DataFrame(
             {
@@ -110,6 +117,7 @@ class MarketRegimeTests(unittest.TestCase):
             detect_market_regime(prices, {"market_regime": {"enabled": True}})
 
     def test_defensive_exposure_schedule_maps_regimes_to_total_exposure(self) -> None:
+        """函数说明：验证 test_defensive_exposure_schedule_maps_regimes_to_total_exposure 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=3)
         regimes = pd.Series([REGIME_BULL, REGIME_SIDEWAYS, REGIME_BEAR], index=dates)
         config = {
@@ -126,6 +134,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(exposure.to_list(), [1.0, 0.8, 0.4])
 
     def test_defensive_exposure_schedule_uses_latest_intraday_regime_per_date(self) -> None:
+        """函数说明：验证 test_defensive_exposure_schedule_uses_latest_intraday_regime_per_date 覆盖的行为场景。"""
         regimes = pd.Series(
             [REGIME_BEAR, REGIME_BULL],
             index=pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30"]),
@@ -145,6 +154,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(exposure.to_list(), [0.4, 0.4])
 
     def test_detect_market_regime_can_mark_benchmark_drawdown_as_bear(self) -> None:
+        """函数说明：验证 test_detect_market_regime_can_mark_benchmark_drawdown_as_bear 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=6)
         close = pd.DataFrame({"A": [10.0, 11.0, 12.0, 11.5, 10.7, 10.6]}, index=dates)
         prices = pd.concat({"close": close}, axis=1)
@@ -167,6 +177,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(regimes.iloc[-1], REGIME_BEAR)
 
     def test_apply_defensive_timing_adds_backtest_exposure_schedule(self) -> None:
+        """函数说明：验证 test_apply_defensive_timing_adds_backtest_exposure_schedule 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=6)
         close = pd.DataFrame({"A": [10.0, 9.8, 9.5, 9.1, 8.9, 8.6]}, index=dates)
         prices = pd.concat({"close": close}, axis=1)
@@ -190,6 +201,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(defensive_exposure_for_date(prices, config, dates[-1]), float(bt_config["exposure_schedule"].iloc[-1]))
 
     def test_detect_market_regime_reads_hs300_con_code_constituents(self) -> None:
+        """函数说明：验证 test_detect_market_regime_reads_hs300_con_code_constituents 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=6)
         close = pd.DataFrame(
             {
@@ -221,6 +233,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(regimes.iloc[-1], REGIME_BULL)
 
     def test_detect_market_regime_uses_equal_weight_mean_proxy(self) -> None:
+        """函数说明：验证 test_detect_market_regime_uses_equal_weight_mean_proxy 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=2)
         close = pd.DataFrame(
             {
@@ -248,6 +261,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(regimes.iloc[-1], REGIME_BULL)
 
     def test_equal_weight_proxy_uses_last_intraday_close_per_trade_date(self) -> None:
+        """函数说明：验证 test_equal_weight_proxy_uses_last_intraday_close_per_trade_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00", "2024-01-04 15:00"])
         close = pd.DataFrame({"A": [10.0, 30.0, 20.0, 20.0]}, index=dates)
         prices = pd.concat({"close": close}, axis=1)
@@ -258,6 +272,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertEqual(benchmark.tolist(), [1.0, 2.0, 2.0])
 
     def test_regime_performance_summarizes_segments_and_aggregates_by_state(self) -> None:
+        """函数说明：验证 test_regime_performance_summarizes_segments_and_aggregates_by_state 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=5)
         equity = pd.Series([100.0, 110.0, 105.0, 120.0, 114.0], index=dates)
         regimes = pd.Series([REGIME_BULL, REGIME_BULL, REGIME_BEAR, REGIME_BEAR, REGIME_BULL], index=dates)
@@ -270,6 +285,7 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertIn("worst_drawdown", summary.columns)
 
     def test_regime_performance_includes_switch_day_return(self) -> None:
+        """函数说明：验证 test_regime_performance_includes_switch_day_return 覆盖的行为场景。"""
         dates = pd.bdate_range("2024-01-02", periods=2)
         equity = pd.Series([100.0, 90.0], index=dates)
         regimes = pd.Series([REGIME_BULL, REGIME_BEAR], index=dates)

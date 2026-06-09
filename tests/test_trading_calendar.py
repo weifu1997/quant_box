@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_trading_calendar 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -12,7 +14,9 @@ from src.trading_calendar import next_business_day, resolve_target_date
 
 
 class TradingCalendarTests(unittest.TestCase):
+    """类说明：组织 TradingCalendarTests 测试用例。"""
     def test_auto_target_date_uses_previous_trade_date_before_cutoff(self) -> None:
+        """函数说明：验证 test_auto_target_date_uses_previous_trade_date_before_cutoff 覆盖的行为场景。"""
         resolution = resolve_target_date(
             "auto",
             config=_config(),
@@ -25,6 +29,7 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(resolution.reason, "before_latest_trade_date_cutoff")
 
     def test_auto_target_date_uses_latest_trade_date_after_cutoff(self) -> None:
+        """函数说明：验证 test_auto_target_date_uses_latest_trade_date_after_cutoff 覆盖的行为场景。"""
         resolution = resolve_target_date(
             "auto",
             config=_config(),
@@ -36,6 +41,7 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(resolution.reason, "after_latest_trade_date_cutoff")
 
     def test_auto_target_date_parses_tushare_compact_dates(self) -> None:
+        """函数说明：验证 test_auto_target_date_parses_tushare_compact_dates 覆盖的行为场景。"""
         resolution = resolve_target_date(
             "auto",
             config=_config(),
@@ -46,11 +52,15 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(resolution.target_date, "2024-01-03")
 
     def test_auto_target_date_prefers_tushare_trade_cal(self) -> None:
+        """函数说明：验证 test_auto_target_date_prefers_tushare_trade_cal 覆盖的行为场景。"""
         class Response:
+            """类说明：封装 Response 相关数据和行为。"""
             def raise_for_status(self) -> None:
+                """函数说明：处理 raise_for_status 主要逻辑。"""
                 return None
 
             def json(self) -> dict:
+                """函数说明：处理 json 主要逻辑。"""
                 return {
                     "code": 0,
                     "data": {
@@ -70,6 +80,7 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(resolution.calendar_source, "tushare_trade_cal")
 
     def test_auto_target_date_uses_a_trade_calendar_when_tushare_is_unconfigured(self) -> None:
+        """函数说明：验证 test_auto_target_date_uses_a_trade_calendar_when_tushare_is_unconfigured 覆盖的行为场景。"""
         resolution = resolve_target_date(
             "auto",
             config=_config(),
@@ -80,6 +91,7 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(resolution.calendar_source, "a_trade_calendar")
 
     def test_auto_target_date_falls_back_to_a_trade_calendar_when_tushare_fails(self) -> None:
+        """函数说明：验证 test_auto_target_date_falls_back_to_a_trade_calendar_when_tushare_fails 覆盖的行为场景。"""
         with patch("requests.post", side_effect=RuntimeError("bad proxy")), patch(
             "src.trading_calendar._a_trade_calendar",
             return_value=pd.DatetimeIndex(pd.to_datetime(["2024-01-02", "2024-01-03"])),
@@ -95,15 +107,18 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertIn("tushare_trade_cal_unavailable", resolution.calendar_warnings)
 
     def test_next_business_day_uses_a_share_trade_calendar(self) -> None:
+        """函数说明：验证 test_next_business_day_uses_a_share_trade_calendar 覆盖的行为场景。"""
         self.assertEqual(str(next_business_day("2024-02-08").date()), "2024-02-19")
 
     def test_next_business_day_rejects_missing_or_invalid_date(self) -> None:
+        """函数说明：验证 test_next_business_day_rejects_missing_or_invalid_date 覆盖的行为场景。"""
         with self.assertRaisesRegex(ValueError, "date is required"):
             next_business_day(None)  # type: ignore[arg-type]
         with self.assertRaisesRegex(ValueError, "Invalid date"):
             next_business_day("not-a-date")
 
     def test_next_business_day_uses_configured_calendar_when_library_is_unavailable(self) -> None:
+        """函数说明：验证 test_next_business_day_uses_configured_calendar_when_library_is_unavailable 覆盖的行为场景。"""
         with tempfile.TemporaryDirectory() as tmp:
             provider = Path(tmp) / "qlib_data"
             calendar_dir = provider / "calendars"
@@ -119,6 +134,7 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(str(next_date.date()), "2024-02-19")
 
     def test_next_business_day_normalizes_calendar_is_open_values(self) -> None:
+        """函数说明：验证 test_next_business_day_normalizes_calendar_is_open_values 覆盖的行为场景。"""
         with tempfile.TemporaryDirectory() as tmp:
             provider = Path(tmp) / "qlib_data"
             calendar_dir = provider / "calendars"
@@ -137,6 +153,7 @@ class TradingCalendarTests(unittest.TestCase):
         self.assertEqual(str(second.date()), "2024-02-19")
 
     def test_next_business_day_strict_raises_without_trade_calendar(self) -> None:
+        """函数说明：验证 test_next_business_day_strict_raises_without_trade_calendar 覆盖的行为场景。"""
         with tempfile.TemporaryDirectory() as tmp:
             with patch("src.trading_calendar._a_trade_calendar_next_trade_date", return_value=None):
                 with self.assertRaises(ValueError):
@@ -150,6 +167,7 @@ class TradingCalendarTests(unittest.TestCase):
                     )
 
     def test_fixed_target_date_bypasses_cutoff(self) -> None:
+        """函数说明：验证 test_fixed_target_date_bypasses_cutoff 覆盖的行为场景。"""
         resolution = resolve_target_date(
             "2024-01-03",
             config=_config(),
@@ -162,6 +180,7 @@ class TradingCalendarTests(unittest.TestCase):
 
 
 def _config(http_url: str = "") -> dict:
+    """函数说明：处理 config 的内部辅助逻辑。"""
     return {
         "data": {
             "end_date": "auto",

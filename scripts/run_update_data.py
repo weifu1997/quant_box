@@ -1,3 +1,5 @@
+"""模块说明：提供 run_update_data 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     parser = argparse.ArgumentParser(description="Fetch configured A-share universe daily data through a Tushare HTTP proxy.")
     parser.add_argument("--codes", nargs="*", help="Optional ts_codes. If omitted, configured universe constituents are used.")
     parser.add_argument("--start-date", help="Override config data.history_start_date.")

@@ -1,3 +1,5 @@
+"""模块说明：汇总股票池与本地价格数据之间的覆盖情况。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,6 +17,7 @@ def summarize_universe_coverage(
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> dict[str, float | int | str]:
+    """函数说明：汇总 summarize_universe_coverage 主要逻辑。"""
     cfg = config or load_config()
     data_cfg = cfg.get("data", {})
     raw_dir = resolve_path(data_cfg.get("raw_dir", "data/raw"))
@@ -47,6 +50,7 @@ def summarize_universe_coverage(
 
 
 def _load_target_symbols(config: dict, universe_file: Path) -> set[str]:
+    """函数说明：加载 load_target_symbols 的内部辅助逻辑。"""
     data_cfg = config.get("data", {})
     if not universe_file.exists():
         return set()
@@ -64,6 +68,7 @@ def _load_target_symbols(config: dict, universe_file: Path) -> set[str]:
 
 
 def _price_symbols(price_df: pd.DataFrame | None, price_file: str | Path | None) -> set[str]:
+    """函数说明：处理 price_symbols 的内部辅助逻辑。"""
     prices = price_df
     if prices is None and price_file is not None:
         path = resolve_path(price_file)
@@ -79,9 +84,11 @@ def _price_symbols(price_df: pd.DataFrame | None, price_file: str | Path | None)
 
 
 def _ratio(part: int, whole: int) -> float:
+    """函数说明：处理 ratio 的内部辅助逻辑。"""
     return float(part / whole) if whole else 0.0
 
 
 def _normalize_symbols(values: object) -> set[str]:
+    """函数说明：规范化 normalize_symbols 的内部辅助逻辑。"""
     symbols = pd.Index(values).dropna().astype(str).str.strip().str.upper()
     return set(symbol for symbol in symbols if symbol)

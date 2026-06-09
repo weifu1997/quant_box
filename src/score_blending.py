@@ -1,3 +1,5 @@
+"""模块说明：按市场状态融合或过滤策略分数。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,6 +16,7 @@ def apply_regime_score_blend(
     regimes: pd.Series,
     config: dict[str, Any] | None = None,
 ) -> tuple[pd.Series, dict[str, Any]]:
+    """函数说明：应用 apply_regime_score_blend 主要逻辑。"""
     cfg = config or {}
     if scores.empty or factors.empty or regimes.empty or not bool(cfg.get("enabled", False)):
         return scores, {"enabled": bool(cfg.get("enabled", False)), "dates_blended": 0}
@@ -78,6 +81,7 @@ def apply_regime_score_filter(
     regimes: pd.Series,
     config: dict[str, Any] | None = None,
 ) -> tuple[pd.Series, dict[str, Any]]:
+    """函数说明：应用 apply_regime_score_filter 主要逻辑。"""
     cfg = config or {}
     if scores.empty or factors.empty or regimes.empty or not bool(cfg.get("enabled", False)):
         return scores, {"enabled": bool(cfg.get("enabled", False)), "dates_filtered": 0}
@@ -133,6 +137,7 @@ def apply_regime_score_filter(
 
 
 def _filter_rules(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """函数说明：过滤 filter_rules 的内部辅助逻辑。"""
     default_components = cfg.get("components") or cfg.get("defensive_components") or [
         {"column": "ROC20", "direction": 1.0},
         {"column": "STD20", "direction": -1.0},
@@ -161,6 +166,7 @@ def _filter_rules(cfg: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _rule_for_regime(rules: list[dict[str, Any]], regime: str) -> dict[str, Any] | None:
+    """函数说明：处理 rule_for_regime 的内部辅助逻辑。"""
     normalized = normalize_regime(regime)
     for rule in rules:
         if rule["regime"] == normalized:
@@ -169,6 +175,7 @@ def _rule_for_regime(rules: list[dict[str, Any]], regime: str) -> dict[str, Any]
 
 
 def _filter_threshold(filter_score: pd.Series, rule: dict[str, Any]) -> float:
+    """函数说明：过滤 filter_threshold 的内部辅助逻辑。"""
     keep_top_fraction = rule.get("keep_top_fraction")
     min_score = float(rule.get("min_score", 0.0))
     if keep_top_fraction is None:
@@ -181,6 +188,7 @@ def _filter_threshold(filter_score: pd.Series, rule: dict[str, Any]) -> float:
 
 
 def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_factor_index 的内部辅助逻辑。"""
     raw_dates = pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(0), errors="coerce"))
     instruments = [_normalize_instrument(value) for value in factors.index.get_level_values(1)]
     frame = pd.DataFrame(
@@ -207,6 +215,7 @@ def _normalize_factor_index(factors: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_score_index(scores: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_score_index 的内部辅助逻辑。"""
     raw_dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0), errors="coerce"))
     values = pd.to_numeric(pd.Series(scores.to_numpy()), errors="coerce").to_numpy()
     frame = pd.DataFrame(
@@ -233,6 +242,7 @@ def _normalize_score_index(scores: pd.Series) -> pd.Series:
 
 
 def _normalize_daily_scores(daily_scores: pd.Series) -> pd.Series:
+    """函数说明：规范化 normalize_daily_scores 的内部辅助逻辑。"""
     daily = daily_scores.droplevel(0).astype(float).sort_values(ascending=False, kind="mergesort", na_position="last").copy()
     daily.index = [_normalize_instrument(value) for value in daily.index]
     daily = daily[daily.index != ""]
@@ -242,6 +252,7 @@ def _normalize_daily_scores(daily_scores: pd.Series) -> pd.Series:
 
 
 def _defensive_score(factors: pd.DataFrame, components: list[dict[str, object]]) -> pd.Series:
+    """函数说明：处理 defensive_score 的内部辅助逻辑。"""
     pieces: list[pd.Series] = []
     used: list[str] = []
     for item in components:
@@ -259,5 +270,6 @@ def _defensive_score(factors: pd.DataFrame, components: list[dict[str, object]])
 
 
 def _cross_sectional_rank_score(series: pd.Series) -> pd.Series:
+    """函数说明：处理 cross_sectional_rank_score 的内部辅助逻辑。"""
     clean = pd.to_numeric(series, errors="coerce")
     return clean.rank(pct=True, method="average").sub(0.5).mul(2.0)

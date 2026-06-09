@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_run_daily_signal 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import importlib
@@ -11,7 +13,9 @@ import pandas as pd
 
 
 class RunDailySignalTests(unittest.TestCase):
+    """类说明：组织 RunDailySignalTests 测试用例。"""
     def test_default_run_writes_candidate_without_overwriting_latest_holdings(self) -> None:
+        """函数说明：验证 test_default_run_writes_candidate_without_overwriting_latest_holdings 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_daily_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -34,6 +38,7 @@ class RunDailySignalTests(unittest.TestCase):
             self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")
 
     def test_empty_latest_signal_uses_signal_date_metadata_for_candidate_outputs(self) -> None:
+        """函数说明：验证 test_empty_latest_signal_uses_signal_date_metadata_for_candidate_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_daily_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -57,6 +62,7 @@ class RunDailySignalTests(unittest.TestCase):
             self.assertFalse((root / "candidate_signal_latest.csv").exists())
 
     def test_official_run_overwrites_latest_holdings(self) -> None:
+        """函数说明：验证 test_official_run_overwrites_latest_holdings 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_daily_signal")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

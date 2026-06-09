@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_config_loader 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import os
@@ -10,7 +12,9 @@ from src.config_loader import DEFAULT_CONFIG, DEFAULT_CONFIG_PATH, _expand_env_v
 
 
 class ConfigLoaderTests(unittest.TestCase):
+    """类说明：组织 ConfigLoaderTests 测试用例。"""
     def test_expand_env_values_supports_whole_value_and_embedded_values(self) -> None:
+        """函数说明：验证 test_expand_env_values_supports_whole_value_and_embedded_values 覆盖的行为场景。"""
         value = {
             "token": "${TUSHARE_TOKEN}",
             "url": "http://${TUSHARE_HOST}:${TUSHARE_PORT}/api",
@@ -29,11 +33,13 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(expanded["items"], ["127.0.0.1", "plain"])
 
     def test_expand_env_values_missing_variable_raises(self) -> None:
+        """函数说明：验证 test_expand_env_values_missing_variable_raises 覆盖的行为场景。"""
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(ValueError, "MISSING_HOST"):
                 _expand_env_values("http://${MISSING_HOST}:8020/")
 
     def test_default_strategy_includes_portfolio_circuit_breaker(self) -> None:
+        """函数说明：验证 test_default_strategy_includes_portfolio_circuit_breaker 覆盖的行为场景。"""
         strategy = DEFAULT_CONFIG["strategy"]
 
         self.assertEqual(strategy["circuit_breaker_drawdown"], 0.08)
@@ -46,6 +52,7 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(strategy["rebalance_drift_threshold"], 0.0)
 
     def test_settings_yaml_loads_current_strategy_overrides(self) -> None:
+        """函数说明：验证 test_settings_yaml_loads_current_strategy_overrides 覆盖的行为场景。"""
         with self.assertNoLogs("src.config_loader", level="WARNING"):
             config = load_config(DEFAULT_CONFIG_PATH)
 
@@ -67,6 +74,7 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertTrue(config["backtest"]["equity_overlay"]["rebalance_on_signal_only"])
 
     def test_load_config_warns_for_unknown_keys_without_rejecting_them(self) -> None:
+        """函数说明：验证 test_load_config_warns_for_unknown_keys_without_rejecting_them 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "settings.yaml"
             path.write_text(
@@ -89,14 +97,17 @@ unknown_section:
         self.assertIn("unknown_section", output)
 
     def test_default_data_config_includes_daily_basic_cache(self) -> None:
+        """函数说明：验证 test_default_data_config_includes_daily_basic_cache 覆盖的行为场景。"""
         self.assertEqual(DEFAULT_CONFIG["data"]["history_start_date"], "2012-01-01")
         self.assertEqual(DEFAULT_CONFIG["data"]["daily_basic_file"], "data/factors/daily_basic.parquet")
         self.assertEqual(DEFAULT_CONFIG["data"]["st_calendar_file"], "data/raw/st_calendar.csv")
 
     def test_default_scoring_excludes_low_liquidity_bucket_and_uses_stable_dynamic_ic(self) -> None:
+        """函数说明：验证 test_default_scoring_excludes_low_liquidity_bucket_and_uses_stable_dynamic_ic 覆盖的行为场景。"""
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "low")
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["quantile"], 0.20)
         self.assertEqual(DEFAULT_CONFIG["ic"]["correlation_rebalance_sessions"], 1)
+        self.assertEqual(DEFAULT_CONFIG["ic"]["weights_cache_file"], "data/factors/rolling_ic_weights.parquet")
         self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["top_k"], 3)
         self.assertEqual(DEFAULT_CONFIG["dynamic_ic_selector"]["metric"], "ic_ir")
         self.assertIn("factor:VMA60", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
@@ -104,6 +115,7 @@ unknown_section:
         self.assertNotIn("factor:RSV5", DEFAULT_CONFIG["dynamic_ic_selector"]["candidates"])
 
     def test_default_selection_risk_filter_is_configured_but_disabled(self) -> None:
+        """函数说明：验证 test_default_selection_risk_filter_is_configured_but_disabled 覆盖的行为场景。"""
         risk_filter = DEFAULT_CONFIG["selection_risk_filter"]
 
         self.assertFalse(risk_filter["enabled"])
@@ -112,6 +124,7 @@ unknown_section:
         self.assertEqual(risk_filter["max_limit_down_days"], 0)
 
     def test_default_backtest_uses_conservative_execution_assumptions(self) -> None:
+        """函数说明：验证 test_default_backtest_uses_conservative_execution_assumptions 覆盖的行为场景。"""
         backtest = DEFAULT_CONFIG["backtest"]
 
         self.assertEqual(backtest["slippage"], 0.0005)
@@ -126,6 +139,7 @@ unknown_section:
         self.assertEqual(backtest["equity_overlay"]["rebalance_threshold"], 0.05)
 
     def test_default_manual_orders_include_execution_buffers(self) -> None:
+        """函数说明：验证 test_default_manual_orders_include_execution_buffers 覆盖的行为场景。"""
         manual_orders = DEFAULT_CONFIG["manual_orders"]
 
         self.assertEqual(manual_orders["limit_price_buffer"], 0.002)
@@ -134,6 +148,7 @@ unknown_section:
         self.assertEqual(manual_orders["fill_feedback_dir"], "outputs/fill_feedback")
 
     def test_default_research_and_data_governance_outputs_are_configured(self) -> None:
+        """函数说明：验证 test_default_research_and_data_governance_outputs_are_configured 覆盖的行为场景。"""
         research = DEFAULT_CONFIG["research"]
         governance = DEFAULT_CONFIG["data_governance"]
 
@@ -149,6 +164,7 @@ unknown_section:
         self.assertEqual(governance["adj_factor_meta_file"], "data/factors/adj_factor_meta.json")
 
     def test_default_quality_includes_full_backtest_return_and_drawdown_gates(self) -> None:
+        """函数说明：验证 test_default_quality_includes_full_backtest_return_and_drawdown_gates 覆盖的行为场景。"""
         quality = DEFAULT_CONFIG["quality"]
 
         self.assertEqual(quality["target_annual_return"], 0.20)
@@ -158,12 +174,14 @@ unknown_section:
         self.assertEqual(quality["max_drawdown_limit"], -0.20)
 
     def test_default_ml_strategy_is_configured_but_disabled_for_existing_pipeline(self) -> None:
+        """函数说明：验证 test_default_ml_strategy_is_configured_but_disabled_for_existing_pipeline 覆盖的行为场景。"""
         ml = DEFAULT_CONFIG["ml_strategy"]
 
         self.assertFalse(ml["enabled"])
         self.assertEqual(ml["model_type"], "ridge_numpy")
         self.assertEqual(ml["model_objective"], "regression")
         self.assertEqual(ml["class_weight"], "balanced")
+        self.assertFalse(ml["fallback_on_missing_model"])
         self.assertEqual(ml["training_start_date"], "auto")
         self.assertEqual(ml["feature_ic_rebalance_sessions"], 1)
         self.assertEqual(ml["label_horizon_sessions"], 20)

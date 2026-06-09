@@ -1,3 +1,5 @@
+"""模块说明：提供 run_convert_data 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     parser = argparse.ArgumentParser(description="Convert raw stock CSV files to Qlib data and local price panels.")
     parser.parse_args()
 

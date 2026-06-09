@@ -1,3 +1,5 @@
+"""模块说明：为因子面板追加基础面和价格衍生特征。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -41,6 +43,7 @@ def append_daily_basic_features(
     daily_basic: pd.DataFrame,
     config: dict[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """函数说明：追加 append_daily_basic_features 主要逻辑。"""
     cfg = config or {}
     enabled = bool(cfg.get("enabled", False)) and bool(cfg.get("daily_basic", True))
     if factors.empty or daily_basic.empty or not enabled:
@@ -83,6 +86,7 @@ def append_price_derived_features(
     prices: pd.DataFrame,
     config: dict[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """函数说明：追加 append_price_derived_features 主要逻辑。"""
     cfg = config or {}
     enabled = bool(cfg.get("enabled", False)) and bool(cfg.get("price_derived", True))
     if factors.empty or prices.empty or not enabled:
@@ -122,6 +126,7 @@ def append_price_derived_features(
 
 
 def _normalize_daily_basic(daily_basic: pd.DataFrame, fields: list[str]) -> pd.DataFrame:
+    """函数说明：规范化 normalize_daily_basic 的内部辅助逻辑。"""
     if daily_basic.empty:
         return pd.DataFrame()
     frame = daily_basic.copy()
@@ -162,6 +167,7 @@ def _align_daily_basic_asof(
     factor_symbols: pd.Index,
     factor_index: pd.Index,
 ) -> pd.DataFrame:
+    """函数说明：处理 align_daily_basic_asof 的内部辅助逻辑。"""
     if basics.empty:
         return pd.DataFrame(index=factor_index)
 
@@ -192,6 +198,7 @@ def _align_daily_basic_asof(
 
 
 def _transform_daily_basic_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：处理 transform_daily_basic_features 的内部辅助逻辑。"""
     result = frame.copy()
     for column in result.columns:
         values = pd.to_numeric(result[column], errors="coerce").replace([np.inf, -np.inf], np.nan)
@@ -202,6 +209,7 @@ def _transform_daily_basic_features(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _price_feature_frame(prices: pd.DataFrame, fields: list[str]) -> pd.DataFrame:
+    """函数说明：处理 price_feature_frame 的内部辅助逻辑。"""
     close = _price_field(prices, "close")
     amount = _price_field(prices, "amount")
     if close.empty:
@@ -243,6 +251,7 @@ def _price_feature_frame(prices: pd.DataFrame, fields: list[str]) -> pd.DataFram
 
 
 def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
+    """函数说明：处理 price_field 的内部辅助逻辑。"""
     field = str(field).strip().lower()
     if prices.empty:
         return pd.DataFrame()
@@ -280,10 +289,12 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
 
 
 def _looks_like_field_table(columns: pd.Index) -> bool:
+    """函数说明：处理 looks_like_field_table 的内部辅助逻辑。"""
     labels = {str(column).strip().lower() for column in columns}
     return len(labels) > 1 and bool(labels & PRICE_FIELD_NAMES)
 
 
 def _feature_window(field: str, prefix: str) -> int:
+    """函数说明：处理 feature_window 的内部辅助逻辑。"""
     suffix = field[len(prefix) :].strip("_")
     return max(2, int(suffix))

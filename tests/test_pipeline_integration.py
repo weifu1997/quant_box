@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_pipeline_integration 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -9,7 +11,9 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class PipelineIntegrationTests(unittest.TestCase):
+    """类说明：组织 PipelineIntegrationTests 测试用例。"""
     def test_scores_resample_and_backtest_real_data_pipeline(self) -> None:
+        """函数说明：验证 test_scores_resample_and_backtest_real_data_pipeline 覆盖的行为场景。"""
         market = require_real_market_data(start="2024-01-02", end="2024-03-29")
 
         scores = build_strategy_scores(

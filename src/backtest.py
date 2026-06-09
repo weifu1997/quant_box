@@ -1,3 +1,5 @@
+"""模块说明：提供组合回测、交易撮合和绩效指标计算。"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -36,6 +38,7 @@ _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str
 
 @dataclass
 class BacktestResult:
+    """类说明：封装 BacktestResult 相关数据和行为。"""
     equity_curve: pd.Series
     holdings: pd.DataFrame
     trades: pd.DataFrame
@@ -49,6 +52,7 @@ def run_backtest(
     end_date: str,
     config: dict,
 ) -> BacktestResult:
+    """函数说明：运行 run_backtest 相关流程。"""
     score_panel = _ensure_score_panel(score_panel)
     prices = _normalize_price_frame(price_df)
 
@@ -424,6 +428,7 @@ def run_backtest(
 
 
 def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dict) -> dict[str, float]:
+    """函数说明：计算 calculate_metrics 主要逻辑。"""
     annual_days = int(config.get("annual_trading_days", 252))
     risk_free_rate = float(config.get("risk_free_rate", 0.0))
     top_n = max(int(config.get("top_n", 1)), 1)
@@ -508,12 +513,14 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, config: dic
 
 
 def _trade_cost_sum(trades: pd.DataFrame, column: str) -> float:
+    """函数说明：处理 trade_cost_sum 的内部辅助逻辑。"""
     if trades.empty or column not in trades.columns:
         return 0.0
     return float(pd.to_numeric(trades[column], errors="coerce").fillna(0.0).sum())
 
 
 def _turnover_sell_count(trades: pd.DataFrame) -> int:
+    """函数说明：处理 turnover_sell_count 的内部辅助逻辑。"""
     if trades.empty or "side" not in trades.columns:
         return 0
     sell_mask = trades["side"].astype(str).str.strip().str.upper() == "SELL"
@@ -524,6 +531,7 @@ def _turnover_sell_count(trades: pd.DataFrame) -> int:
 
 
 def calculate_benchmark_metrics(equity_curve: pd.Series, benchmark_curve: pd.Series, config: dict) -> dict[str, float]:
+    """函数说明：计算 calculate_benchmark_metrics 主要逻辑。"""
     annual_days = int(config.get("annual_trading_days", 252))
     aligned = pd.concat(
         [equity_curve.pct_change().rename("portfolio"), benchmark_curve.pct_change().rename("benchmark")],
@@ -539,6 +547,7 @@ def calculate_benchmark_metrics(equity_curve: pd.Series, benchmark_curve: pd.Ser
 
 
 def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
+    """函数说明：确保 ensure_score_panel 的内部辅助逻辑。"""
     if isinstance(score_panel, pd.DataFrame):
         if "score" in score_panel.columns:
             score_panel = score_panel["score"]
@@ -574,6 +583,7 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
 
 
 def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：规范化 normalize_price_frame 的内部辅助逻辑。"""
     prices = price_df
     raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
     valid_dates = ~raw_dates.isna()
@@ -631,12 +641,14 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_price_field(value: object) -> str:
+    """函数说明：规范化 normalize_price_field 的内部辅助逻辑。"""
     if pd.isna(value):
         return ""
     return str(value).strip().lower()
 
 
 def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
+    """函数说明：处理 field 的内部辅助逻辑。"""
     field = _normalize_price_field(field)
     cache_key = id(prices)
     cached = _PRICE_FIELD_CACHE.get(cache_key)
@@ -660,12 +672,14 @@ def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
 
 
 def _prune_price_field_cache() -> None:
+    """函数说明：处理 prune_price_field_cache 的内部辅助逻辑。"""
     dead_keys = [key for key, (prices_ref, _fields, _cache) in _PRICE_FIELD_CACHE.items() if prices_ref() is None]
     for key in dead_keys:
         _PRICE_FIELD_CACHE.pop(key, None)
 
 
 def _field_on_date(prices: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.Series:
+    """函数说明：处理 field_on_date 的内部辅助逻辑。"""
     frame = _field(prices, field)
     if frame.empty or date not in frame.index:
         return pd.Series(dtype=float)
@@ -675,6 +689,7 @@ def _field_on_date(prices: pd.DataFrame, field: str, date: pd.Timestamp) -> pd.S
 
 
 def _price_row(prices: pd.DataFrame, preferred_field: str, date: pd.Timestamp) -> pd.Series:
+    """函数说明：处理 price_row 的内部辅助逻辑。"""
     row = _field_on_date(prices, preferred_field, date)
     if not row.empty:
         return row
@@ -687,6 +702,7 @@ def _tradability(
     previous_date: pd.Timestamp | None,
     config: dict,
 ) -> dict[str, set[str]]:
+    """函数说明：处理 tradability 的内部辅助逻辑。"""
     close = _field_on_date(prices, "close", trade_date)
     priced = set(close.dropna().index.astype(str))
     buyable = set(priced)
@@ -718,6 +734,7 @@ def _tradability(
 
 
 def _limit_threshold_for_stock(stock: str, prices: pd.DataFrame, trade_date: pd.Timestamp, config: dict, side: str) -> float:
+    """函数说明：处理 limit_threshold_for_stock 的内部辅助逻辑。"""
     suffix = "up" if side == "up" else "down"
     if _is_st_on_date(stock, prices, trade_date):
         return float(config.get(f"st_limit_{suffix}_threshold", 0.049))
@@ -732,6 +749,7 @@ def _limit_threshold_for_stock(stock: str, prices: pd.DataFrame, trade_date: pd.
 
 
 def _is_st_on_date(stock: str, prices: pd.DataFrame, trade_date: pd.Timestamp) -> bool:
+    """函数说明：判断 is_st_on_date 是否成立。"""
     is_st = _field_on_date(prices, "is_st", trade_date)
     if is_st.empty or stock not in is_st.index or pd.isna(is_st.loc[stock]):
         return False
@@ -744,6 +762,7 @@ def _portfolio_value(
     close: pd.Series | Mapping[str, float],
     last_prices: dict[str, float],
 ) -> float:
+    """函数说明：处理 portfolio_value 的内部辅助逻辑。"""
     total = capital
     for stock, shares in holdings.items():
         total += shares * _price_for(stock, close, last_prices)
@@ -751,6 +770,7 @@ def _portfolio_value(
 
 
 def _price_for(stock: str, close: pd.Series | Mapping[str, float], last_prices: dict[str, float]) -> float:
+    """函数说明：处理 price_for 的内部辅助逻辑。"""
     if isinstance(close, Mapping):
         price = close.get(stock)
         if price is not None and pd.notna(price):
@@ -762,6 +782,7 @@ def _price_for(stock: str, close: pd.Series | Mapping[str, float], last_prices: 
 
 
 def _row_price_dict(row: pd.Series | Mapping[str, float]) -> Mapping[str, float]:
+    """函数说明：处理 row_price_dict 的内部辅助逻辑。"""
     if isinstance(row, Mapping):
         return row
     if row.empty:
@@ -777,6 +798,7 @@ def _target_values(
     exposure_scale: float,
     config: dict,
 ) -> dict[str, float]:
+    """函数说明：处理 target_values 的内部辅助逻辑。"""
     if not target_holdings:
         return {}
 
@@ -803,6 +825,7 @@ def _apply_rebalance_drift_threshold(
     total: float,
     threshold: float,
 ) -> dict[str, int]:
+    """函数说明：应用 apply_rebalance_drift_threshold 的内部辅助逻辑。"""
     if threshold <= 0 or total <= 0 or not desired_shares:
         return desired_shares
 
@@ -823,6 +846,7 @@ def _apply_rebalance_drift_threshold(
 
 
 def _score_weights(scores: pd.Series, target_holdings: list[str]) -> pd.Series:
+    """函数说明：处理 score_weights 的内部辅助逻辑。"""
     selected = pd.to_numeric(scores.reindex(target_holdings), errors="coerce").replace([np.inf, -np.inf], np.nan)
     if selected.notna().sum() == 0:
         return pd.Series(1.0 / len(target_holdings), index=target_holdings, dtype=float)
@@ -839,11 +863,13 @@ def _score_weights(scores: pd.Series, target_holdings: list[str]) -> pd.Series:
 
 
 def _round_lot(shares: float, stock: str, config: dict) -> int:
+    """函数说明：处理 round_lot 的内部辅助逻辑。"""
     lot_size = _lot_size(stock, config)
     return int(shares / lot_size) * lot_size
 
 
 def _lot_size(stock: str, config: dict) -> int:
+    """函数说明：处理 lot_size 的内部辅助逻辑。"""
     lot_map = config.get("lot_size_map", {})
     if stock in lot_map:
         return int(lot_map[stock])
@@ -874,6 +900,7 @@ def _trade(
     slippage_model: str = "fixed",
     capacity: dict[str, float | bool] | None = None,
 ) -> dict[str, Any]:
+    """函数说明：处理 trade 的内部辅助逻辑。"""
     row = {
         "signal_date": signal_date,
         "date": trade_date,
@@ -906,6 +933,7 @@ def _blocked_trade(
     shares: int,
     reason: str,
 ) -> dict[str, Any]:
+    """函数说明：处理 blocked_trade 的内部辅助逻辑。"""
     return {
         "signal_date": signal_date,
         "date": trade_date,
@@ -926,6 +954,7 @@ def _blocked_trade(
 
 
 def _max_drawdown_duration(equity_curve: pd.Series) -> int:
+    """函数说明：处理 max_drawdown_duration 的内部辅助逻辑。"""
     if equity_curve.empty:
         return 0
     running_max = equity_curve.cummax()
@@ -953,6 +982,7 @@ def _execute_risk_exits(
     prices: pd.DataFrame,
     config: dict,
 ) -> float:
+    """函数说明：处理 execute_risk_exits 的内部辅助逻辑。"""
     stop_loss = config.get("stop_loss_pct")
     take_profit = config.get("take_profit_pct")
     if stop_loss is None and take_profit is None:
@@ -1022,6 +1052,7 @@ def _execute_stale_price_exits(
     prices: pd.DataFrame,
     config: dict,
 ) -> float:
+    """函数说明：处理 execute_stale_price_exits 的内部辅助逻辑。"""
     threshold = int(config.get("stale_price_exit_days", 20))
     haircut = float(config.get("stale_price_haircut", 0.5))
     policy = str(config.get("stale_price_exit_policy", "haircut_exit")).strip().lower()
@@ -1089,6 +1120,7 @@ def _liquidate_portfolio(
     config: dict,
     reason: str,
 ) -> float:
+    """函数说明：处理 liquidate_portfolio 的内部辅助逻辑。"""
     for stock, shares in list(holdings.items()):
         if shares <= 0:
             continue
@@ -1135,6 +1167,7 @@ def _reduce_portfolio_exposure(
     target_exposure: float,
     reason: str,
 ) -> float:
+    """函数说明：处理 reduce_portfolio_exposure 的内部辅助逻辑。"""
     target_exposure = max(0.0, min(float(target_exposure), 1.0))
     if target_exposure <= 0:
         return _liquidate_portfolio(
@@ -1227,6 +1260,7 @@ def _sell_all(
     execution_price: float | None = None,
     requested_shares: int | None = None,
 ) -> float:
+    """函数说明：处理 sell_all 的内部辅助逻辑。"""
     total_shares = holdings.get(stock, 0)
     shares = total_shares if requested_shares is None else min(max(int(requested_shares), 0), total_shares)
     if shares <= 0:
@@ -1277,6 +1311,7 @@ def _sell_all(
 
 
 def _average_entry_price(old_entry: float | None, old_shares: int, price: float, buy_shares: int) -> float:
+    """函数说明：处理 average_entry_price 的内部辅助逻辑。"""
     if old_entry is None or old_shares <= 0:
         return float(price)
     return float((old_entry * old_shares + price * buy_shares) / (old_shares + buy_shares))
@@ -1294,6 +1329,7 @@ def _risk_exit_decision_from_rows(
     take_profit: float | None,
     config: dict | None = None,
 ) -> tuple[str | None, float | None]:
+    """函数说明：处理 risk_exit_decision_from_rows 的内部辅助逻辑。"""
     open_price = _price_for(stock, open_prices, last_prices)
     high_price = _price_for(stock, high_prices, last_prices)
     low_price = _price_for(stock, low_prices, last_prices)
@@ -1319,6 +1355,7 @@ def _risk_exit_decision_from_rows(
 
 
 def _stop_trigger_fill_price(stop_price: float, low_price: float, config: dict | None) -> float:
+    """函数说明：处理 stop_trigger_fill_price 的内部辅助逻辑。"""
     cfg = config or {}
     policy = str(cfg.get("stop_fill_policy", "conservative")).strip().lower()
     if policy in {"stop", "stop_price", "ideal"}:
@@ -1329,6 +1366,7 @@ def _stop_trigger_fill_price(stop_price: float, low_price: float, config: dict |
 
 
 def _take_profit_fill_price(take_price: float, high_price: float, config: dict | None) -> float:
+    """函数说明：处理 take_profit_fill_price 的内部辅助逻辑。"""
     cfg = config or {}
     policy = str(cfg.get("take_profit_fill_policy", cfg.get("stop_fill_policy", "conservative"))).strip().lower()
     if policy in {"target", "take_price", "ideal", "stop_price"}:
@@ -1346,6 +1384,7 @@ def _risk_exit_market_price(
     prices: pd.DataFrame,
     config: dict,
 ) -> float:
+    """函数说明：处理 risk_exit_market_price 的内部辅助逻辑。"""
     price_field = str(config.get("risk_exit_price_field", config.get("trade_price_field", "close"))).lower()
     price_row = _price_row(prices, price_field, trade_date)
     if not price_row.empty:
@@ -1354,6 +1393,7 @@ def _risk_exit_market_price(
 
 
 def _trade_slippage(base_slippage: float, prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notional: float, config: dict) -> float:
+    """函数说明：处理 trade_slippage 的内部辅助逻辑。"""
     base = max(float(base_slippage), 0.0)
     if not bool(config.get("dynamic_slippage_enabled", False)):
         return base
@@ -1371,10 +1411,12 @@ def _trade_slippage(base_slippage: float, prices: pd.DataFrame, trade_date: pd.T
 
 
 def _slippage_model_name(config: dict) -> str:
+    """函数说明：处理 slippage_model_name 的内部辅助逻辑。"""
     return "dynamic_adv" if bool(config.get("dynamic_slippage_enabled", False)) else "fixed"
 
 
 def _capacity(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, notional: float, config: dict) -> dict[str, float | bool]:
+    """函数说明：处理 capacity 的内部辅助逻辑。"""
     window = int(config.get("capacity_window", 20))
     amount_unit = float(config.get("amount_unit", 1000.0))
     warn_threshold = float(config.get("capacity_warning_threshold", 0.05))
@@ -1391,6 +1433,7 @@ def _apply_capacity_limit(
     trade_date: pd.Timestamp,
     config: dict,
 ) -> tuple[int, str, str | None]:
+    """函数说明：应用 apply_capacity_limit 的内部辅助逻辑。"""
     participation = config.get("max_participation_rate")
     if participation is None:
         return requested_shares, "filled", None
@@ -1412,6 +1455,7 @@ def _apply_capacity_limit(
 
 
 def _prior_adv(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, window: int, amount_unit: float) -> float:
+    """函数说明：处理 prior_adv 的内部辅助逻辑。"""
     amount = _field(prices, "amount")
     if amount.empty or stock not in amount.columns:
         return 0.0
@@ -1422,6 +1466,7 @@ def _prior_adv(prices: pd.DataFrame, trade_date: pd.Timestamp, stock: str, windo
 
 
 def _next_price_date(price_dates: pd.Index, signal_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.Timestamp | None:
+    """函数说明：处理 next_price_date 的内部辅助逻辑。"""
     pos = price_dates.searchsorted(signal_date, side="right")
     if pos >= len(price_dates):
         return None

@@ -1,3 +1,5 @@
+"""模块说明：生成数据治理报告并检查时点数据证据。"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -14,6 +16,7 @@ from src.config_loader import load_config, resolve_path
 
 @dataclass
 class DataGovernanceReport:
+    """类说明：封装 DataGovernanceReport 相关数据和行为。"""
     generated_at: str
     universe_file: str
     universe_rows: int
@@ -79,15 +82,18 @@ class DataGovernanceReport:
 
     @property
     def is_point_in_time_ready(self) -> bool:
+        """函数说明：判断 is_point_in_time_ready 是否成立。"""
         return not self.issues
 
     def to_dict(self) -> dict[str, Any]:
+        """函数说明：处理 to_dict 主要逻辑。"""
         result = asdict(self)
         result["is_point_in_time_ready"] = self.is_point_in_time_ready
         return result
 
 
 def build_data_governance_report(config: dict | None = None, sample_raw_files: int = 50) -> DataGovernanceReport:
+    """函数说明：构建 build_data_governance_report 主要逻辑。"""
     cfg = config or load_config()
     data_cfg = cfg.get("data", {})
     gov_cfg = cfg.get("data_governance", {})
@@ -343,6 +349,7 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
 
 
 def write_data_governance_report(report: DataGovernanceReport, out_dir: str | Path) -> Path:
+    """函数说明：写入 write_data_governance_report 主要逻辑。"""
     output_dir = resolve_path(out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "data_governance_report.json"
@@ -351,6 +358,7 @@ def write_data_governance_report(report: DataGovernanceReport, out_dir: str | Pa
 
 
 def _read_csv_if_exists(path: Path | None) -> pd.DataFrame:
+    """函数说明：读取 read_csv_if_exists 的内部辅助逻辑。"""
     if path is None or not path.exists():
         return pd.DataFrame()
     try:
@@ -360,6 +368,7 @@ def _read_csv_if_exists(path: Path | None) -> pd.DataFrame:
 
 
 def _read_table_if_exists(path: Path | None) -> pd.DataFrame:
+    """函数说明：读取 read_table_if_exists 的内部辅助逻辑。"""
     if path is None or not path.exists():
         return pd.DataFrame()
     try:
@@ -371,6 +380,7 @@ def _read_table_if_exists(path: Path | None) -> pd.DataFrame:
 
 
 def _read_json_if_exists(path: Path) -> dict[str, Any]:
+    """函数说明：读取 read_json_if_exists 的内部辅助逻辑。"""
     if not path.exists():
         return {}
     try:
@@ -380,6 +390,7 @@ def _read_json_if_exists(path: Path) -> dict[str, Any]:
 
 
 def _int_value(value: Any) -> int:
+    """函数说明：处理 int_value 的内部辅助逻辑。"""
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -387,6 +398,7 @@ def _int_value(value: Any) -> int:
 
 
 def _float_value(value: Any, default: float = 0.0) -> float:
+    """函数说明：处理 float_value 的内部辅助逻辑。"""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -394,6 +406,7 @@ def _float_value(value: Any, default: float = 0.0) -> float:
 
 
 def _adj_factor_missing_symbols(issues: Any) -> list[str]:
+    """函数说明：处理 adj_factor_missing_symbols 的内部辅助逻辑。"""
     if not isinstance(issues, list):
         return []
     symbols: list[str] = []
@@ -409,6 +422,7 @@ def _adj_factor_missing_symbols(issues: Any) -> list[str]:
 
 
 def _delisted_rows(frame: pd.DataFrame) -> int:
+    """函数说明：处理 delisted_rows 的内部辅助逻辑。"""
     if frame.empty:
         return 0
     count = 0
@@ -421,10 +435,12 @@ def _delisted_rows(frame: pd.DataFrame) -> int:
 
 
 def _has_any_column(frame: pd.DataFrame, columns: list[str]) -> bool:
+    """函数说明：判断 has_any_column 是否成立。"""
     return any(column in frame.columns for column in columns)
 
 
 def _date_range_text(series: pd.Series | None) -> tuple[str, str]:
+    """函数说明：处理 date_range_text 的内部辅助逻辑。"""
     if series is None:
         return "", ""
     dates = pd.to_datetime(series.astype(str).str.replace("-", "", regex=False), format="%Y%m%d", errors="coerce").dropna()
@@ -434,6 +450,7 @@ def _date_range_text(series: pd.Series | None) -> tuple[str, str]:
 
 
 def _date_range_from_columns(frame: pd.DataFrame, columns: list[str]) -> tuple[str, str]:
+    """函数说明：处理 date_range_from_columns 的内部辅助逻辑。"""
     date_parts = []
     for column in columns:
         if column not in frame.columns:
@@ -452,6 +469,7 @@ def _date_range_from_columns(frame: pd.DataFrame, columns: list[str]) -> tuple[s
 
 
 def _config_start_date(data_cfg: dict[str, Any]) -> str:
+    """函数说明：处理 config_start_date 的内部辅助逻辑。"""
     value = data_cfg.get("history_start_date") or data_cfg.get("start_date")
     if not value:
         return ""
@@ -462,10 +480,12 @@ def _config_start_date(data_cfg: dict[str, Any]) -> str:
 
 
 def _price_panel_start_date(config: dict[str, Any]) -> str:
+    """函数说明：处理 price_panel_start_date 的内部辅助逻辑。"""
     return _date_index_start_date(_price_panel_trade_dates(config))
 
 
 def _price_panel_trade_dates(config: dict[str, Any]) -> pd.DatetimeIndex:
+    """函数说明：处理 price_panel_trade_dates 的内部辅助逻辑。"""
     ic_cfg = config.get("ic")
     if not isinstance(ic_cfg, dict) or "price_file" not in ic_cfg:
         return pd.DatetimeIndex([])
@@ -486,6 +506,7 @@ def _price_panel_trade_dates(config: dict[str, Any]) -> pd.DatetimeIndex:
 
 
 def _date_index_from_values(values: Any) -> pd.DatetimeIndex:
+    """函数说明：处理 date_index_from_values 的内部辅助逻辑。"""
     if isinstance(values, pd.MultiIndex):
         candidates = [_date_index_from_values(values.get_level_values(pos)) for pos in range(values.nlevels)]
         return max(candidates, key=len) if candidates else pd.DatetimeIndex([])
@@ -495,12 +516,14 @@ def _date_index_from_values(values: Any) -> pd.DatetimeIndex:
 
 
 def _date_index_start_date(dates: pd.DatetimeIndex) -> str:
+    """函数说明：处理 date_index_start_date 的内部辅助逻辑。"""
     if dates.empty:
         return ""
     return str(pd.Timestamp(dates.min()).date())
 
 
 def _filter_date_texts(dates: pd.DatetimeIndex, start: str, end: str) -> set[str]:
+    """函数说明：过滤 filter_date_texts 的内部辅助逻辑。"""
     if dates.empty:
         return set()
     start_date = pd.to_datetime(start, errors="coerce")
@@ -514,12 +537,14 @@ def _filter_date_texts(dates: pd.DatetimeIndex, start: str, end: str) -> set[str
 
 
 def _date_texts_from_series(series: pd.Series | None) -> set[str]:
+    """函数说明：处理 date_texts_from_series 的内部辅助逻辑。"""
     if series is None:
         return set()
     return {str(pd.Timestamp(date).date()) for date in _date_index_from_values(series)}
 
 
 def _month_texts_from_dates(date_texts: set[str]) -> set[str]:
+    """函数说明：处理 month_texts_from_dates 的内部辅助逻辑。"""
     months: set[str] = set()
     for value in date_texts:
         parsed = pd.to_datetime(value, errors="coerce")
@@ -529,6 +554,7 @@ def _month_texts_from_dates(date_texts: set[str]) -> set[str]:
 
 
 def _month_range_texts(start: str, end: str) -> set[str]:
+    """函数说明：处理 month_range_texts 的内部辅助逻辑。"""
     start_date = pd.to_datetime(start, errors="coerce")
     end_date = pd.to_datetime(end, errors="coerce")
     if pd.isna(start_date) or pd.isna(end_date):
@@ -538,6 +564,7 @@ def _month_range_texts(start: str, end: str) -> set[str]:
 
 
 def _coerce_dates(values: Any) -> pd.Series:
+    """函数说明：处理 coerce_dates 的内部辅助逻辑。"""
     if isinstance(values, pd.Series):
         raw = values.dropna()
     else:
@@ -561,6 +588,7 @@ def _coerce_dates(values: Any) -> pd.Series:
 
 
 def _point_in_time_start_date(*dates: str) -> str:
+    """函数说明：处理 point_in_time_start_date 的内部辅助逻辑。"""
     parsed = [pd.Timestamp(value).normalize() for value in pd.to_datetime(list(dates), errors="coerce") if not pd.isna(value)]
     if not parsed:
         return ""
@@ -568,6 +596,7 @@ def _point_in_time_start_date(*dates: str) -> str:
 
 
 def _date_after(left: str, right: str) -> bool:
+    """函数说明：处理 date_after 的内部辅助逻辑。"""
     left_date = pd.to_datetime(left, errors="coerce")
     right_date = pd.to_datetime(right, errors="coerce")
     if pd.isna(left_date) or pd.isna(right_date):
@@ -576,6 +605,7 @@ def _date_after(left: str, right: str) -> bool:
 
 
 def _month_after(left: str, right: str) -> bool:
+    """函数说明：处理 month_after 的内部辅助逻辑。"""
     left_date = pd.to_datetime(left, errors="coerce")
     right_date = pd.to_datetime(right, errors="coerce")
     if pd.isna(left_date) or pd.isna(right_date):
@@ -584,6 +614,7 @@ def _month_after(left: str, right: str) -> bool:
 
 
 def _sample_raw_adj_factor(raw_dir: Path, sample_raw_files: int) -> tuple[int, int]:
+    """函数说明：处理 sample_raw_adj_factor 的内部辅助逻辑。"""
     if not raw_dir.exists():
         return 0, 0
     files = sorted(path for path in raw_dir.glob("*.csv") if _is_stock_csv(path))[: max(sample_raw_files, 1)]
@@ -599,6 +630,7 @@ def _sample_raw_adj_factor(raw_dir: Path, sample_raw_files: int) -> tuple[int, i
 
 
 def _count_raw_stock_files(raw_dir: Path) -> int:
+    """函数说明：处理 count_raw_stock_files 的内部辅助逻辑。"""
     if not raw_dir.exists():
         return 0
     return sum(1 for path in raw_dir.glob("*.csv") if _is_stock_csv(path))
@@ -616,6 +648,7 @@ def _build_repair_actions(
     data_cfg: dict[str, Any],
     adj_factor_missing_symbols: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """函数说明：构建 build_repair_actions 的内部辅助逻辑。"""
     actions: list[dict[str, Any]] = []
     end_date = factor_end or str(data_cfg.get("end_date", "auto"))
     update_script = r".\.venv\Scripts\python.exe scripts\run_update_point_in_time_data.py"
@@ -691,4 +724,5 @@ def _build_repair_actions(
 
 
 def _valid_symbol(value: str) -> bool:
+    """函数说明：处理 valid_symbol 的内部辅助逻辑。"""
     return len(value) == len("000001.SZ") and value[:6].isdigit() and value[6:] in {".SZ", ".SH"}

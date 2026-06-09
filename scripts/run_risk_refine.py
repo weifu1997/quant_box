@@ -1,3 +1,5 @@
+"""模块说明：提供 run_risk_refine 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -29,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     quality = config.get("quality", {})
     parser = argparse.ArgumentParser(
@@ -252,10 +255,12 @@ def main() -> None:
 
 
 def _csv_values(value: str, cast: Callable[[str], Any]) -> list[Any]:
+    """函数说明：处理 csv_values 的内部辅助逻辑。"""
     return [cast(item.strip()) for item in str(value).split(",") if item.strip()]
 
 
 def _csv_optional_values(value: str, cast: Callable[[str], Any]) -> list[Any]:
+    """函数说明：处理 csv_optional_values 的内部辅助逻辑。"""
     values: list[Any] = []
     for item in str(value).split(","):
         item = item.strip()
@@ -276,6 +281,7 @@ def _with_timing_overrides(
     bear_exposure: float,
     bear_drawdown_threshold: float | None,
 ) -> dict[str, Any]:
+    """函数说明：处理 with_timing_overrides 的内部辅助逻辑。"""
     result = deepcopy(config)
     result.setdefault("defensive_timing", {})
     if mode != "config":
@@ -328,6 +334,7 @@ def _combo_key(
     float,
     float,
 ]:
+    """函数说明：处理 combo_key 的内部辅助逻辑。"""
     return (
         str(liquidity_side).strip().lower(),
         round(float(liquidity_quantile), 6),
@@ -352,6 +359,7 @@ def _combo_key(
 
 
 def _optional_key(value: object) -> float | None:
+    """函数说明：处理 optional_key 的内部辅助逻辑。"""
     if value is None or pd.isna(value):
         return None
     return round(float(value), 6)
@@ -382,6 +390,7 @@ def _completed_keys(
         float,
     ]
 ]:
+    """函数说明：处理 completed_keys 的内部辅助逻辑。"""
     frame = _read_existing(output_path)
     if frame.empty:
         return set()
@@ -435,12 +444,14 @@ def _completed_keys(
 
 
 def _read_existing(output_path: Path) -> pd.DataFrame:
+    """函数说明：读取 read_existing 的内部辅助逻辑。"""
     if not output_path.exists():
         return pd.DataFrame()
     return pd.read_csv(output_path)
 
 
 def _best_rows(rows: pd.DataFrame, target_annual_return: float, drawdown_limit: float) -> pd.DataFrame:
+    """函数说明：处理 best_rows 的内部辅助逻辑。"""
     frame = rows.copy()
     for column in ["annual_return", "max_drawdown", "sharpe", "calmar"]:
         frame[column] = pd.to_numeric(frame.get(column, 0.0), errors="coerce").fillna(0.0)
@@ -453,6 +464,7 @@ def _best_rows(rows: pd.DataFrame, target_annual_return: float, drawdown_limit: 
 
 
 def _number(value: object) -> float:
+    """函数说明：处理 number 的内部辅助逻辑。"""
     parsed = pd.to_numeric(value, errors="coerce")
     if pd.isna(parsed):
         return 0.0

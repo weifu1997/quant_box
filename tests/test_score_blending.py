@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_score_blending 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -8,7 +10,9 @@ from src.score_blending import apply_regime_score_blend, apply_regime_score_filt
 
 
 class ScoreBlendingTests(unittest.TestCase):
+    """类说明：组织 ScoreBlendingTests 测试用例。"""
     def test_regime_score_blend_uses_defensive_components_in_bear_state(self) -> None:
+        """函数说明：验证 test_regime_score_blend_uses_defensive_components_in_bear_state 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
         scores = pd.Series([1.0, 0.0], index=index, name="score")
@@ -34,6 +38,7 @@ class ScoreBlendingTests(unittest.TestCase):
         self.assertEqual(summary["dates_blended"], 1)
 
     def test_regime_score_blend_matches_factor_instruments_case_insensitively(self) -> None:
+        """函数说明：验证 test_regime_score_blend_matches_factor_instruments_case_insensitively 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         score_index = pd.MultiIndex.from_product(
             [[date], ["000001.SZ", "600519.SH"]],
@@ -64,6 +69,7 @@ class ScoreBlendingTests(unittest.TestCase):
         self.assertEqual(summary["dates_blended"], 1)
 
     def test_regime_score_blend_keeps_highest_score_when_normalized_codes_duplicate(self) -> None:
+        """函数说明：验证 test_regime_score_blend_keeps_highest_score_when_normalized_codes_duplicate 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         scores = pd.Series(
             [10.0, 1.0, 5.0],
@@ -92,6 +98,7 @@ class ScoreBlendingTests(unittest.TestCase):
         self.assertGreater(float(daily.loc["A"]), float(daily.loc["B"]))
 
     def test_regime_score_blend_uses_latest_intraday_scores_per_date(self) -> None:
+        """函数说明：验证 test_regime_score_blend_uses_latest_intraday_scores_per_date 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         scores = pd.Series(
             [100.0, 1.0, 1.0, 100.0],
@@ -127,6 +134,7 @@ class ScoreBlendingTests(unittest.TestCase):
         self.assertGreater(float(daily.loc["B"]), float(daily.loc["A"]))
 
     def test_regime_score_blend_uses_latest_intraday_factors_per_instrument(self) -> None:
+        """函数说明：验证 test_regime_score_blend_uses_latest_intraday_factors_per_instrument 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         index = pd.MultiIndex.from_product([[date], ["A", "B"]], names=["datetime", "instrument"])
         scores = pd.Series([0.0, 0.0], index=index, name="score")
@@ -158,6 +166,7 @@ class ScoreBlendingTests(unittest.TestCase):
         self.assertGreater(float(daily.loc["A"]), float(daily.loc["B"]))
 
     def test_regime_score_filter_masks_weak_bear_candidates(self) -> None:
+        """函数说明：验证 test_regime_score_filter_masks_weak_bear_candidates 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         index = pd.MultiIndex.from_product([[date], ["A", "B", "C"]], names=["datetime", "instrument"])
         scores = pd.Series([1.0, 0.9, 0.8], index=index, name="score")
@@ -188,6 +197,7 @@ class ScoreBlendingTests(unittest.TestCase):
         self.assertEqual(summary["rows_removed"], 1)
 
     def test_regime_score_filter_matches_factor_instruments_case_insensitively(self) -> None:
+        """函数说明：验证 test_regime_score_filter_matches_factor_instruments_case_insensitively 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-31")
         score_index = pd.MultiIndex.from_product(
             [[date], ["000001.SZ", "600519.SH"]],

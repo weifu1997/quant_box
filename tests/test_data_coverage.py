@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_data_coverage 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -13,7 +15,9 @@ from src.data_coverage import (
 
 
 class DataCoverageTests(unittest.TestCase):
+    """类说明：组织 DataCoverageTests 测试用例。"""
     def test_price_data_gaps_report_missing_symbols_by_date(self) -> None:
+        """函数说明：验证 test_price_data_gaps_report_missing_symbols_by_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         close = pd.DataFrame({"A": [10.0, None], "B": [20.0, 21.0]}, index=dates)
         prices = pd.concat({"close": close}, axis=1)
@@ -28,6 +32,7 @@ class DataCoverageTests(unittest.TestCase):
         self.assertAlmostEqual(float(summary["min_coverage"]), 0.5)
 
     def test_price_coverage_uses_latest_intraday_snapshot_per_date(self) -> None:
+        """函数说明：验证 test_price_coverage_uses_latest_intraday_snapshot_per_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"])
         close = pd.DataFrame({"A": [10.0, None, 11.0], "B": [20.0, 21.0, 22.0]}, index=dates)
         prices = pd.concat({"close": close}, axis=1)
@@ -41,6 +46,7 @@ class DataCoverageTests(unittest.TestCase):
         self.assertAlmostEqual(float(summary["min_coverage"]), 1.0)
 
     def test_price_coverage_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_price_coverage_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         prices = pd.DataFrame(
             {
@@ -55,6 +61,7 @@ class DataCoverageTests(unittest.TestCase):
             price_coverage_summary(prices, "2024-01-02", "2024-01-03")
 
     def test_skipped_months_filters_non_empty_reasons(self) -> None:
+        """函数说明：验证 test_skipped_months_filters_non_empty_reasons 覆盖的行为场景。"""
         diagnostics = pd.DataFrame(
             [
                 {"signal_date": "2024-01-31", "skip_reason": ""},
@@ -68,6 +75,7 @@ class DataCoverageTests(unittest.TestCase):
         self.assertEqual(skipped.iloc[0]["signal_date"], "2024-02-29")
 
     def test_yearly_equity_coverage_flags_missing_years(self) -> None:
+        """函数说明：验证 test_yearly_equity_coverage_flags_missing_years 覆盖的行为场景。"""
         equity = pd.Series(
             [100.0, 101.0],
             index=pd.to_datetime(["2024-01-02", "2026-01-02"]),

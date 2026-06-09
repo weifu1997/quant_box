@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_feature_extension 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -9,7 +11,9 @@ from src.feature_extension import _price_field, append_daily_basic_features, app
 
 
 class FeatureExtensionTests(unittest.TestCase):
+    """类说明：组织 FeatureExtensionTests 测试用例。"""
     def test_append_daily_basic_features_uses_lagged_available_date(self) -> None:
+        """函数说明：验证 test_append_daily_basic_features_uses_lagged_available_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
         index = pd.MultiIndex.from_product([dates, ["000001.SZ"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0, 2.0]}, index=index)
@@ -37,6 +41,7 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(float(extended.loc[(dates[1], "000001.SZ"), "DB_turnover_rate"]), 1.5)
 
     def test_append_daily_basic_features_uses_most_recent_available_lagged_date(self) -> None:
+        """函数说明：验证 test_append_daily_basic_features_uses_most_recent_available_lagged_date 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-08", "2024-01-10"])
         index = pd.MultiIndex.from_product([dates, ["000001.SZ"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0, 2.0]}, index=index)
@@ -63,6 +68,7 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(float(extended.loc[(dates[1], "000001.SZ"), "DB_turnover_rate"]), 2.5)
 
     def test_append_daily_basic_features_respects_daily_basic_toggle(self) -> None:
+        """函数说明：验证 test_append_daily_basic_features_respects_daily_basic_toggle 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-03")
         index = pd.MultiIndex.from_product([[date], ["000001.SZ"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0]}, index=index)
@@ -85,6 +91,7 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertEqual(summary["features_added"], 0)
 
     def test_append_daily_basic_features_normalizes_symbol_inputs(self) -> None:
+        """函数说明：验证 test_append_daily_basic_features_normalizes_symbol_inputs 覆盖的行为场景。"""
         date = pd.Timestamp("2024-01-03")
         index = pd.MultiIndex.from_product([[date], [" 000001.sz "]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0]}, index=index)
@@ -110,6 +117,7 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(float(extended.loc[(date, " 000001.sz "), "DB_turnover_rate"]), 1.5)
 
     def test_append_price_derived_features_uses_lagged_price_panel(self) -> None:
+        """函数说明：验证 test_append_price_derived_features_uses_lagged_price_panel 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates, ["000001.SZ"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0]}, index=index)
@@ -139,6 +147,7 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(float(extended.loc[(dates[2], "000001.SZ"), "PX_LOW_AMOUNT_2"]), expected, places=6)
 
     def test_price_field_keeps_latest_intraday_price_per_session(self) -> None:
+        """函数说明：验证 test_price_field_keeps_latest_intraday_price_per_session 覆盖的行为场景。"""
         prices = pd.DataFrame(
             {("close", "000001.sz"): [10.0, 30.0, 20.0]},
             index=pd.to_datetime(["2024-01-02 15:00", "2024-01-02 09:30", "2024-01-03 15:00"]),
@@ -151,6 +160,7 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(float(close.loc[pd.Timestamp("2024-01-02"), "000001.SZ"]), 10.0)
 
     def test_append_price_derived_features_accepts_plain_close_panel(self) -> None:
+        """函数说明：验证 test_append_price_derived_features_accepts_plain_close_panel 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates, ["000001.SZ"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0]}, index=index)
@@ -173,6 +183,7 @@ class FeatureExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(float(extended.loc[(dates[2], "000001.SZ"), "PX_RETURN_2"]), 0.2, places=6)
 
     def test_append_price_derived_features_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_append_price_derived_features_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates, ["000001.SZ"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0]}, index=index)
@@ -198,6 +209,7 @@ class FeatureExtensionTests(unittest.TestCase):
             )
 
     def test_append_price_derived_features_normalizes_factor_symbols(self) -> None:
+        """函数说明：验证 test_append_price_derived_features_normalizes_factor_symbols 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
         index = pd.MultiIndex.from_product([dates, [" 000001.sz "]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"F1": [1.0, 2.0, 3.0]}, index=index)

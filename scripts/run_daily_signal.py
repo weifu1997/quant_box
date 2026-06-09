@@ -1,3 +1,5 @@
+"""模块说明：提供 run_daily_signal 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     parser = argparse.ArgumentParser(description="Generate daily rebalance signal.")
     parser.add_argument("--date", default="latest", help="Signal date, YYYY-MM-DD, or latest factor date.")
     parser.add_argument("--previous-holdings", nargs="*", help="Optional previous holdings override.")
@@ -39,6 +42,7 @@ def main() -> None:
 
 
 def _signal_output_date(signal_df, requested_date: str) -> str:
+    """函数说明：处理 signal_output_date 的内部辅助逻辑。"""
     if not signal_df.empty and "date" in signal_df.columns:
         return str(signal_df["date"].iloc[0])
     signal_date = getattr(signal_df, "attrs", {}).get("signal_date")

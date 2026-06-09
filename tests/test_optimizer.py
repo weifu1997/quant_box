@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_optimizer 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import math
@@ -20,13 +22,16 @@ from tests.fixtures.real_data import require_real_market_data
 
 
 class OptimizerTests(unittest.TestCase):
+    """类说明：组织 OptimizerTests 测试用例。"""
     def test_optimization_score_penalizes_turnover_and_trade_cost(self) -> None:
+        """函数说明：验证 test_optimization_score_penalizes_turnover_and_trade_cost 覆盖的行为场景。"""
         cheap = {"sharpe": 1.0, "annual_turnover": 1.0, "annual_trade_cost_ratio": 0.02}
         expensive = {"sharpe": 1.0, "annual_turnover": 10.0, "annual_trade_cost_ratio": 0.20}
 
         self.assertGreater(_optimization_score(cheap), _optimization_score(expensive))
 
     def test_optimization_score_penalizes_deep_drawdown(self) -> None:
+        """函数说明：验证 test_optimization_score_penalizes_deep_drawdown 覆盖的行为场景。"""
         stable = {
             "annual_return": 0.2,
             "max_drawdown": -0.25,
@@ -40,9 +45,11 @@ class OptimizerTests(unittest.TestCase):
         self.assertGreater(_optimization_score(stable, drawdown_limit=-0.4), _optimization_score(fragile, drawdown_limit=-0.4))
 
     def test_optimization_score_treats_missing_metrics_as_zero(self) -> None:
+        """函数说明：验证 test_optimization_score_treats_missing_metrics_as_zero 覆盖的行为场景。"""
         self.assertEqual(_optimization_score({"sharpe": float("nan")}), 0.0)
 
     def test_sorted_results_prefers_smaller_drawdown_when_primary_scores_tie(self) -> None:
+        """函数说明：验证 test_sorted_results_prefers_smaller_drawdown_when_primary_scores_tie 覆盖的行为场景。"""
         rows = [
             {"name": "deep", "optimization_score": 1.0, "sharpe": 0.5, "annual_return": 0.1, "max_drawdown": -0.40},
             {"name": "shallow", "optimization_score": 1.0, "sharpe": 0.5, "annual_return": 0.1, "max_drawdown": -0.10},
@@ -53,6 +60,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(result["name"].tolist(), ["shallow", "deep"])
 
     def test_baseline_grid_is_smaller_than_full_grid(self) -> None:
+        """函数说明：验证 test_baseline_grid_is_smaller_than_full_grid 覆盖的行为场景。"""
         self.assertLess(_grid_size(BASELINE_GRID), _grid_size(DEFAULT_GRID))
         self.assertEqual(BASELINE_GRID["factor_group"], ["momentum", "factor:LOW0"])
         self.assertEqual(BASELINE_GRID["top_n"], [7, 10, 15, 20])
@@ -60,6 +68,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(BASELINE_GRID["rebalance_drift_threshold"], [0.02])
 
     def test_run_walk_forward_optimization_returns_out_of_sample_window(self) -> None:
+        """函数说明：验证 test_run_walk_forward_optimization_returns_out_of_sample_window 覆盖的行为场景。"""
         factors, prices = _walk_forward_data()
         grid = _small_grid()
 
@@ -87,6 +96,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertIn(row["rebalance_freq"], grid["rebalance_freq"])
 
     def test_run_walk_forward_grid_validation_evaluates_all_grid_combinations(self) -> None:
+        """函数说明：验证 test_run_walk_forward_grid_validation_evaluates_all_grid_combinations 覆盖的行为场景。"""
         factors, prices = _walk_forward_data()
         grid = _small_grid()
 
@@ -109,6 +119,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(set(result["rebalance_freq"]), {"daily", "weekly"})
 
     def test_grid_validation_passes_full_scoring_config(self) -> None:
+        """函数说明：验证 test_grid_validation_passes_full_scoring_config 覆盖的行为场景。"""
         factors, prices = _walk_forward_data()
         grid = {
             "factor_group": ["dynamic_ic_selector"],
@@ -120,6 +131,7 @@ class OptimizerTests(unittest.TestCase):
         captured: list[dict] = []
 
         def fake_build_scores(factor_df: pd.DataFrame, config: dict, price_df: pd.DataFrame | None = None) -> pd.Series:
+            """函数说明：处理 fake_build_scores 主要逻辑。"""
             captured.append(config)
             return factor_df["ROC5"].rename("score")
 
@@ -143,6 +155,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertTrue(captured[0]["liquidity_filter"]["enabled"])
 
     def test_grid_validation_passes_configured_ic_label_params(self) -> None:
+        """函数说明：验证 test_grid_validation_passes_configured_ic_label_params 覆盖的行为场景。"""
         factors, prices = _walk_forward_data()
         grid = {
             "factor_group": ["ic_weighted"],
@@ -186,6 +199,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(kwargs["min_obs"], 4)
 
     def test_date_slices_include_intraday_timestamps_on_boundary_dates(self) -> None:
+        """函数说明：验证 test_date_slices_include_intraday_timestamps_on_boundary_dates 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02 15:00", "2024-01-03 15:00"])
         factor_index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
         factors = pd.DataFrame({"ROC5": [1.0, 2.0]}, index=factor_index)
@@ -200,6 +214,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(score_slice.index.get_level_values("datetime")[0], dates[1])
 
     def test_grid_validation_includes_intraday_boundary_prices(self) -> None:
+        """函数说明：验证 test_grid_validation_includes_intraday_boundary_prices 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01 15:00", "2024-01-02 15:00", "2024-02-01 15:00"])
         instruments = ["A", "B", "C", "D", "E"]
         index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
@@ -241,6 +256,7 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(pd.Timestamp(result.iloc[0]["test_end"]).date().isoformat(), "2024-02-01")
 
     def test_grid_validation_keeps_latest_intraday_price_order_before_backtest(self) -> None:
+        """函数说明：验证 test_grid_validation_keeps_latest_intraday_price_order_before_backtest 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-01 15:00", "2024-01-02 15:00", "2024-01-02 09:30", "2024-02-01 15:00"])
         stock = "A"
         index = pd.MultiIndex.from_product([dates, [stock]], names=["datetime", "instrument"])
@@ -262,9 +278,11 @@ class OptimizerTests(unittest.TestCase):
         captured_prices: list[pd.DataFrame] = []
 
         class FakeBacktestResult:
+            """类说明：提供 FakeBacktestResult 测试替身实现。"""
             metrics = {"sharpe": 0.0}
 
         def fake_build_scores(factor_df: pd.DataFrame, config: dict, price_df: pd.DataFrame | None = None) -> pd.Series:
+            """函数说明：处理 fake_build_scores 主要逻辑。"""
             return factor_df["ROC5"].rename("score")
 
         def fake_run_backtest(
@@ -274,6 +292,7 @@ class OptimizerTests(unittest.TestCase):
             end_date: str,
             config: dict,
         ) -> FakeBacktestResult:
+            """函数说明：处理 fake_run_backtest 主要逻辑。"""
             captured_prices.append(price_df.copy())
             return FakeBacktestResult()
 
@@ -302,6 +321,7 @@ class OptimizerTests(unittest.TestCase):
 
 
 def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """函数说明：处理 walk_forward_data 的内部辅助逻辑。"""
     market = require_real_market_data(
         start="2023-01-03",
         end="2024-03-29",
@@ -311,6 +331,7 @@ def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def _small_grid() -> dict[str, list]:
+    """函数说明：处理 small_grid 的内部辅助逻辑。"""
     return {
         "factor_group": ["momentum"],
         "top_n": [1, 2],
@@ -321,6 +342,7 @@ def _small_grid() -> dict[str, list]:
 
 
 def _grid_size(grid: dict[str, list]) -> int:
+    """函数说明：处理 grid_size 的内部辅助逻辑。"""
     size = 1
     for values in grid.values():
         size *= len(values)
@@ -328,6 +350,7 @@ def _grid_size(grid: dict[str, list]) -> int:
 
 
 def _base_backtest_config() -> dict:
+    """函数说明：处理 base_backtest_config 的内部辅助逻辑。"""
     return {
         "initial_capital": 100000,
         "commission": 0.0,

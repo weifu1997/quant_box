@@ -1,3 +1,5 @@
+"""模块说明：提供 run_goal_fast_factor_screen 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -20,6 +22,7 @@ from scripts._shared import dated_output_path
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     parser = argparse.ArgumentParser(description="Fast screen exact single-factor candidates for the active goal.")
     parser.add_argument("--output", default=dated_output_path("goal_fast_factor_screen"))
     parser.add_argument("--batch-size", type=int, default=12)
@@ -111,6 +114,7 @@ def main() -> None:
 
 
 def _screen_config(config: dict, factor_group: str, liquidity_mode: dict[str, object]) -> dict:
+    """函数说明：处理 screen_config 的内部辅助逻辑。"""
     result = dict(config)
     result["strategy"] = {**config.get("strategy", {}), "factor_group": factor_group, "rebalance_freq": "monthly"}
     result["liquidity_filter"] = {**config.get("liquidity_filter", {}), **liquidity_mode}
@@ -123,6 +127,7 @@ def _filter_scores(
     config: dict,
     liquidity_mode: dict[str, object],
 ) -> pd.Series:
+    """函数说明：过滤 filter_scores 的内部辅助逻辑。"""
     filter_config = {**config.get("liquidity_filter", {}), **liquidity_mode}
     if not bool(filter_config.get("enabled", False)):
         return scores
@@ -130,6 +135,7 @@ def _filter_scores(
 
 
 def _parse_liquidity_mode(value: str) -> dict[str, object]:
+    """函数说明：解析 parse_liquidity_mode 的内部辅助逻辑。"""
     mode = value.strip().lower()
     if mode in {"none", "off", "false"}:
         return {"enabled": False}
@@ -138,6 +144,7 @@ def _parse_liquidity_mode(value: str) -> dict[str, object]:
 
 
 def _liquidity_row(liquidity_mode: dict[str, object]) -> dict[str, object]:
+    """函数说明：处理 liquidity_row 的内部辅助逻辑。"""
     return {
         "liquidity_enabled": bool(liquidity_mode.get("enabled", False)),
         "liquidity_side": liquidity_mode.get("side", ""),
@@ -146,6 +153,7 @@ def _liquidity_row(liquidity_mode: dict[str, object]) -> dict[str, object]:
 
 
 def _error_row(column: str, direction_name: str, liquidity_mode: dict[str, object], message: str) -> dict[str, object]:
+    """函数说明：处理 error_row 的内部辅助逻辑。"""
     return {
         "factor_group": "",
         "factor": column,
@@ -161,6 +169,7 @@ def _error_row(column: str, direction_name: str, liquidity_mode: dict[str, objec
 
 
 def _screen_quality_fields(metrics: dict[str, object], config: dict) -> dict[str, object]:
+    """函数说明：处理 screen_quality_fields 的内部辅助逻辑。"""
     return_threshold, drawdown_limit = _quality_thresholds(config)
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
@@ -171,6 +180,7 @@ def _screen_quality_fields(metrics: dict[str, object], config: dict) -> dict[str
 
 
 def _quality_thresholds(config: dict) -> tuple[float, float]:
+    """函数说明：处理 quality_thresholds 的内部辅助逻辑。"""
     quality = config.get("quality", {})
     return_threshold = float(quality.get("min_backtest_annual_return", quality.get("target_annual_return", 0.20)))
     drawdown_limit = float(quality.get("max_backtest_drawdown_limit", quality.get("max_drawdown_limit", -0.20)))
@@ -178,6 +188,7 @@ def _quality_thresholds(config: dict) -> tuple[float, float]:
 
 
 def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:
+    """函数说明：处理 sorted 的内部辅助逻辑。"""
     frame = pd.DataFrame(rows)
     if frame.empty:
         return frame
@@ -187,6 +198,7 @@ def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:
 
 
 def _read_factor_subset(path_value: str | Path, columns: list[str], start_date: str, end_date: str) -> pd.DataFrame:
+    """函数说明：读取 read_factor_subset 的内部辅助逻辑。"""
     path = resolve_path(path_value)
     requested = [*columns, "datetime", "instrument"]
     factors = pd.read_parquet(path, columns=requested)
@@ -198,6 +210,7 @@ def _read_factor_subset(path_value: str | Path, columns: list[str], start_date: 
 
 
 def _read_price_fields(path_value: str | Path, fields: list[str], start_date: str, end_date: str) -> pd.DataFrame:
+    """函数说明：读取 read_price_fields 的内部辅助逻辑。"""
     path = resolve_path(path_value)
     columns = _price_columns_for_fields(path, fields)
     prices = pd.read_parquet(path, columns=columns)
@@ -207,6 +220,7 @@ def _read_price_fields(path_value: str | Path, fields: list[str], start_date: st
 
 
 def _price_columns_for_fields(path: Path, fields: list[str]) -> list[str] | None:
+    """函数说明：处理 price_columns_for_fields 的内部辅助逻辑。"""
     wanted = {str(field).strip().lower() for field in fields if str(field).strip()}
     if not wanted:
         return None
@@ -225,6 +239,7 @@ def _price_columns_for_fields(path: Path, fields: list[str]) -> list[str] | None
 
 
 def _score_component_columns(config: dict, available_columns: list[str]) -> list[str]:
+    """函数说明：处理 score_component_columns 的内部辅助逻辑。"""
     if not bool(config.get("regime_score_blend", {}).get("enabled", False)):
         return []
     available = {str(column) for column in available_columns}

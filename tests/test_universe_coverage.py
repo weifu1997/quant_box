@@ -1,3 +1,5 @@
+"""模块说明：覆盖 test_universe_coverage 相关行为的测试用例。"""
+
 from __future__ import annotations
 
 import unittest
@@ -11,7 +13,9 @@ from src.universe_coverage import summarize_universe_coverage
 
 
 class UniverseCoverageTests(unittest.TestCase):
+    """类说明：组织 UniverseCoverageTests 测试用例。"""
     def test_summarize_universe_coverage_reports_local_and_price_panel_counts(self) -> None:
+        """函数说明：验证 test_summarize_universe_coverage_reports_local_and_price_panel_counts 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -47,6 +51,7 @@ class UniverseCoverageTests(unittest.TestCase):
         self.assertAlmostEqual(float(coverage["price_target_coverage"]), 2 / 3)
 
     def test_summarize_universe_coverage_normalizes_symbol_whitespace_and_case(self) -> None:
+        """函数说明：验证 test_summarize_universe_coverage_normalizes_symbol_whitespace_and_case 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"
@@ -78,6 +83,7 @@ class UniverseCoverageTests(unittest.TestCase):
         self.assertEqual(coverage["price_target_coverage"], 1.0)
 
     def test_summarize_universe_coverage_rejects_flat_ohlcv_price_frame(self) -> None:
+        """函数说明：验证 test_summarize_universe_coverage_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw_dir = root / "raw"

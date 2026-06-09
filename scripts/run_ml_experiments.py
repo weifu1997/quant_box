@@ -1,3 +1,5 @@
+"""模块说明：提供 run_ml_experiments 命令行入口。"""
+
 from __future__ import annotations
 
 import argparse
@@ -24,6 +26,7 @@ from scripts._shared import yearly_quality_gate, yearly_stats
 
 
 def main() -> None:
+    """函数说明：解析命令行参数并执行主流程。"""
     config = load_config()
     parser = argparse.ArgumentParser(description="Run fast ML score portfolio experiments without retraining models.")
     parser.add_argument("--start-date", default=config["data"]["start_date"])
@@ -196,6 +199,7 @@ def main() -> None:
 
 
 def _write_results(rows: list[dict[str, object]], out_path: Path) -> pd.DataFrame:
+    """函数说明：写入 write_results 的内部辅助逻辑。"""
     result_df = pd.DataFrame(rows)
     if not result_df.empty:
         result_df = result_df.sort_values(["quality_pass", "annual_return", "max_drawdown"], ascending=[False, False, False])
@@ -204,6 +208,7 @@ def _write_results(rows: list[dict[str, object]], out_path: Path) -> pd.DataFram
 
 
 def _load_scores(path: Path) -> pd.Series:
+    """函数说明：加载 load_scores 的内部辅助逻辑。"""
     if not path.exists():
         raise FileNotFoundError(f"Scores file not found: {path}. Run scripts/run_ml_strategy.py first.")
     frame = pd.read_parquet(path)
@@ -229,6 +234,7 @@ def _load_scores(path: Path) -> pd.Series:
 
 
 def _quality(metrics: dict[str, float], yearly: pd.DataFrame, config: dict) -> dict[str, object]:
+    """函数说明：处理 quality 的内部辅助逻辑。"""
     ml_cfg = config.get("ml_strategy", {})
     target_return = float(ml_cfg.get("target_annual_return", 0.20))
     min_yearly_return = float(ml_cfg.get("min_yearly_annual_return", target_return))
@@ -255,6 +261,7 @@ def _quality(metrics: dict[str, float], yearly: pd.DataFrame, config: dict) -> d
 
 
 def _fast_yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
+    """函数说明：处理 fast_yearly_stats 的内部辅助逻辑。"""
     if equity_curve.empty:
         return pd.DataFrame(columns=["year", "start", "end", "days", "total_return", "annual_return", "max_drawdown"])
     equity = equity_curve.sort_index().astype(float)
@@ -282,18 +289,22 @@ def _fast_yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
 
 
 def _csv_ints(value: str) -> list[int]:
+    """函数说明：处理 csv_ints 的内部辅助逻辑。"""
     return [int(item.strip()) for item in value.split(",") if item.strip()]
 
 
 def _csv_floats(value: str) -> list[float]:
+    """函数说明：处理 csv_floats 的内部辅助逻辑。"""
     return [float(item.strip()) for item in value.split(",") if item.strip()]
 
 
 def _csv_bools(value: str) -> list[bool]:
+    """函数说明：处理 csv_bools 的内部辅助逻辑。"""
     return [item.strip().lower() in {"1", "true", "yes", "y"} for item in value.split(",") if item.strip()]
 
 
 def _csv_optional_floats(value: str) -> list[float | None]:
+    """函数说明：处理 csv_optional_floats 的内部辅助逻辑。"""
     result: list[float | None] = []
     for item in value.split(","):
         text = item.strip().lower()

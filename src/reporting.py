@@ -1,3 +1,5 @@
+"""模块说明：生成日度信号报告并归档运行产物。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +12,7 @@ from src.config_loader import resolve_path
 
 
 def write_daily_signal_report(report: dict[str, Any], out_dir: str | Path) -> Path:
+    """函数说明：写入 write_daily_signal_report 主要逻辑。"""
     output_dir = resolve_path(out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "daily_signal_report.md"
@@ -18,6 +21,7 @@ def write_daily_signal_report(report: dict[str, Any], out_dir: str | Path) -> Pa
 
 
 def archive_run(files: list[str | Path], history_dir: str | Path, signal_date: str) -> Path:
+    """函数说明：归档 archive_run 主要逻辑。"""
     target = resolve_path(history_dir) / signal_date
     target.mkdir(parents=True, exist_ok=True)
     for item in files:
@@ -30,6 +34,7 @@ def archive_run(files: list[str | Path], history_dir: str | Path, signal_date: s
 
 
 def _render_report(report: dict[str, Any]) -> str:
+    """函数说明：处理 render_report 的内部辅助逻辑。"""
     selected_params = report.get("selected_params", {})
     data_health = report.get("data_health", {})
     param_quality = report.get("parameter_quality", {})
@@ -37,6 +42,7 @@ def _render_report(report: dict[str, Any]) -> str:
     data_governance = report.get("data_governance", {})
     metrics = report.get("backtest_metrics", {})
     research = report.get("research_diagnostics", {})
+    failure_analysis = report.get("failure_analysis", {})
     account = report.get("account", {})
     signal_summary = report.get("signal_summary", {})
     block_reasons = report.get("block_reasons", [])
@@ -116,6 +122,10 @@ def _render_report(report: dict[str, Any]) -> str:
             f"- Calmar: {_num(backtest_quality.get('calmar'))}",
             f"- Issues: {', '.join(backtest_quality.get('issues', [])) or 'none'}",
             "",
+            "## Failure Analysis",
+            "",
+            *_failure_analysis_lines(failure_analysis),
+            "",
             "## Selected Params",
             "",
             *_mapping_lines(selected_params),
@@ -161,6 +171,7 @@ def _render_report(report: dict[str, Any]) -> str:
 
 
 def signal_action_summary(signal_df: pd.DataFrame) -> dict[str, int]:
+    """函数说明：处理 signal_action_summary 主要逻辑。"""
     if signal_df.empty or "action" not in signal_df.columns:
         return {"BUY": 0, "HOLD": 0, "SELL": 0}
     counts = signal_df["action"].astype(str).str.upper().value_counts()
@@ -168,6 +179,7 @@ def signal_action_summary(signal_df: pd.DataFrame) -> dict[str, int]:
 
 
 def _mapping_lines(values: dict[str, Any], max_items: int | None = None) -> list[str]:
+    """函数说明：处理 mapping_lines 的内部辅助逻辑。"""
     items = list(values.items())
     if max_items is not None:
         items = items[:max_items]
@@ -175,6 +187,7 @@ def _mapping_lines(values: dict[str, Any], max_items: int | None = None) -> list
 
 
 def _repair_action_lines(actions: Any, max_items: int = 5) -> list[str]:
+    """函数说明：处理 repair_action_lines 的内部辅助逻辑。"""
     if not isinstance(actions, list) or not actions:
         return ["- Repair actions: none"]
     lines = []
@@ -190,6 +203,7 @@ def _repair_action_lines(actions: Any, max_items: int = 5) -> list[str]:
 
 
 def _symbol_preview(symbols: Any, max_items: int = 8) -> str:
+    """函数说明：处理 symbol_preview 的内部辅助逻辑。"""
     if not isinstance(symbols, list) or not symbols:
         return "none"
     values = [str(symbol) for symbol in symbols]
@@ -198,6 +212,7 @@ def _symbol_preview(symbols: Any, max_items: int = 8) -> str:
 
 
 def _cost_summary(research: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 cost_summary 的内部辅助逻辑。"""
     costs = research.get("cost_attribution", {})
     if not isinstance(costs, dict):
         return {}
@@ -206,6 +221,7 @@ def _cost_summary(research: dict[str, Any]) -> dict[str, Any]:
 
 
 def _exposure_summary(research: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 exposure_summary 的内部辅助逻辑。"""
     exposure = research.get("exposure", {})
     if not isinstance(exposure, dict):
         return {}
@@ -214,6 +230,7 @@ def _exposure_summary(research: dict[str, Any]) -> dict[str, Any]:
 
 
 def _turnover_summary(research: dict[str, Any]) -> dict[str, Any]:
+    """函数说明：处理 turnover_summary 的内部辅助逻辑。"""
     turnover = research.get("turnover_attribution", {})
     if not isinstance(turnover, dict):
         return {}
@@ -236,7 +253,64 @@ def _turnover_summary(research: dict[str, Any]) -> dict[str, Any]:
     return {f"turnover_{key}": turnover.get(key) for key in keys if key in turnover}
 
 
+def _failure_analysis_lines(analysis: Any) -> list[str]:
+    """Render the compact failure diagnosis section."""
+    if not isinstance(analysis, dict) or not analysis.get("enabled", False):
+        issues = analysis.get("issues", []) if isinstance(analysis, dict) else []
+        return [f"- Enabled: False", f"- Issues: {', '.join(map(str, issues)) or 'none'}"]
+
+    gaps = analysis.get("backtest_threshold_gaps", {})
+    drawdown = analysis.get("drawdown_summary", {})
+    return [
+        f"- Primary failure area: {analysis.get('primary_failure_area', '')}",
+        f"- Parameter/backtest mismatch: {analysis.get('parameter_backtest_mismatch', False)}",
+        f"- Backtest gaps: annual return {_pct(gaps.get('annual_return_gap'))}; max drawdown {_pct(gaps.get('max_drawdown_gap'))}",
+        (
+            "- Worst drawdown: "
+            f"{drawdown.get('start_date') or drawdown.get('peak_date') or ''}"
+            f" -> {drawdown.get('trough_date') or ''}"
+            f" (recovery: {drawdown.get('recovery_date') or 'none'})"
+        ),
+        f"- Drawdown strategy / benchmark / active return: {_pct(drawdown.get('strategy_return_peak_to_trough'))} / {_pct(drawdown.get('benchmark_return_peak_to_trough'))} / {_pct(drawdown.get('active_return_peak_to_trough'))}",
+        f"- Drawdown trades/cost/risk exits/blocked: {drawdown.get('trades_peak_to_trough', '')}/{_num(drawdown.get('trade_cost_peak_to_trough'))}/{drawdown.get('risk_exit_trades_peak_to_trough', '')}/{drawdown.get('blocked_trades_peak_to_trough', '')}",
+        f"- Top drawdown contributors: {_drawdown_contributor_preview(drawdown)}",
+        f"- Next check: {_next_failure_check(analysis)}",
+    ]
+
+
+def _drawdown_contributor_preview(drawdown: dict[str, Any]) -> str:
+    """Preview the largest negative drawdown contributors."""
+    records = drawdown.get("top_negative_instruments", [])
+    if not isinstance(records, list) or not records:
+        return "none"
+    labels = []
+    for record in records[:3]:
+        if not isinstance(record, dict):
+            continue
+        instrument = record.get("instrument", "")
+        contribution = _pct(record.get("gross_contribution"))
+        labels.append(f"{instrument} {contribution}".strip())
+    return ", ".join(labels) if labels else "none"
+
+
+def _next_failure_check(analysis: dict[str, Any]) -> str:
+    """Choose a short next-step hint for a failed automatic run."""
+    if analysis.get("parameter_backtest_mismatch"):
+        return "compare validation windows with pre-validation and full-history segments"
+    primary = str(analysis.get("primary_failure_area", ""))
+    if primary == "params":
+        return "review parameter grid and validation quality thresholds"
+    if primary == "backtest":
+        return "review drawdown control and yearly return breakdown"
+    if primary in {"data", "governance"}:
+        return "repair data readiness before trusting performance diagnostics"
+    if primary == "account":
+        return "load current holdings before promoting candidate orders"
+    return "review failure analysis artifacts"
+
+
 def _pct(value: Any) -> str:
+    """函数说明：处理 pct 的内部辅助逻辑。"""
     try:
         return f"{float(value) * 100:.2f}%"
     except (TypeError, ValueError):
@@ -244,6 +318,7 @@ def _pct(value: Any) -> str:
 
 
 def _num(value: Any) -> str:
+    """函数说明：处理 num 的内部辅助逻辑。"""
     try:
         return f"{float(value):.6f}"
     except (TypeError, ValueError):
