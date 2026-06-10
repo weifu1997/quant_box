@@ -1,0 +1,110 @@
+[
+  {
+    "name": "largecap_top15_take035_no_timing",
+    "strategy": {
+      "factor_group": "factor:DB_circ_mv",
+      "top_n": 15,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "smallcap_top15_take035_no_timing",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_circ_mv",
+      "top_n": 15,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "lowpb_top20_take035_no_timing",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_pb",
+      "top_n": 20,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "lowpe_top20_take035_no_timing",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_pe_ttm",
+      "top_n": 20,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "highdiv_top20_take035_no_timing",
+    "strategy": {
+      "factor_group": "factor:DB_dv_ttm",
+      "top_n": 20,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "lowturnover_top20_take035_no_timing",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_turnover_rate_f",
+      "top_n": 20,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  }
+]

@@ -32,7 +32,12 @@ from src.data_fetcher import update_daily_data_resumable
 from src.data_governance import build_data_governance_report, write_data_governance_report
 from src.data_health import build_data_health_report, write_data_health_report
 from src.factor_calculator import load_or_compute_factors
-from src.failure_analysis import build_failure_analysis_artifacts, write_failure_analysis_artifacts
+from src.failure_analysis import build_failure_analysis_artifacts, build_yearly_breakdown, write_failure_analysis_artifacts
+from src.fundamental_data import (
+    build_fundamental_screen,
+    summarize_fundamental_screen_result,
+    write_fundamental_screen_outputs,
+)
 from src.manual_orders import (
     generate_fill_feedback_template,
     generate_manual_orders,
@@ -100,7 +105,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run data refresh, automatic walk-forward tuning, backtest and latest signal.")
     parser.add_argument("--skip-update", action="store_true", help="Skip Tushare data update.")
     parser.add_argument("--skip-convert", action="store_true", help="Skip raw-to-price conversion.")
-    parser.add_argument("--skip-factor", action="store_true", help="Reuse existing factor cache without recomputation.")
+    parser.add_argument("--skip-factor", action="store_true", help="Read the factor cache directly without cache validation or recomputation.")
+    parser.add_argument("--force-factor", action="store_true", help="Recompute factors even when the existing cache matches the request.")
     parser.add_argument("--skip-adj-factor-meta", action="store_true", help="Skip refreshing adj-factor version metadata.")
     parser.add_argument("--skip-optimize", action="store_true", help="Use current config strategy instead of automatic tuning.")
     parser.add_argument("--skip-backtest", action="store_true", help="Generate signal without running the full historical backtest.")
@@ -210,7 +216,7 @@ def main() -> None:
                 raise FileNotFoundError(f"Factor cache not found: {factor_path}")
             factors = pd.read_parquet(factor_path)
         else:
-            factors = load_or_compute_factors(args.start_date, end_date, cache_file=factor_file, force=True)
+            factors = load_or_compute_factors(args.start_date, end_date, cache_file=factor_file, force=args.force_factor)
         _stage(status, out_dir, "compute_factors", "complete")
 
         price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
@@ -405,7 +411,12 @@ def main() -> None:
         artifacts.append(metrics_path)
         if not args.skip_backtest:
             artifacts.extend([equity_path, holdings_bt_path, trades_path])
-        backtest_quality = assess_backtest_quality(result.metrics, config.get("quality", {}))
+        backtest_yearly_quality = (
+            build_yearly_breakdown(result, backtest_runtime_config)
+            if not args.skip_backtest
+            else pd.DataFrame()
+        )
+        backtest_quality = assess_backtest_quality(result.metrics, config.get("quality", {}), yearly=backtest_yearly_quality)
         backtest_quality_path = out_dir / "auto_backtest_quality.json"
         _write_json(backtest_quality_path, backtest_quality.to_dict())
         artifacts.append(backtest_quality_path)
@@ -558,6 +569,9 @@ def main() -> None:
         artifacts.extend(Path(path) for path in execution_files.values())
         _stage(status, out_dir, "generate_signal", "complete", "executable" if is_executable else "blocked")
 
+        fundamental_screen, fundamental_files = _maybe_build_fundamental_screen(selected_config, str(output_date), out_dir)
+        artifacts.extend(Path(path) for path in fundamental_files.values())
+
         selected_params_path = out_dir / "auto_selected_params.json"
         _write_json(selected_params_path, selected_params)
         artifacts.append(selected_params_path)
@@ -573,6 +587,7 @@ def main() -> None:
             "backtest_metrics": result.metrics,
             "research_diagnostics": research_diagnostics,
             "failure_analysis": failure_analysis,
+            "fundamental_screen": fundamental_screen,
             "account": account.to_dict(),
             "signal_summary": signal_action_summary(signal_df),
             "signal_date": str(output_date),
@@ -599,6 +614,7 @@ def main() -> None:
                 "backtest_quality": str(backtest_quality_path),
                 **research_files,
                 **failure_files,
+                **fundamental_files,
             },
         }
         report_path = out_dir / "auto_signal_report.json"
@@ -719,6 +735,35 @@ def _stage(status: dict[str, Any], out_dir: Path, name: str, state: str, message
         }
     )
     _write_status(out_dir, status)
+
+
+def _maybe_build_fundamental_screen(config: dict[str, Any], output_date: str, out_dir: Path) -> tuple[dict[str, Any], dict[str, str]]:
+    """Build the optional fundamental screen artifact for the daily report."""
+
+    screen_cfg = config.get("fundamental_screen", {})
+    if not bool(screen_cfg.get("include_in_auto_report", False)):
+        return {"enabled": False, "status": "disabled"}, {}
+    try:
+        result = build_fundamental_screen(config=config, as_of=output_date)
+        csv_path, report_path = write_fundamental_screen_outputs(
+            result,
+            out_dir,
+            top_n=int(screen_cfg.get("top_n", 30)),
+        )
+        files = {
+            "fundamental_screen_csv": str(csv_path),
+            "fundamental_screen_report": str(report_path),
+        }
+        summary = summarize_fundamental_screen_result(
+            result,
+            top_n=int(screen_cfg.get("auto_report_top_n", 10)),
+            csv_path=csv_path,
+            report_path=report_path,
+        )
+        return summary, files
+    except Exception as exc:  # pragma: no cover - defensive non-blocking report hook
+        logger.warning("Fundamental screen report skipped: %s", exc)
+        return {"enabled": True, "status": "failed", "error": str(exc)}, {}
 
 
 def _validation_progress_message(row: dict[str, object], completed: int) -> str:

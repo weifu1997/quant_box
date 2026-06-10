@@ -90,6 +90,17 @@ def build_failure_analysis_artifacts(
     threshold_gaps = _backtest_threshold_gaps(backtest_quality)
     parameter_backtest_mismatch = bool(parameter_quality.get("is_acceptable")) and not bool(backtest_quality.get("is_acceptable"))
     primary_failure_area = _primary_failure_area(block_reasons, quality_warnings)
+    validation_vs_backtest = build_validation_vs_backtest_table(
+        validation,
+        selected_params,
+        backtest_result,
+        backtest_config,
+        backtest_quality,
+        start_date,
+        end_date,
+    )
+    yearly_breakdown = build_yearly_breakdown(backtest_result, backtest_config)
+    failure_scope_summary = build_failure_scope_summary(validation_vs_backtest)
 
     analysis = {
         "enabled": True,
@@ -105,26 +116,20 @@ def build_failure_analysis_artifacts(
         "block_reasons": list(block_reasons),
         "quality_warnings": list(quality_warnings),
         "drawdown_summary": drawdown_summary,
+        "failure_scope_summary": failure_scope_summary,
         "explanation": _failure_explanation(
             parameter_backtest_mismatch=parameter_backtest_mismatch,
             primary_failure_area=primary_failure_area,
             backtest_quality=backtest_quality,
             threshold_gaps=threshold_gaps,
             drawdown_summary=drawdown_summary,
+            failure_scope_summary=failure_scope_summary,
         ),
     }
 
     tables = {
-        "validation_vs_backtest": build_validation_vs_backtest_table(
-            validation,
-            selected_params,
-            backtest_result,
-            backtest_config,
-            backtest_quality,
-            start_date,
-            end_date,
-        ),
-        "yearly_breakdown": build_yearly_breakdown(backtest_result, backtest_config),
+        "validation_vs_backtest": validation_vs_backtest,
+        "yearly_breakdown": yearly_breakdown,
     }
     return analysis, tables
 
@@ -284,6 +289,45 @@ def build_drawdown_failure_summary(
             ascending=False,
         ),
         "regime_trade_summary": _json_safe(regime_trades),
+    }
+
+
+def build_failure_scope_summary(validation_vs_backtest: pd.DataFrame) -> dict[str, Any]:
+    """函数说明：归纳失败主要来自验证窗口、窗口前历史还是跨窗口全历史。"""
+    if validation_vs_backtest.empty:
+        return {
+            "primary_scope": "unknown",
+            "description": "No validation/backtest comparison rows were generated.",
+            "failed_scopes": [],
+            "scope_details": [],
+        }
+    frame = validation_vs_backtest.copy()
+    annual_failed = _truthy_series(frame.get("annual_return_failed"), frame.index)
+    drawdown_failed = _truthy_series(frame.get("max_drawdown_failed"), frame.index)
+    frame["_failed"] = annual_failed | drawdown_failed
+
+    scope_order = ["validation_window", "pre_validation_history", "validation_forward_history", "full_history"]
+    scope_details = [_failure_scope_detail(frame, scope) for scope in scope_order if scope in set(frame["failure_scope"].astype(str))]
+    failed_scopes = [detail["scope"] for detail in scope_details if detail["failed_rows"] > 0]
+
+    if "validation_window" in failed_scopes:
+        primary_scope = "validation_window"
+    elif "pre_validation_history" in failed_scopes:
+        primary_scope = "pre_validation_history"
+    elif "validation_forward_history" in failed_scopes:
+        primary_scope = "validation_forward_history"
+    elif failed_scopes == ["full_history"]:
+        primary_scope = "cross_window_full_history"
+    elif "full_history" in failed_scopes:
+        primary_scope = "full_history"
+    else:
+        primary_scope = "none"
+
+    return {
+        "primary_scope": primary_scope,
+        "description": _failure_scope_description(primary_scope),
+        "failed_scopes": failed_scopes,
+        "scope_details": scope_details,
     }
 
 
@@ -474,6 +518,70 @@ def _failure_flags(metrics: dict[str, Any], backtest_quality: dict[str, Any]) ->
     }
 
 
+def _failure_scope_detail(frame: pd.DataFrame, scope: str) -> dict[str, Any]:
+    """函数说明：汇总单个失败范围的行数、失败驱动和最差指标。"""
+    rows = frame[frame["failure_scope"].astype(str) == scope]
+    failed_rows = rows[rows["_failed"]]
+    drivers: list[str] = []
+    if "failure_driver" in failed_rows.columns:
+        for value in failed_rows["failure_driver"].dropna().astype(str):
+            drivers.extend([part for part in value.split(",") if part and part != "none"])
+    return {
+        "scope": scope,
+        "rows": int(len(rows)),
+        "failed_rows": int(len(failed_rows)),
+        "failure_drivers": sorted(set(drivers)),
+        "worst_annual_return": _series_min(rows.get("annual_return")),
+        "worst_max_drawdown": _series_min(rows.get("max_drawdown")),
+    }
+
+
+def _failure_scope_description(scope: str) -> str:
+    """函数说明：给失败范围生成简短说明。"""
+    descriptions = {
+        "validation_window": "At least one selected validation window failed a quality gate.",
+        "pre_validation_history": "The failure is mainly before the first validation window.",
+        "validation_forward_history": "The failure is in the validation-forward full-history segment.",
+        "cross_window_full_history": "Standalone windows pass, but the compounded full-history path fails.",
+        "full_history": "The full-history backtest fails a quality gate.",
+        "none": "No validation/backtest comparison scope failed.",
+        "unknown": "No validation/backtest comparison rows were generated.",
+    }
+    return descriptions.get(scope, descriptions["unknown"])
+
+
+def _truthy_series(series: Any, index: pd.Index) -> pd.Series:
+    """函数说明：把 bool/字符串标志统一转换为布尔序列。"""
+    if series is None:
+        return pd.Series(False, index=index)
+    values = pd.Series(series, index=index)
+    return values.map(_truthy_value).fillna(False).astype(bool)
+
+
+def _truthy_value(value: Any) -> bool:
+    """函数说明：判断表格标志值是否表示真。"""
+    if value is None:
+        return False
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _series_min(series: Any) -> float | None:
+    """函数说明：读取数值列中的最小值。"""
+    if series is None:
+        return None
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if values.empty:
+        return None
+    return float(values.min())
+
+
 def _failure_explanation(
     *,
     parameter_backtest_mismatch: bool,
@@ -481,6 +589,7 @@ def _failure_explanation(
     backtest_quality: dict[str, Any],
     threshold_gaps: dict[str, Any],
     drawdown_summary: dict[str, Any],
+    failure_scope_summary: dict[str, Any],
 ) -> list[str]:
     """函数说明：生成失败原因的简短文字解释。"""
     lines: list[str] = []
@@ -488,6 +597,12 @@ def _failure_explanation(
         lines.append("Parameter validation passed, but the full-history backtest failed quality gates.")
     else:
         lines.append(f"Primary failure area: {primary_failure_area}.")
+    if failure_scope_summary.get("primary_scope"):
+        lines.append(
+            "Failure scope: "
+            f"{failure_scope_summary.get('primary_scope')} "
+            f"({failure_scope_summary.get('description')})."
+        )
     if threshold_gaps.get("annual_return_gap") is not None:
         lines.append(
             "Backtest annual return gap: "

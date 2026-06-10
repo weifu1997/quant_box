@@ -70,6 +70,12 @@ class BacktestQualityReport:
     calmar: float
     min_backtest_annual_return: float
     max_backtest_drawdown_limit: float
+    yearly_min_annual_return: float
+    yearly_worst_max_drawdown: float
+    min_yearly_annual_return: float
+    max_yearly_drawdown_limit: float
+    years_below_return_target: list[int]
+    years_breaching_drawdown_limit: list[int]
 
     def to_dict(self) -> dict[str, Any]:
         """函数说明：处理 to_dict 主要逻辑。"""
@@ -208,6 +214,8 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
         issues.append(f"positive_return_rate_below_threshold:{positive_return_rate:.4f}<{min_positive:.4f}")
     if annual_return_mean < min_optimizer_return:
         issues.append(f"annual_return_mean_below_threshold:{annual_return_mean:.4f}<{min_optimizer_return:.4f}")
+    if annual_return_min < min_optimizer_return:
+        issues.append(f"annual_return_min_below_threshold:{annual_return_min:.4f}<{min_optimizer_return:.4f}")
     if sharpe_mean < min_sharpe:
         issues.append(f"sharpe_mean_below_threshold:{sharpe_mean:.4f}<{min_sharpe:.4f}")
     if max_drawdown_worst < max_drawdown:
@@ -238,11 +246,17 @@ def assess_parameter_quality(summary: pd.DataFrame, quality_config: dict | None 
     )
 
 
-def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None = None) -> BacktestQualityReport:
+def assess_backtest_quality(
+    metrics: dict[str, Any],
+    quality_config: dict | None = None,
+    yearly: pd.DataFrame | None = None,
+) -> BacktestQualityReport:
     """函数说明：评估 assess_backtest_quality 主要逻辑。"""
     cfg = quality_config or {}
     min_return = float(cfg.get("min_backtest_annual_return", cfg.get("target_annual_return", 0.20)))
     max_drawdown = float(cfg.get("max_backtest_drawdown_limit", -0.20))
+    min_yearly_return = float(cfg.get("min_yearly_annual_return", min_return))
+    max_yearly_drawdown = float(cfg.get("max_yearly_drawdown_limit", max_drawdown))
     issues: list[str] = []
 
     if not metrics or bool(metrics.get("backtest_skipped", False)):
@@ -254,16 +268,24 @@ def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None
             calmar=0.0,
             min_backtest_annual_return=min_return,
             max_backtest_drawdown_limit=max_drawdown,
+            yearly_min_annual_return=0.0,
+            yearly_worst_max_drawdown=0.0,
+            min_yearly_annual_return=min_yearly_return,
+            max_yearly_drawdown_limit=max_yearly_drawdown,
+            years_below_return_target=[],
+            years_breaching_drawdown_limit=[],
         )
 
     annual_return = _number(metrics.get("annual_return"), 0.0)
     observed_drawdown = _number(metrics.get("max_drawdown"), 0.0)
     calmar = _number(metrics.get("calmar"), 0.0)
+    yearly_quality = _assess_yearly_backtest_quality(yearly, min_yearly_return, max_yearly_drawdown)
 
     if annual_return < min_return:
         issues.append(f"backtest_annual_return_below_threshold:{annual_return:.4f}<{min_return:.4f}")
     if observed_drawdown < max_drawdown:
         issues.append(f"backtest_max_drawdown_worse_than_limit:{observed_drawdown:.4f}<{max_drawdown:.4f}")
+    issues.extend(yearly_quality["issues"])
 
     return BacktestQualityReport(
         is_acceptable=not issues,
@@ -273,7 +295,78 @@ def assess_backtest_quality(metrics: dict[str, Any], quality_config: dict | None
         calmar=calmar,
         min_backtest_annual_return=min_return,
         max_backtest_drawdown_limit=max_drawdown,
+        yearly_min_annual_return=float(yearly_quality["yearly_min_annual_return"]),
+        yearly_worst_max_drawdown=float(yearly_quality["yearly_worst_max_drawdown"]),
+        min_yearly_annual_return=min_yearly_return,
+        max_yearly_drawdown_limit=max_yearly_drawdown,
+        years_below_return_target=list(yearly_quality["years_below_return_target"]),
+        years_breaching_drawdown_limit=list(yearly_quality["years_breaching_drawdown_limit"]),
     )
+
+
+def _assess_yearly_backtest_quality(
+    yearly: pd.DataFrame | None,
+    min_return: float,
+    drawdown_limit: float,
+) -> dict[str, Any]:
+    """函数说明：评估逐年收益和回撤是否满足目标。"""
+    result: dict[str, Any] = {
+        "issues": [],
+        "yearly_min_annual_return": 0.0,
+        "yearly_worst_max_drawdown": 0.0,
+        "years_below_return_target": [],
+        "years_breaching_drawdown_limit": [],
+    }
+    if yearly is None:
+        return result
+    if yearly.empty:
+        result["issues"] = ["backtest_yearly_breakdown_empty"]
+        return result
+    required = {"year", "annual_return", "max_drawdown"}
+    if not required.issubset(yearly.columns):
+        result["issues"] = [f"backtest_yearly_breakdown_missing_columns:{','.join(sorted(required - set(yearly.columns)))}"]
+        return result
+
+    frame = yearly.copy()
+    frame["year"] = pd.to_numeric(frame["year"], errors="coerce").astype("Int64")
+    frame["annual_return"] = pd.to_numeric(frame["annual_return"], errors="coerce")
+    frame["max_drawdown"] = pd.to_numeric(frame["max_drawdown"], errors="coerce")
+    frame = frame.dropna(subset=["year"])
+    annual = frame["annual_return"].dropna()
+    drawdown = frame["max_drawdown"].dropna()
+    result["yearly_min_annual_return"] = float(annual.min()) if not annual.empty else 0.0
+    result["yearly_worst_max_drawdown"] = float(drawdown.min()) if not drawdown.empty else 0.0
+
+    below_return = frame[frame["annual_return"] < min_return]
+    drawdown_breach = frame[frame["max_drawdown"] < drawdown_limit]
+    result["years_below_return_target"] = [int(year) for year in below_return["year"].dropna().to_list()]
+    result["years_breaching_drawdown_limit"] = [int(year) for year in drawdown_breach["year"].dropna().to_list()]
+
+    issues: list[str] = []
+    if not below_return.empty:
+        issues.append(
+            "backtest_yearly_annual_return_below_threshold:"
+            f"{_year_value_summary(below_return, 'annual_return')}<{min_return:.4f}"
+        )
+    if not drawdown_breach.empty:
+        issues.append(
+            "backtest_yearly_max_drawdown_worse_than_limit:"
+            f"{_year_value_summary(drawdown_breach, 'max_drawdown')}<{drawdown_limit:.4f}"
+        )
+    result["issues"] = issues
+    return result
+
+
+def _year_value_summary(frame: pd.DataFrame, column: str) -> str:
+    """函数说明：格式化年度质量失败的年份和值。"""
+    parts = []
+    for _, row in frame.iterrows():
+        year = row.get("year")
+        value = row.get(column)
+        if pd.isna(year) or pd.isna(value):
+            continue
+        parts.append(f"{int(year)}={float(value):.4f}")
+    return ",".join(parts)
 
 
 def apply_strategy_params(config: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -299,6 +392,9 @@ def _target_filtered_summary(summary: pd.DataFrame, quality_config: dict | None,
     annual = pd.to_numeric(summary["annual_return_mean"], errors="coerce")
     drawdown = pd.to_numeric(summary["max_drawdown_worst"], errors="coerce")
     mask = (annual >= min_return) & (drawdown >= drawdown_limit)
+    if "annual_return_min" in summary.columns:
+        annual_min = pd.to_numeric(summary["annual_return_min"], errors="coerce")
+        mask &= annual_min >= min_return
     if "annual_turnover_mean" in summary.columns:
         turnover = pd.to_numeric(summary["annual_turnover_mean"], errors="coerce")
         mask &= turnover <= float(cfg.get("max_annual_turnover", float("inf")))

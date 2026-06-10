@@ -1,0 +1,99 @@
+[
+  {
+    "name": "klen_inv_q65_top5_turn1_take035",
+    "strategy": {
+      "factor_group": "inverse_factor:KLEN",
+      "top_n": 5,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "klen_inv_q65_top7_turn1_take035",
+    "strategy": {
+      "factor_group": "inverse_factor:KLEN",
+      "top_n": 7,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "max60_inv_q65_top5_turn1_take035",
+    "strategy": {
+      "factor_group": "inverse_factor:MAX60",
+      "top_n": 5,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "klen_inv_q65_top5_turn1_take035_no_selrisk",
+    "strategy": {
+      "factor_group": "inverse_factor:KLEN",
+      "top_n": 5,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02,
+      "selection_risk_filter": {"enabled": false}
+    }
+  },
+  {
+    "name": "klen_inv_q65_top5_turn1_notake_no_selrisk",
+    "strategy": {
+      "factor_group": "inverse_factor:KLEN",
+      "top_n": 5,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": null,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02,
+      "selection_risk_filter": {"enabled": false}
+    }
+  }
+]

@@ -37,6 +37,27 @@ class ReportingTests(unittest.TestCase):
                         }
                     ],
                 },
+                "fundamental_screen": {
+                    "enabled": True,
+                    "status": "ok",
+                    "as_of_date": "2024-01-03",
+                    "rows": 2,
+                    "covered_rows": 1,
+                    "passed": 0,
+                    "watch": 1,
+                    "fundamental_coverage": "50.00%",
+                    "dividend_coverage": "50.00%",
+                    "top_watch": [
+                        {
+                            "ts_code": "000001.SZ",
+                            "name": "Alpha Bank",
+                            "industry": "Bank",
+                            "total_score": 4,
+                            "failed_reasons": "quality",
+                        }
+                    ],
+                    "files": {"report": "outputs/fundamental_screen_report.md"},
+                },
                 "signal_summary": {"BUY": 1, "HOLD": 2, "SELL": 3},
                 "files": {"manual_orders": "outputs/manual_orders.csv"},
             }
@@ -50,6 +71,9 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("- Block reasons: data_unhealthy", text)
             self.assertIn("- Raw coverage: 80.00%", text)
             self.assertIn("Repair action: daily_basic (coverage_gap)", text)
+            self.assertIn("## Fundamental Screen", text)
+            self.assertIn("- Covered rows: 1/2", text)
+            self.assertIn("000001.SZ Alpha Bank Bank score=4 quality", text)
             self.assertIn("- SELL: 3", text)
 
     def test_archive_run_copies_existing_files_under_signal_date(self) -> None:

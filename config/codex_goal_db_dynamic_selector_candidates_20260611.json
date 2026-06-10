@@ -1,0 +1,137 @@
+[
+  {
+    "name": "db_dyn_lb63_top3_pos_top10_take035",
+    "strategy": {
+      "factor_group": "dynamic_ic_selector",
+      "top_n": 10,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "dynamic_ic_selector": {
+      "candidates": [
+        "factor:ROC60",
+        "inverse_factor:DB_turnover_rate_f",
+        "factor:BETA20",
+        "factor:RSQR20",
+        "inverse_factor:DB_total_mv",
+        "inverse_factor:KLEN",
+        "factor:LOW0",
+        "factor:DB_dv_ttm",
+        "factor:ROC30",
+        "inverse_factor:DB_circ_mv",
+        "inverse_factor:MAX60",
+        "inverse_factor:DB_pb",
+        "factor:BETA60"
+      ],
+      "horizon": 20,
+      "window": 63,
+      "min_periods": 20,
+      "min_obs": 20,
+      "method": "spearman",
+      "metric": "ic_ir",
+      "top_k": 3,
+      "min_score": 0.0,
+      "fallback_candidate": "factor:ROC60"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "db_dyn_lb63_top1_pos_top10_take035",
+    "strategy": {
+      "factor_group": "dynamic_ic_selector",
+      "top_n": 10,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "dynamic_ic_selector": {
+      "candidates": [
+        "factor:ROC60",
+        "inverse_factor:DB_turnover_rate_f",
+        "factor:BETA20",
+        "factor:RSQR20",
+        "inverse_factor:DB_total_mv",
+        "inverse_factor:KLEN",
+        "factor:LOW0",
+        "factor:DB_dv_ttm",
+        "factor:ROC30",
+        "inverse_factor:DB_circ_mv",
+        "inverse_factor:MAX60",
+        "inverse_factor:DB_pb",
+        "factor:BETA60"
+      ],
+      "horizon": 20,
+      "window": 63,
+      "min_periods": 20,
+      "min_obs": 20,
+      "method": "spearman",
+      "metric": "ic_ir",
+      "top_k": 1,
+      "min_score": 0.0,
+      "fallback_candidate": "factor:ROC60"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "db_dyn_lb126_top3_pos_top10_take035",
+    "strategy": {
+      "factor_group": "dynamic_ic_selector",
+      "top_n": 10,
+      "max_turnover": 1,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "dynamic_ic_selector": {
+      "candidates": [
+        "factor:ROC60",
+        "inverse_factor:DB_turnover_rate_f",
+        "factor:BETA20",
+        "factor:RSQR20",
+        "inverse_factor:DB_total_mv",
+        "inverse_factor:KLEN",
+        "factor:LOW0",
+        "factor:DB_dv_ttm",
+        "factor:ROC30",
+        "inverse_factor:DB_circ_mv",
+        "inverse_factor:MAX60",
+        "inverse_factor:DB_pb",
+        "factor:BETA60"
+      ],
+      "horizon": 20,
+      "window": 126,
+      "min_periods": 40,
+      "min_obs": 20,
+      "method": "spearman",
+      "metric": "ic_ir",
+      "top_k": 3,
+      "min_score": 0.0,
+      "fallback_candidate": "factor:ROC60"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  }
+]

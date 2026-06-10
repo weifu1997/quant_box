@@ -159,6 +159,42 @@ class AutoTuningTests(unittest.TestCase):
 
         self.assertEqual(selected["factor_group"], "factor:LOW0")
 
+    def test_select_stable_params_filters_low_validation_window_return_min(self) -> None:
+        """函数说明：验证候选参数的单个验证窗口年化不足时会被过滤。"""
+        summary = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 7,
+                    "max_turnover": 1,
+                    "rank_buffer": 20,
+                    "rebalance_freq": "monthly",
+                    "annual_return_mean": 0.30,
+                    "annual_return_min": 0.12,
+                    "max_drawdown_worst": -0.12,
+                    "auto_score": 10.0,
+                },
+                {
+                    "factor_group": "factor:LOW0",
+                    "top_n": 10,
+                    "max_turnover": 1,
+                    "rank_buffer": 20,
+                    "rebalance_freq": "monthly",
+                    "annual_return_mean": 0.24,
+                    "annual_return_min": 0.21,
+                    "max_drawdown_worst": -0.18,
+                    "auto_score": 1.0,
+                },
+            ]
+        )
+
+        selected = select_stable_params(
+            summary,
+            {"min_optimizer_annual_return": 0.20, "max_drawdown_limit": -0.20},
+        )
+
+        self.assertEqual(selected["factor_group"], "factor:LOW0")
+
     def test_select_stable_params_strict_rejects_when_no_params_meet_target_profile(self) -> None:
         """函数说明：验证 test_select_stable_params_strict_rejects_when_no_params_meet_target_profile 覆盖的行为场景。"""
         summary = pd.DataFrame(
@@ -350,6 +386,37 @@ class AutoTuningTests(unittest.TestCase):
         self.assertTrue(any(issue.startswith("positive_return_rate_below_threshold") for issue in quality.issues))
         self.assertTrue(any(issue.startswith("annual_return_mean_below_threshold") for issue in quality.issues))
 
+    def test_assess_parameter_quality_blocks_low_validation_window_return_min(self) -> None:
+        """函数说明：验证验证窗口最低年化不足会阻断参数质量。"""
+        summary = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 5,
+                    "max_turnover": 1,
+                    "rank_buffer": 10,
+                    "rebalance_freq": "monthly",
+                    "windows": 3,
+                    "positive_return_rate": 1.0,
+                    "annual_return_mean": 0.26,
+                    "annual_return_min": 0.12,
+                    "sharpe_mean": 1.0,
+                    "max_drawdown_worst": -0.12,
+                    "annual_turnover_mean": 2.0,
+                    "annual_trade_cost_ratio_mean": 0.01,
+                    "auto_score": 1.0,
+                }
+            ]
+        )
+
+        quality = assess_parameter_quality(
+            summary,
+            {"min_optimizer_annual_return": 0.20, "max_drawdown_limit": -0.20},
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertTrue(any(issue.startswith("annual_return_min_below_threshold") for issue in quality.issues))
+
     def test_assess_backtest_quality_requires_return_and_drawdown_targets(self) -> None:
         """函数说明：验证 test_assess_backtest_quality_requires_return_and_drawdown_targets 覆盖的行为场景。"""
         quality = assess_backtest_quality(
@@ -360,6 +427,27 @@ class AutoTuningTests(unittest.TestCase):
         self.assertFalse(quality.is_acceptable)
         self.assertTrue(any(issue.startswith("backtest_annual_return_below_threshold") for issue in quality.issues))
         self.assertTrue(any(issue.startswith("backtest_max_drawdown_worse_than_limit") for issue in quality.issues))
+
+    def test_assess_backtest_quality_requires_yearly_targets_when_available(self) -> None:
+        """函数说明：验证逐年收益和回撤目标会阻断全历史合格的回测。"""
+        yearly = pd.DataFrame(
+            [
+                {"year": 2022, "annual_return": 0.10, "max_drawdown": -0.10},
+                {"year": 2023, "annual_return": 0.25, "max_drawdown": -0.25},
+            ]
+        )
+
+        quality = assess_backtest_quality(
+            {"annual_return": 0.25, "max_drawdown": -0.15, "calmar": 1.66},
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},
+            yearly=yearly,
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertEqual(quality.years_below_return_target, [2022])
+        self.assertEqual(quality.years_breaching_drawdown_limit, [2023])
+        self.assertTrue(any(issue.startswith("backtest_yearly_annual_return_below_threshold") for issue in quality.issues))
+        self.assertTrue(any(issue.startswith("backtest_yearly_max_drawdown_worse_than_limit") for issue in quality.issues))
 
     def test_assess_backtest_quality_accepts_target_profile(self) -> None:
         """函数说明：验证 test_assess_backtest_quality_accepts_target_profile 覆盖的行为场景。"""

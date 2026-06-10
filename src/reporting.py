@@ -43,6 +43,7 @@ def _render_report(report: dict[str, Any]) -> str:
     metrics = report.get("backtest_metrics", {})
     research = report.get("research_diagnostics", {})
     failure_analysis = report.get("failure_analysis", {})
+    fundamental = report.get("fundamental_screen", {})
     account = report.get("account", {})
     signal_summary = report.get("signal_summary", {})
     block_reasons = report.get("block_reasons", [])
@@ -107,6 +108,7 @@ def _render_report(report: dict[str, Any]) -> str:
             f"- Windows: {param_quality.get('windows', 0)}",
             f"- Positive return rate: {_pct(param_quality.get('positive_return_rate'))}",
             f"- Annual return mean: {_pct(param_quality.get('annual_return_mean'))}",
+            f"- Annual return min: {_pct(param_quality.get('annual_return_min'))}",
             f"- Annual return target: {_pct(param_quality.get('min_optimizer_annual_return'))}",
             f"- Sharpe mean: {_num(param_quality.get('sharpe_mean'))}",
             f"- Worst drawdown: {_pct(param_quality.get('max_drawdown_worst'))}",
@@ -119,6 +121,10 @@ def _render_report(report: dict[str, Any]) -> str:
             f"- Annual return target: {_pct(backtest_quality.get('min_backtest_annual_return'))}",
             f"- Max drawdown: {_pct(backtest_quality.get('max_drawdown'))}",
             f"- Max drawdown limit: {_pct(backtest_quality.get('max_backtest_drawdown_limit'))}",
+            f"- Yearly min annual return: {_pct(backtest_quality.get('yearly_min_annual_return'))}",
+            f"- Years below return target: {', '.join(map(str, backtest_quality.get('years_below_return_target', []))) or 'none'}",
+            f"- Yearly worst drawdown: {_pct(backtest_quality.get('yearly_worst_max_drawdown'))}",
+            f"- Years breaching drawdown limit: {', '.join(map(str, backtest_quality.get('years_breaching_drawdown_limit', []))) or 'none'}",
             f"- Calmar: {_num(backtest_quality.get('calmar'))}",
             f"- Issues: {', '.join(backtest_quality.get('issues', [])) or 'none'}",
             "",
@@ -142,6 +148,10 @@ def _render_report(report: dict[str, Any]) -> str:
             *_mapping_lines(_turnover_summary(research), max_items=6),
             *_mapping_lines(_exposure_summary(research), max_items=6),
             f"- Issues: {', '.join(research.get('issues', [])) or 'none'}",
+            "",
+            "## Fundamental Screen",
+            "",
+            *_fundamental_screen_lines(fundamental),
             "",
             "## Account",
             "",
@@ -211,6 +221,55 @@ def _symbol_preview(symbols: Any, max_items: int = 8) -> str:
     return ", ".join(values[:max_items]) + suffix
 
 
+def _fundamental_screen_lines(fundamental: Any) -> list[str]:
+    if not isinstance(fundamental, dict) or not fundamental:
+        return ["- Enabled: False", "- Status: missing"]
+    enabled = bool(fundamental.get("enabled", False))
+    status = str(fundamental.get("status", ""))
+    lines = [
+        f"- Enabled: {enabled}",
+        f"- Status: {status}",
+    ]
+    if not enabled or status == "failed":
+        if fundamental.get("error"):
+            lines.append(f"- Error: {fundamental.get('error')}")
+        return lines
+    lines.extend(
+        [
+            f"- As of date: {fundamental.get('as_of_date', '')}",
+            f"- Covered rows: {fundamental.get('covered_rows', 0)}/{fundamental.get('rows', 0)}",
+            f"- Fundamental coverage: {fundamental.get('fundamental_coverage', '')}",
+            f"- Dividend coverage: {fundamental.get('dividend_coverage', '')}",
+            f"- Passed: {fundamental.get('passed', 0)}",
+            f"- Watch: {fundamental.get('watch', 0)}",
+            f"- Top pass: {_fundamental_record_preview(fundamental.get('top_pass', []))}",
+            f"- Top watch: {_fundamental_record_preview(fundamental.get('top_watch', []))}",
+        ]
+    )
+    files = fundamental.get("files", {})
+    if isinstance(files, dict) and files:
+        lines.append(f"- Report: {files.get('report', '')}")
+    return lines
+
+
+def _fundamental_record_preview(records: Any, max_items: int = 5) -> str:
+    if not isinstance(records, list) or not records:
+        return "none"
+    labels = []
+    for record in records[:max_items]:
+        if not isinstance(record, dict):
+            continue
+        symbol = str(record.get("ts_code", "") or "")
+        name = str(record.get("name", "") or "")
+        industry = str(record.get("industry", "") or "")
+        score = record.get("total_score", "")
+        reason = str(record.get("failed_reasons", "") or "")
+        label = " ".join(part for part in [symbol, name, industry, f"score={score}", reason] if part)
+        labels.append(label)
+    suffix = "" if len(records) <= max_items else f" (+{len(records) - max_items} more)"
+    return "; ".join(labels) + suffix if labels else "none"
+
+
 def _cost_summary(research: dict[str, Any]) -> dict[str, Any]:
     """函数说明：处理 cost_summary 的内部辅助逻辑。"""
     costs = research.get("cost_attribution", {})
@@ -261,9 +320,10 @@ def _failure_analysis_lines(analysis: Any) -> list[str]:
 
     gaps = analysis.get("backtest_threshold_gaps", {})
     drawdown = analysis.get("drawdown_summary", {})
+    scope = analysis.get("failure_scope_summary", {})
     return [
         f"- Primary failure area: {analysis.get('primary_failure_area', '')}",
-        f"- Parameter/backtest mismatch: {analysis.get('parameter_backtest_mismatch', False)}",
+        f"- Parameter/backtest mismatch: {analysis.get('parameter_backtest_mismatch', False)}; failure scope: {scope.get('primary_scope', '')}",
         f"- Backtest gaps: annual return {_pct(gaps.get('annual_return_gap'))}; max drawdown {_pct(gaps.get('max_drawdown_gap'))}",
         (
             "- Worst drawdown: "
@@ -295,6 +355,14 @@ def _drawdown_contributor_preview(drawdown: dict[str, Any]) -> str:
 
 def _next_failure_check(analysis: dict[str, Any]) -> str:
     """Choose a short next-step hint for a failed automatic run."""
+    scope = analysis.get("failure_scope_summary", {})
+    primary_scope = scope.get("primary_scope") if isinstance(scope, dict) else None
+    if primary_scope == "pre_validation_history":
+        return "include pre-validation years in optimization gates"
+    if primary_scope == "cross_window_full_history":
+        return "review cross-window drawdown and full-history path risk"
+    if primary_scope == "validation_window":
+        return "tighten selected-parameter validation gates"
     if analysis.get("parameter_backtest_mismatch"):
         return "compare validation windows with pre-validation and full-history segments"
     primary = str(analysis.get("primary_failure_area", ""))

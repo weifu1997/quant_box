@@ -6,7 +6,7 @@ import unittest
 
 import pandas as pd
 
-from src.selection_risk import filter_scores_by_selection_risk
+from src.selection_risk import _NORMALIZED_PRICE_CACHE, _normalize_price_frame, filter_scores_by_selection_risk
 
 
 class SelectionRiskTests(unittest.TestCase):
@@ -136,6 +136,23 @@ class SelectionRiskTests(unittest.TestCase):
         self.assertEqual(float(filtered.loc["A"]), 3.0)
         self.assertTrue(pd.isna(filtered.loc["B"]))
         self.assertEqual(float(filtered.loc["C"]), 1.0)
+
+    def test_normalized_price_frame_cache_reuses_same_source_panel(self) -> None:
+        """函数说明：验证同一价格面板重复规范化会复用缓存。"""
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        prices = _price_panel(
+            dates,
+            open_values={"A": [10.0, 10.1]},
+            close_values={"A": [10.0, 10.1]},
+            low_values={"A": [10.0, 10.0]},
+        )
+        _NORMALIZED_PRICE_CACHE.clear()
+
+        first = _normalize_price_frame(prices)
+        second = _normalize_price_frame(prices)
+
+        self.assertIs(first, second)
+        self.assertEqual(len(_NORMALIZED_PRICE_CACHE), 1)
 
 
 def _config() -> dict:

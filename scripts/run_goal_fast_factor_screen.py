@@ -27,17 +27,21 @@ def main() -> None:
     parser.add_argument("--output", default=dated_output_path("goal_fast_factor_screen"))
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--top-n", default="7,10,15,20")
-    parser.add_argument("--liquidity-modes", default="none,high:0.80,high:0.65,high:0.80")
+    parser.add_argument("--liquidity-modes", default="none,high:0.80,high:0.65")
     parser.add_argument("--limit-columns", type=int, default=0)
+    parser.add_argument("--factor-file", default="", help="Factor parquet file to screen.")
+    parser.add_argument("--columns", default="", help="Comma-separated factor columns to screen; defaults to all columns.")
     args = parser.parse_args()
 
     config = load_config()
     start_date = config["data"]["start_date"]
     end_date = resolve_target_date_value(config["data"]["end_date"], config=config)
-    columns = factor_cache_columns(config["factors"]["cache_file"])
+    factor_file = args.factor_file or config["factors"]["cache_file"]
+    available_columns = factor_cache_columns(factor_file)
+    columns = _requested_screen_columns(args.columns, available_columns)
     if args.limit_columns:
         columns = columns[: args.limit_columns]
-    component_columns = _score_component_columns(config, factor_cache_columns(config["factors"]["cache_file"]))
+    component_columns = _score_component_columns(config, available_columns)
     top_ns = [int(value.strip()) for value in args.top_n.split(",") if value.strip()]
     liquidity_modes = [_parse_liquidity_mode(value) for value in args.liquidity_modes.split(",") if value.strip()]
     trade_price_field = str(config.get("backtest", {}).get("trade_price_field", "close")).lower()
@@ -58,7 +62,7 @@ def main() -> None:
     for batch_start in range(0, len(columns), args.batch_size):
         batch = columns[batch_start : batch_start + args.batch_size]
         read_columns = list(dict.fromkeys([*batch, *component_columns]))
-        factors = _read_factor_subset(config["factors"]["cache_file"], read_columns, start_date, end_date)
+        factors = _read_factor_subset(factor_file, read_columns, start_date, end_date)
         for column in batch:
             score_columns = [col for col in [column, *component_columns] if col in factors.columns]
             for direction_name, factor_group in [
@@ -93,6 +97,7 @@ def main() -> None:
                             "rebalance_drift_threshold": 0.02,
                         }
                         result = run_fast_prepared_backtest(prepared, bt_config)
+                        yearly = _fast_yearly_stats(result.equity_curve)
                         row = {
                             "factor_group": factor_group,
                             "factor": column,
@@ -101,7 +106,7 @@ def main() -> None:
                             "top_n": top_n,
                             **result.metrics,
                         }
-                        row.update(_screen_quality_fields(row, config))
+                        row.update(_screen_quality_fields(row, config, yearly=yearly))
                         rows.append(row)
         frame = _sorted(rows)
         frame.to_csv(out_path, index=False, encoding="utf-8-sig")
@@ -111,6 +116,24 @@ def main() -> None:
             flush=True,
         )
     print(f"Saved screen to {out_path}")
+
+
+def _requested_screen_columns(value: str, available_columns: list[str]) -> list[str]:
+    if not str(value or "").strip():
+        return available_columns
+    requested = [item.strip() for item in str(value).split(",") if item.strip()]
+    available_by_lower = {str(column).lower(): str(column) for column in available_columns}
+    selected: list[str] = []
+    missing: list[str] = []
+    for column in requested:
+        match = available_by_lower.get(column.lower())
+        if match is None:
+            missing.append(column)
+        elif match not in selected:
+            selected.append(match)
+    if missing:
+        raise ValueError(f"Requested screen columns are missing from factor cache: {', '.join(missing)}")
+    return selected
 
 
 def _screen_config(config: dict, factor_group: str, liquidity_mode: dict[str, object]) -> dict:
@@ -163,28 +186,104 @@ def _error_row(column: str, direction_name: str, liquidity_mode: dict[str, objec
         "error": message,
         "annual_return": 0.0,
         "max_drawdown": -1.0,
+        "year_count": 0,
+        "year_ann_pass": 0,
+        "year_dd_pass": 0,
+        "min_yearly_annual_return": 0.0,
+        "worst_yearly_drawdown": -1.0,
         "target_gap": 1.0,
         "meets_full_target": False,
     }
 
 
-def _screen_quality_fields(metrics: dict[str, object], config: dict) -> dict[str, object]:
+def _screen_quality_fields(metrics: dict[str, object], config: dict, yearly: pd.DataFrame | None = None) -> dict[str, object]:
     """函数说明：处理 screen_quality_fields 的内部辅助逻辑。"""
-    return_threshold, drawdown_limit = _quality_thresholds(config)
+    return_threshold, drawdown_limit, turnover_limit = _quality_thresholds(config)
     annual_return = float(metrics.get("annual_return", 0.0) or 0.0)
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
+    annual_turnover = float(metrics.get("annual_turnover", metrics.get("annual_weight_turnover", 0.0)) or 0.0)
+    yearly_fields = _yearly_quality_fields(yearly, return_threshold, drawdown_limit)
+    year_count = int(yearly_fields["year_count"])
+    yearly_pass = year_count <= 0 or (
+        int(yearly_fields["year_ann_pass"]) >= year_count and int(yearly_fields["year_dd_pass"]) >= year_count
+    )
+    turnover_pass = annual_turnover <= turnover_limit
+    global_gap = max(0.0, return_threshold - annual_return) + max(0.0, drawdown_limit - max_drawdown)
+    if turnover_limit > 0:
+        global_gap += max(0.0, annual_turnover - turnover_limit) / turnover_limit
+    yearly_gap = 0.0
+    if year_count > 0:
+        yearly_gap = max(0.0, return_threshold - float(yearly_fields["min_yearly_annual_return"])) + max(
+            0.0,
+            drawdown_limit - float(yearly_fields["worst_yearly_drawdown"]),
+        )
     return {
-        "meets_full_target": bool(annual_return >= return_threshold and max_drawdown >= drawdown_limit),
-        "target_gap": max(0.0, return_threshold - annual_return) + max(0.0, drawdown_limit - max_drawdown),
+        **yearly_fields,
+        "turnover_pass": bool(turnover_pass),
+        "formal_confirmation_required": True,
+        "approximation_notes": "fast_screen_ignores_formal_tradability_capacity_and_risk_exits",
+        "meets_full_target": bool(
+            annual_return >= return_threshold and max_drawdown >= drawdown_limit and yearly_pass and turnover_pass
+        ),
+        "target_gap": global_gap + yearly_gap,
     }
 
 
-def _quality_thresholds(config: dict) -> tuple[float, float]:
+def _yearly_quality_fields(yearly: pd.DataFrame | None, return_threshold: float, drawdown_limit: float) -> dict[str, object]:
+    if yearly is None or yearly.empty:
+        return {
+            "year_count": 0,
+            "year_ann_pass": 0,
+            "year_dd_pass": 0,
+            "min_yearly_annual_return": 0.0,
+            "worst_yearly_drawdown": 0.0,
+        }
+    annual = pd.to_numeric(yearly.get("annual_return"), errors="coerce")
+    drawdown = pd.to_numeric(yearly.get("max_drawdown"), errors="coerce")
+    return {
+        "year_count": int(len(yearly)),
+        "year_ann_pass": int((annual >= return_threshold).sum()),
+        "year_dd_pass": int((drawdown >= drawdown_limit).sum()),
+        "min_yearly_annual_return": float(annual.min()) if not annual.dropna().empty else 0.0,
+        "worst_yearly_drawdown": float(drawdown.min()) if not drawdown.dropna().empty else 0.0,
+    }
+
+
+def _fast_yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
+    """Calculate yearly stats for sparse fast-backtest equity points."""
+    if equity_curve.empty:
+        return pd.DataFrame(columns=["year", "start", "end", "days", "total_return", "annual_return", "max_drawdown"])
+    equity = equity_curve.sort_index().astype(float)
+    rows: list[dict[str, object]] = []
+    for year, segment in equity.groupby(equity.index.year):
+        segment = segment.dropna()
+        if len(segment) < 2:
+            continue
+        total_return = float(segment.iloc[-1] / segment.iloc[0] - 1.0) if segment.iloc[0] else 0.0
+        years = max((segment.index[-1] - segment.index[0]).days / 365.25, 1 / 252)
+        annual_return = float((1.0 + total_return) ** (1.0 / years) - 1.0) if total_return > -1 else -1.0
+        drawdown = segment / segment.cummax() - 1.0
+        rows.append(
+            {
+                "year": int(year),
+                "start": segment.index.min().date().isoformat(),
+                "end": segment.index.max().date().isoformat(),
+                "days": int(len(segment)),
+                "total_return": total_return,
+                "annual_return": annual_return,
+                "max_drawdown": float(drawdown.min()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _quality_thresholds(config: dict) -> tuple[float, float, float]:
     """函数说明：处理 quality_thresholds 的内部辅助逻辑。"""
     quality = config.get("quality", {})
     return_threshold = float(quality.get("min_backtest_annual_return", quality.get("target_annual_return", 0.20)))
     drawdown_limit = float(quality.get("max_backtest_drawdown_limit", quality.get("max_drawdown_limit", -0.20)))
-    return return_threshold, drawdown_limit
+    turnover_limit = float(quality.get("max_annual_turnover", float("inf")))
+    return return_threshold, drawdown_limit, turnover_limit
 
 
 def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -192,9 +291,21 @@ def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(rows)
     if frame.empty:
         return frame
-    for column in ["annual_return", "max_drawdown", "sharpe", "target_gap"]:
+    for column in [
+        "annual_return",
+        "max_drawdown",
+        "sharpe",
+        "target_gap",
+        "year_ann_pass",
+        "year_dd_pass",
+        "min_yearly_annual_return",
+        "worst_yearly_drawdown",
+    ]:
         frame[column] = pd.to_numeric(frame.get(column, 0.0), errors="coerce")
-    return frame.sort_values(["meets_full_target", "target_gap", "annual_return", "max_drawdown"], ascending=[False, True, False, False])
+    return frame.sort_values(
+        ["meets_full_target", "target_gap", "year_ann_pass", "year_dd_pass", "annual_return", "max_drawdown"],
+        ascending=[False, True, False, False, False, False],
+    )
 
 
 def _read_factor_subset(path_value: str | Path, columns: list[str], start_date: str, end_date: str) -> pd.DataFrame:

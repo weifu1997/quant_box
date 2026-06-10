@@ -1,0 +1,204 @@
+[
+  {
+    "name": "db_total_mv_inv_top10_no_liq_notake",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_total_mv",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": null,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "db_total_mv_inv_top10_no_liq_overlay",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_total_mv",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": true,
+    "defensive_timing_config": {
+      "bull_exposure": 1.0,
+      "sideways_exposure": 1.0,
+      "bear_exposure": 0.6
+    },
+    "market_regime": {
+      "ma_window": 90,
+      "momentum_window": 5,
+      "high_volatility_threshold": 999.0,
+      "bear_drawdown_threshold": null,
+      "lag_days": 1
+    },
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02,
+      "exposure_schedule_rebalance_on_signal_only": true,
+      "equity_overlay": {
+        "enabled": true,
+        "min_periods": 60,
+        "ma_window": 90,
+        "momentum_window": 5,
+        "drawdown_window": 60,
+        "drawdown_cut": 0.15,
+        "bull_exposure": 1.0,
+        "sideways_exposure": 0.5,
+        "bear_exposure": 0.5,
+        "rebalance_threshold": 0.05,
+        "rebalance_on_signal_only": true
+      }
+    }
+  },
+  {
+    "name": "db_total_mv_inv_top10_no_liq_guard18",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_total_mv",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02,
+      "annual_drawdown_guard": {
+        "enabled": true,
+        "drawdown": 0.18,
+        "release_drawdown": 0.08,
+        "target_exposure": 0.30
+      }
+    }
+  },
+  {
+    "name": "db_total_mv_inv_top10_no_liq_weekly",
+    "strategy": {
+      "factor_group": "inverse_factor:DB_total_mv",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "weekly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": false},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "roc60_q65_top10_weekly_take035",
+    "strategy": {
+      "factor_group": "factor:ROC60",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "weekly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "roc60_q65_top10_monthly_notake",
+    "strategy": {
+      "factor_group": "factor:ROC60",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": null,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "beta60_q65_top5_monthly_notake",
+    "strategy": {
+      "factor_group": "factor:BETA60",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": null,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "beta60_q65_top5_monthly_overlay",
+    "strategy": {
+      "factor_group": "factor:BETA60",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": true,
+    "defensive_timing_config": {
+      "bull_exposure": 1.0,
+      "sideways_exposure": 1.0,
+      "bear_exposure": 0.6
+    },
+    "market_regime": {
+      "ma_window": 90,
+      "momentum_window": 5,
+      "high_volatility_threshold": 999.0,
+      "bear_drawdown_threshold": null,
+      "lag_days": 1
+    },
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02,
+      "exposure_schedule_rebalance_on_signal_only": true,
+      "equity_overlay": {
+        "enabled": true,
+        "min_periods": 60,
+        "ma_window": 90,
+        "momentum_window": 5,
+        "drawdown_window": 60,
+        "drawdown_cut": 0.15,
+        "bull_exposure": 1.0,
+        "sideways_exposure": 0.5,
+        "bear_exposure": 0.5,
+        "rebalance_threshold": 0.05,
+        "rebalance_on_signal_only": true
+      }
+    }
+  }
+]

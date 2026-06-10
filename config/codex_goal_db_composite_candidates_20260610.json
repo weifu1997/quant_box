@@ -1,0 +1,264 @@
+[
+  {
+    "name": "dynamic_db_q35_top10_take035_top1_w252",
+    "strategy": {
+      "factor_group": "dynamic_ic_selector",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "dynamic_ic_selector": {
+      "candidates": [
+        "factor:ROC60",
+        "factor:ROC30",
+        "inverse_factor:MAX60",
+        "inverse_factor:BETA20",
+        "factor:RSQR20",
+        "factor:LOW0",
+        "inverse_factor:DB_circ_mv",
+        "factor:DB_dv_ttm",
+        "inverse_factor:DB_turnover_rate_f",
+        "inverse_factor:DB_pb",
+        "inverse_factor:DB_pe_ttm"
+      ],
+      "horizon": 20,
+      "window": 252,
+      "min_periods": 60,
+      "min_obs": 20,
+      "method": "spearman",
+      "metric": "ic_ir",
+      "top_k": 1,
+      "fallback_candidate": "factor:ROC60"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "dynamic_db_q35_top10_take035_top3_w252",
+    "strategy": {
+      "factor_group": "dynamic_ic_selector",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "dynamic_ic_selector": {
+      "candidates": [
+        "factor:ROC60",
+        "factor:ROC30",
+        "inverse_factor:MAX60",
+        "inverse_factor:BETA20",
+        "factor:RSQR20",
+        "factor:LOW0",
+        "inverse_factor:DB_circ_mv",
+        "factor:DB_dv_ttm",
+        "inverse_factor:DB_turnover_rate_f",
+        "inverse_factor:DB_pb",
+        "inverse_factor:DB_pe_ttm"
+      ],
+      "horizon": 20,
+      "window": 252,
+      "min_periods": 60,
+      "min_obs": 20,
+      "method": "spearman",
+      "metric": "ic_ir",
+      "top_k": 3,
+      "fallback_candidate": "factor:ROC60"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "dynamic_db_q35_top10_take035_top3_w504",
+    "strategy": {
+      "factor_group": "dynamic_ic_selector",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "dynamic_ic_selector": {
+      "candidates": [
+        "factor:ROC60",
+        "factor:ROC30",
+        "inverse_factor:MAX60",
+        "inverse_factor:BETA20",
+        "factor:RSQR20",
+        "factor:LOW0",
+        "inverse_factor:DB_circ_mv",
+        "factor:DB_dv_ttm",
+        "inverse_factor:DB_turnover_rate_f",
+        "inverse_factor:DB_pb",
+        "inverse_factor:DB_pe_ttm"
+      ],
+      "horizon": 20,
+      "window": 504,
+      "min_periods": 120,
+      "min_obs": 20,
+      "method": "spearman",
+      "metric": "ic_ir",
+      "top_k": 3,
+      "fallback_candidate": "factor:ROC60"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "roc60_db_blend_q35_top10_take035",
+    "strategy": {
+      "factor_group": "factor:ROC60",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "regime_score_blend": {
+      "enabled": true,
+      "bull_defensive_weight": 0.15,
+      "sideways_defensive_weight": 0.45,
+      "bear_defensive_weight": 0.85,
+      "defensive_components": [
+        {"column": "DB_dv_ttm", "direction": 1.0},
+        {"column": "DB_turnover_rate_f", "direction": -1.0},
+        {"column": "DB_circ_mv", "direction": -1.0},
+        {"column": "MAX60", "direction": -1.0}
+      ]
+    },
+    "market_regime": {
+      "ma_window": 90,
+      "momentum_window": 5,
+      "high_volatility_threshold": 999.0,
+      "bear_drawdown_threshold": null,
+      "lag_days": 1
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "roc60_db_blend_q35_top15_take035",
+    "strategy": {
+      "factor_group": "factor:ROC60",
+      "top_n": 15,
+      "rank_buffer": 25,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "regime_score_blend": {
+      "enabled": true,
+      "bull_defensive_weight": 0.20,
+      "sideways_defensive_weight": 0.50,
+      "bear_defensive_weight": 0.90,
+      "defensive_components": [
+        {"column": "DB_dv_ttm", "direction": 1.0},
+        {"column": "DB_turnover_rate_f", "direction": -1.0},
+        {"column": "DB_circ_mv", "direction": -1.0},
+        {"column": "MAX60", "direction": -1.0}
+      ]
+    },
+    "market_regime": {
+      "ma_window": 90,
+      "momentum_window": 5,
+      "high_volatility_threshold": 999.0,
+      "bear_drawdown_threshold": null,
+      "lag_days": 1
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "roc60_db_bear_filter_q35_top10_take035",
+    "strategy": {
+      "factor_group": "factor:ROC60",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "regime_score_filter": {
+      "enabled": true,
+      "rules": [
+        {
+          "regime": "bear",
+          "components": [
+            {"column": "DB_dv_ttm", "direction": 1.0},
+            {"column": "DB_turnover_rate_f", "direction": -1.0},
+            {"column": "DB_circ_mv", "direction": -1.0},
+            {"column": "MAX60", "direction": -1.0}
+          ],
+          "keep_top_fraction": 0.55,
+          "min_score": -1.0
+        }
+      ]
+    },
+    "market_regime": {
+      "ma_window": 90,
+      "momentum_window": 5,
+      "high_volatility_threshold": 999.0,
+      "bear_drawdown_threshold": null,
+      "lag_days": 1
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  }
+]

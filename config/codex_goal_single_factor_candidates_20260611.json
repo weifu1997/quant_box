@@ -1,0 +1,86 @@
+[
+  {
+    "name": "single_beta20_q80_top5_take035",
+    "strategy": {
+      "factor_group": "factor:BETA20",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.80},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "single_beta20_q80_top5_take035_guard",
+    "strategy": {
+      "factor_group": "factor:BETA20",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.80},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02,
+      "annual_drawdown_guard": {
+        "enabled": true,
+        "drawdown": 0.18,
+        "release_drawdown": 0.12,
+        "target_exposure": 0.3
+      }
+    }
+  },
+  {
+    "name": "single_rsqr20_q80_top5_take035",
+    "strategy": {
+      "factor_group": "factor:RSQR20",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.80},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "single_rsqr20_q80_top5_take035_guard",
+    "strategy": {
+      "factor_group": "factor:RSQR20",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.80},
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02,
+      "annual_drawdown_guard": {
+        "enabled": true,
+        "drawdown": 0.18,
+        "release_drawdown": 0.12,
+        "target_exposure": 0.3
+      }
+    }
+  }
+]

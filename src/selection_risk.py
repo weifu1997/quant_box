@@ -12,6 +12,8 @@ import pandas as pd
 from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
 
 _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str], dict[str, pd.DataFrame]]] = {}
+_NORMALIZED_PRICE_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], pd.DataFrame]] = {}
+_NORMALIZED_PRICE_CACHE_MAX_SIZE = 8
 
 
 def selection_risk_filter_enabled(config: dict[str, Any] | None) -> bool:
@@ -227,6 +229,11 @@ def _config_value(config: dict[str, Any], key: str, default: Any) -> Any:
 
 def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
     """函数说明：规范化 normalize_price_frame 的内部辅助逻辑。"""
+    source_prices = prices
+    cached = _get_cached_normalized_price_frame(source_prices)
+    if cached is not None:
+        return cached
+
     raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
     valid_dates = ~pd.isna(raw_dates)
     if not valid_dates.all():
@@ -256,12 +263,14 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
             prices.columns = normalized_columns
         if prices.index.has_duplicates:
             prices = prices.loc[~prices.index.duplicated(keep="last")]
-        prices = prices.loc[:, prices.columns.get_level_values("instrument") != ""]
+        non_empty_instruments = prices.columns.get_level_values("instrument") != ""
+        if not bool(non_empty_instruments.all()):
+            prices = prices.loc[:, non_empty_instruments]
         if prices.columns.has_duplicates:
             prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
         if not prices.index.is_monotonic_increasing:
-            return prices.sort_index()
-        return prices
+            prices = prices.sort_index()
+        return _store_normalized_price_frame(source_prices, prices)
 
     if _looks_like_field_table(prices.columns):
         raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
@@ -274,12 +283,46 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
         [["close"], [_normalize_instrument(value) for value in result.columns]],
         names=["field", "instrument"],
     )
-    result = result.loc[:, result.columns.get_level_values("instrument") != ""]
+    non_empty_instruments = result.columns.get_level_values("instrument") != ""
+    if not bool(non_empty_instruments.all()):
+        result = result.loc[:, non_empty_instruments]
     if result.columns.has_duplicates:
         result = result.loc[:, ~result.columns.duplicated(keep="last")]
     if not result.index.is_monotonic_increasing:
-        return result.sort_index()
-    return result
+        result = result.sort_index()
+    return _store_normalized_price_frame(source_prices, result)
+
+
+def _get_cached_normalized_price_frame(prices: pd.DataFrame) -> pd.DataFrame | None:
+    """函数说明：读取同一价格面板的规范化缓存。"""
+    cached = _NORMALIZED_PRICE_CACHE.get(id(prices))
+    if cached is None:
+        return None
+    cached_source, normalized = cached
+    if cached_source() is prices:
+        return normalized
+    _NORMALIZED_PRICE_CACHE.pop(id(prices), None)
+    return None
+
+
+def _store_normalized_price_frame(source_prices: pd.DataFrame, normalized: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：保存价格面板规范化结果，并限制缓存体积。"""
+    _prune_normalized_price_cache()
+    if len(_NORMALIZED_PRICE_CACHE) >= _NORMALIZED_PRICE_CACHE_MAX_SIZE:
+        _NORMALIZED_PRICE_CACHE.pop(next(iter(_NORMALIZED_PRICE_CACHE)), None)
+    cache_key = id(source_prices)
+    _NORMALIZED_PRICE_CACHE[cache_key] = (
+        weakref.ref(source_prices, lambda _ref, key=cache_key: _NORMALIZED_PRICE_CACHE.pop(key, None)),
+        normalized,
+    )
+    return normalized
+
+
+def _prune_normalized_price_cache() -> None:
+    """函数说明：清理已经释放的价格面板缓存项。"""
+    dead_keys = [key for key, (source_ref, _) in _NORMALIZED_PRICE_CACHE.items() if source_ref() is None]
+    for key in dead_keys:
+        _NORMALIZED_PRICE_CACHE.pop(key, None)
 
 
 def _normalize_price_field(value: object) -> str:

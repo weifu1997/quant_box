@@ -34,6 +34,8 @@ from src.strategy import select_stocks
 
 LOT_SIZE = 100
 _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str], dict[str, pd.DataFrame]]] = {}
+_NORMALIZED_PRICE_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], pd.DataFrame]] = {}
+_NORMALIZED_PRICE_CACHE_MAX_SIZE = 8
 
 
 @dataclass
@@ -584,6 +586,11 @@ def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:
 
 def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
     """函数说明：规范化 normalize_price_frame 的内部辅助逻辑。"""
+    source_prices = price_df
+    cached = _get_cached_normalized_price_frame(source_prices)
+    if cached is not None:
+        return cached
+
     prices = price_df
     raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
     valid_dates = ~raw_dates.isna()
@@ -618,8 +625,8 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
         if prices.columns.has_duplicates:
             prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
         if not prices.index.is_monotonic_increasing:
-            return prices.sort_index()
-        return prices
+            prices = prices.sort_index()
+        return _store_normalized_price_frame(source_prices, prices)
 
     if _looks_like_field_table(prices.columns):
         raise ValueError("Non-MultiIndex price_df must be a close-price panel with instrument columns.")
@@ -636,8 +643,40 @@ def _normalize_price_frame(price_df: pd.DataFrame) -> pd.DataFrame:
     if prices.columns.has_duplicates:
         prices = prices.loc[:, ~prices.columns.duplicated(keep="last")]
     if not prices.index.is_monotonic_increasing:
-        return prices.sort_index()
-    return prices
+        prices = prices.sort_index()
+    return _store_normalized_price_frame(source_prices, prices)
+
+
+def _get_cached_normalized_price_frame(prices: pd.DataFrame) -> pd.DataFrame | None:
+    """函数说明：读取同一价格面板的规范化缓存。"""
+    cached = _NORMALIZED_PRICE_CACHE.get(id(prices))
+    if cached is None:
+        return None
+    cached_source, normalized = cached
+    if cached_source() is prices:
+        return normalized
+    _NORMALIZED_PRICE_CACHE.pop(id(prices), None)
+    return None
+
+
+def _store_normalized_price_frame(source_prices: pd.DataFrame, normalized: pd.DataFrame) -> pd.DataFrame:
+    """函数说明：保存价格面板规范化结果，并限制缓存体积。"""
+    _prune_normalized_price_cache()
+    if len(_NORMALIZED_PRICE_CACHE) >= _NORMALIZED_PRICE_CACHE_MAX_SIZE:
+        _NORMALIZED_PRICE_CACHE.pop(next(iter(_NORMALIZED_PRICE_CACHE)), None)
+    cache_key = id(source_prices)
+    _NORMALIZED_PRICE_CACHE[cache_key] = (
+        weakref.ref(source_prices, lambda _ref, key=cache_key: _NORMALIZED_PRICE_CACHE.pop(key, None)),
+        normalized,
+    )
+    return normalized
+
+
+def _prune_normalized_price_cache() -> None:
+    """函数说明：清理已经释放的价格面板缓存项。"""
+    dead_keys = [key for key, (source_ref, _) in _NORMALIZED_PRICE_CACHE.items() if source_ref() is None]
+    for key in dead_keys:
+        _NORMALIZED_PRICE_CACHE.pop(key, None)
 
 
 def _normalize_price_field(value: object) -> str:
@@ -721,16 +760,37 @@ def _tradability(
         low = _field_on_date(prices, "low", trade_date).reindex(close.index)
         up_probe = high.where(high.notna(), close)
         down_probe = low.where(low.notna(), close)
-        for stock in close.index[valid_prev]:
-            stock = str(stock)
-            up_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "up")
-            down_threshold = _limit_threshold_for_stock(stock, prices, trade_date, config, "down")
-            if pd.notna(up_probe.get(stock)) and float(up_probe.get(stock)) >= float(prev_close.get(stock)) * (1 + up_threshold):
-                buyable.discard(stock)
-            if pd.notna(down_probe.get(stock)) and float(down_probe.get(stock)) <= float(prev_close.get(stock)) * (1 - down_threshold):
-                sellable.discard(stock)
+        valid_index = pd.Index(close.index[valid_prev]).astype(str)
+        if not valid_index.empty:
+            is_st = _field_on_date(prices, "is_st", trade_date).reindex(valid_index)
+            prev_values = pd.to_numeric(prev_close.reindex(valid_index), errors="coerce")
+            up_values = pd.to_numeric(up_probe.reindex(valid_index), errors="coerce")
+            down_values = pd.to_numeric(down_probe.reindex(valid_index), errors="coerce")
+            up_thresholds = _limit_thresholds_for_stocks(valid_index, is_st, config, "up")
+            down_thresholds = _limit_thresholds_for_stocks(valid_index, is_st, config, "down")
+            limit_up = up_values.notna() & (up_values >= prev_values * (1 + up_thresholds))
+            limit_down = down_values.notna() & (down_values <= prev_values * (1 - down_thresholds))
+            buyable.difference_update(limit_up[limit_up].index.astype(str))
+            sellable.difference_update(limit_down[limit_down].index.astype(str))
 
     return {"priced": priced, "buyable": buyable, "sellable": sellable}
+
+
+def _limit_thresholds_for_stocks(stocks: pd.Index, is_st: pd.Series, config: dict, side: str) -> pd.Series:
+    suffix = "up" if side == "up" else "down"
+    stock_index = pd.Index(stocks).astype(str)
+    thresholds = pd.Series(float(config.get(f"limit_{suffix}_threshold", 0.099)), index=stock_index, dtype="float64")
+    lowered = stock_index.str.lower()
+    star_mask = lowered.str.startswith(("688", "689"))
+    growth_mask = lowered.str.startswith(("300", "301"))
+    bj_mask = lowered.str.startswith(("8", "4"))
+    thresholds.loc[star_mask] = float(config.get(f"star_limit_{suffix}_threshold", config.get(f"growth_limit_{suffix}_threshold", 0.199)))
+    thresholds.loc[growth_mask] = float(config.get(f"growth_limit_{suffix}_threshold", config.get(f"star_limit_{suffix}_threshold", 0.199)))
+    thresholds.loc[bj_mask] = float(config.get(f"bj_limit_{suffix}_threshold", 0.299))
+    if is_st is not None and not is_st.empty:
+        st_flags = pd.to_numeric(is_st.reindex(stock_index), errors="coerce").fillna(0).astype(bool)
+        thresholds.loc[st_flags] = float(config.get(f"st_limit_{suffix}_threshold", 0.049))
+    return thresholds
 
 
 def _limit_threshold_for_stock(stock: str, prices: pd.DataFrame, trade_date: pd.Timestamp, config: dict, side: str) -> float:

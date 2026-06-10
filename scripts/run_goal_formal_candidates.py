@@ -35,9 +35,12 @@ def main() -> None:
     parser.add_argument("--max-candidates", type=int, default=0)
     parser.add_argument("--skip-diagnostics", action="store_true", help="Skip candidate-level research diagnostics.")
     parser.add_argument("--resume", action="store_true", help="Skip candidates already present in the output CSV.")
+    parser.add_argument("--candidates-file", default="", help="Optional JSON file with candidate specs to run.")
+    parser.add_argument("--factor-file", default="", help="Factor parquet file to use for scoring.")
     args = parser.parse_args()
 
     config = load_config()
+    factor_file = args.factor_file or config["factors"]["cache_file"]
     start_date = config["data"]["start_date"]
     end_date = resolve_target_date_value(config["data"]["end_date"], config=config)
     prices = pd.read_parquet(resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet")))
@@ -45,7 +48,7 @@ def main() -> None:
     out_path = resolve_path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    candidates = _candidate_specs()
+    candidates = _candidate_specs(args.candidates_file or None)
     candidates = candidates[max(0, args.start_index - 1) :]
     if args.max_candidates:
         candidates = candidates[: args.max_candidates]
@@ -58,10 +61,11 @@ def main() -> None:
             print(f"{idx}/{len(candidates)} {candidate['name']}: skipped existing result", flush=True)
             continue
         started = time.monotonic()
+        print(f"{idx}/{len(candidates)} {candidate['name']}: preparing config", flush=True)
         strategy = _strategy_config(config, candidate)
         factor_config = _scoring_config(config, strategy, candidate)
         factor_columns = requested_factor_columns(
-            config["factors"]["cache_file"],
+            factor_file,
             strategy,
             factor_config.get("dynamic_ic_selector", {}),
             factor_config.get("ml_strategy", {}),
@@ -70,16 +74,36 @@ def main() -> None:
         )
         factor_key = None if factor_columns is None else tuple(sorted(factor_columns))
         if factor_key not in factor_cache:
-            factor_cache[factor_key] = load_or_compute_factors(
-                start_date,
-                end_date,
-                cache_file=config["factors"]["cache_file"],
-                columns=factor_columns,
+            print(
+                f"{idx}/{len(candidates)} {candidate['name']}: loading factors columns="
+                f"{'all' if factor_columns is None else len(factor_columns)}",
+                flush=True,
             )
+            try:
+                factor_cache[factor_key] = load_or_compute_factors(
+                    start_date,
+                    end_date,
+                    cache_file=factor_file,
+                    columns=factor_columns,
+                )
+            except Exception as exc:
+                row = _candidate_error_row(candidate, started, exc, config.get("quality", {}))
+                rows.append(row)
+                pd.DataFrame(rows).to_csv(out_path, index=False, encoding="utf-8-sig")
+                print(f"{idx}/{len(candidates)} {candidate['name']}: error={exc}", flush=True)
+                continue
         scoring_key = _score_key(candidate)
         if scoring_key not in score_cache:
+            print(f"{idx}/{len(candidates)} {candidate['name']}: building scores", flush=True)
             scoring_config = factor_config
-            scores = build_strategy_scores(factor_cache[factor_key], scoring_config, price_df=prices)
+            try:
+                scores = build_strategy_scores(factor_cache[factor_key], scoring_config, price_df=prices)
+            except Exception as exc:
+                row = _candidate_error_row(candidate, started, exc, config.get("quality", {}))
+                rows.append(row)
+                pd.DataFrame(rows).to_csv(out_path, index=False, encoding="utf-8-sig")
+                print(f"{idx}/{len(candidates)} {candidate['name']}: error={exc}", flush=True)
+                continue
             score_cache[scoring_key] = resample_signals(scores, strategy.get("rebalance_freq", "daily"))
 
         timing_config = _timing_config(config, candidate)
@@ -91,19 +115,30 @@ def main() -> None:
                 bt_config[key] = value
         bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
 
-        result = run_backtest(score_cache[scoring_key], prices, start_date, end_date, bt_config)
+        print(f"{idx}/{len(candidates)} {candidate['name']}: running formal backtest", flush=True)
+        try:
+            result = run_backtest(score_cache[scoring_key], prices, start_date, end_date, bt_config)
+        except Exception as exc:
+            row = _candidate_error_row(candidate, started, exc, config.get("quality", {}))
+            rows.append(row)
+            pd.DataFrame(rows).to_csv(out_path, index=False, encoding="utf-8-sig")
+            print(f"{idx}/{len(candidates)} {candidate['name']}: error={exc}", flush=True)
+            continue
         yearly = _yearly_stats(result.equity_curve)
         year_ann_pass, year_dd_pass = _yearly_pass_counts(yearly, config.get("quality", {}))
+        year_count = int(len(yearly))
         row = {
             "candidate": candidate["name"],
             "seconds": time.monotonic() - started,
             **candidate.get("recorded_hint", {}),
             **result.metrics,
+            "year_count": year_count,
             "year_ann_pass": year_ann_pass,
             "year_dd_pass": year_dd_pass,
         }
         row.update(_quality_flags(row, config.get("quality", {})))
         prefix = out_path.with_name(f"{out_path.stem}_{candidate['name']}")
+        print(f"{idx}/{len(candidates)} {candidate['name']}: writing artifacts", flush=True)
         row.update(_write_candidate_artifacts(prefix, result, yearly, prices, config, write_diagnostics=not args.skip_diagnostics))
         Path(str(prefix) + "_metrics.json").write_text(json.dumps(row, indent=2, default=str), encoding="utf-8")
         rows.append(row)
@@ -185,7 +220,7 @@ def _scoring_config(config: dict[str, Any], strategy: dict[str, Any], candidate:
     """函数说明：处理 scoring_config 的内部辅助逻辑。"""
     result = deepcopy(config)
     result["strategy"] = strategy
-    for key in ["liquidity_filter", "market_regime", "regime_score_blend", "regime_score_filter"]:
+    for key in ["liquidity_filter", "market_regime", "regime_score_blend", "regime_score_filter", "dynamic_ic_selector"]:
         if key in candidate:
             result[key] = {**result.get(key, {}), **candidate[key]}
     return result
@@ -209,7 +244,8 @@ def _score_key(candidate: dict[str, Any]) -> str:
     market_items = json.dumps(candidate.get("market_regime", {}), sort_keys=True, default=str)
     blend_items = json.dumps(candidate.get("regime_score_blend", {}), sort_keys=True, default=str)
     filter_items = json.dumps(candidate.get("regime_score_filter", {}), sort_keys=True, default=str)
-    return repr((strategy_items, liquidity_items, market_items, blend_items, filter_items))
+    dynamic_items = json.dumps(candidate.get("dynamic_ic_selector", {}), sort_keys=True, default=str)
+    return repr((strategy_items, liquidity_items, market_items, blend_items, filter_items, dynamic_items))
 
 
 def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +254,9 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
     max_drawdown = float(metrics.get("max_drawdown", 0.0) or 0.0)
     annual_turnover = float(metrics.get("annual_turnover", 0.0) or 0.0)
     annual_cost = float(metrics.get("annual_trade_cost_ratio", metrics.get("trade_cost_ratio", 0.0)) or 0.0)
+    year_count = int(metrics.get("year_count", 0) or 0)
+    year_ann_pass = int(metrics.get("year_ann_pass", 0) or 0)
+    year_dd_pass = int(metrics.get("year_dd_pass", 0) or 0)
     return_threshold, drawdown_limit = _quality_return_drawdown_thresholds(quality_cfg)
     turnover_limit = float(quality_cfg.get("max_annual_turnover", 20.0))
     cost_limit = float(quality_cfg.get("max_annual_trade_cost_ratio", 0.2))
@@ -226,6 +265,8 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
         "drawdown_pass": max_drawdown >= drawdown_limit,
         "annual_turnover_pass": annual_turnover <= turnover_limit,
         "annual_trade_cost_ratio_pass": annual_cost <= cost_limit,
+        "yearly_annual_return_pass": bool(year_count <= 0 or year_ann_pass >= year_count),
+        "yearly_drawdown_pass": bool(year_count <= 0 or year_dd_pass >= year_count),
         "annual_return_threshold": return_threshold,
         "drawdown_limit": drawdown_limit,
         "annual_turnover_limit": turnover_limit,
@@ -236,8 +277,27 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
         and flags["drawdown_pass"]
         and flags["annual_turnover_pass"]
         and flags["annual_trade_cost_ratio_pass"]
+        and flags["yearly_annual_return_pass"]
+        and flags["yearly_drawdown_pass"]
     )
     return flags
+
+
+def _candidate_error_row(candidate: dict[str, Any], started: float, exc: Exception, quality_cfg: dict[str, Any]) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "candidate": candidate.get("name", ""),
+        "seconds": time.monotonic() - started,
+        "error": f"{type(exc).__name__}: {exc}",
+        "annual_return": 0.0,
+        "max_drawdown": -1.0,
+        "annual_turnover": 0.0,
+        "annual_trade_cost_ratio": 0.0,
+        "year_count": 0,
+        "year_ann_pass": 0,
+        "year_dd_pass": 0,
+    }
+    row.update(_quality_flags(row, quality_cfg))
+    return row
 
 
 def _quality_return_drawdown_thresholds(quality_cfg: dict[str, Any]) -> tuple[float, float]:

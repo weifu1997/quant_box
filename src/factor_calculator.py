@@ -91,8 +91,11 @@ def load_or_compute_factors(
     config = load_config()
     end = resolve_target_date_value(end_date, config=config)
     path = resolve_path(cache_file or config["factors"]["cache_file"])
+    is_default_cache = _is_default_factor_cache(path, config)
     if path.exists() and not force:
         cached = _read_factor_cache(path, columns=columns)
+        if not is_default_cache:
+            return _slice_custom_factor_cache(cached, path, start_date, end, config, columns=columns)
         if _factor_cache_matches_request(cached, start_date, end, config, cache_file=path, columns=columns):
             return _slice_factor_cache(cached, start_date, end)
 
@@ -163,6 +166,43 @@ def _factor_cache_matches_request(
     if not _factor_cache_meta_matches(config, start_date, end_date, cache_file=cache_file):
         return False
 
+    return _factor_cache_data_matches_request(factors, start_date, end_date, config)
+
+
+def _slice_custom_factor_cache(
+    factors: pd.DataFrame,
+    path: Path,
+    start_date: str,
+    end_date: str,
+    config: dict,
+    columns: list[str] | None = None,
+) -> pd.DataFrame:
+    """Validate and slice a user-supplied factor cache without Alpha158 metadata."""
+    if factors.empty:
+        raise ValueError(f"Custom factor cache is empty: {path}")
+    if not isinstance(factors.index, pd.MultiIndex):
+        raise ValueError(f"Custom factor cache must use a MultiIndex of datetime/instrument: {path}")
+    if columns is not None:
+        requested_columns = [str(column) for column in columns]
+        cached_columns = {str(column) for column in factors.columns}
+        missing = [column for column in requested_columns if column not in cached_columns]
+        if missing:
+            missing_text = ", ".join(missing)
+            raise ValueError(f"Custom factor cache {path} is missing requested columns: {missing_text}")
+    if not _factor_cache_data_matches_request(factors, start_date, end_date, config):
+        raise ValueError(f"Custom factor cache {path} does not cover requested dates or symbols from {start_date} to {end_date}.")
+    return _slice_factor_cache(factors, start_date, end_date)
+
+
+def _factor_cache_data_matches_request(
+    factors: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+    config: dict,
+) -> bool:
+    """Validate cache frame shape, date coverage, and symbol coverage against price data."""
+    if factors.empty or not isinstance(factors.index, pd.MultiIndex):
+        return False
     factor_dates = pd.to_datetime(factors.index.get_level_values(0)).normalize()
     requested_start = pd.Timestamp(start_date).normalize()
     requested_end = pd.Timestamp(end_date).normalize()
@@ -307,7 +347,8 @@ def _should_write_factor_cache(path: Path, start_date: str, end_date: str, confi
 
     requested_start = pd.Timestamp(start_date).normalize()
     requested_end = pd.Timestamp(end_date).normalize()
-    if requested_start != pd.Timestamp(default_start).normalize():
+    required_start = _default_data_start_date(config, default_start)
+    if requested_start > required_start:
         return False
 
     default_end = _default_data_end_date(config, default_start)
@@ -334,7 +375,29 @@ def _default_data_end_date(config: dict, default_start: str) -> pd.Timestamp | N
     if configured_end not in {None, "", "auto"}:
         return pd.Timestamp(resolve_target_date_value(str(configured_end), config=config)).normalize()
 
+    auto_target = _auto_target_end_date(config)
     price_dates, _symbols = _price_cache_state(config, default_start, "2100-01-01")
     if price_dates.empty:
+        return auto_target
+    price_end = pd.Timestamp(price_dates.max()).normalize()
+    if auto_target is None:
+        return price_end
+    return min(price_end, auto_target)
+
+
+def _default_data_start_date(config: dict, default_start: str) -> pd.Timestamp:
+    """函数说明：返回默认因子缓存需要覆盖的实际可用起点。"""
+    configured_start = pd.Timestamp(default_start).normalize()
+    price_dates, _symbols = _price_cache_state(config, default_start, "2100-01-01")
+    if price_dates.empty:
+        return configured_start
+    return max(configured_start, pd.Timestamp(price_dates.min()).normalize())
+
+
+def _auto_target_end_date(config: dict) -> pd.Timestamp | None:
+    """函数说明：解析自动目标日，失败时返回空值。"""
+    try:
+        return pd.Timestamp(resolve_target_date_value("auto", config=config)).normalize()
+    except Exception as exc:
+        logger.debug("Unable to resolve auto factor cache end date; falling back to price cache max date: %s", exc)
         return None
-    return pd.Timestamp(price_dates.max()).normalize()

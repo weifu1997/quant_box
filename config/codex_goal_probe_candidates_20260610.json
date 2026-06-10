@@ -1,0 +1,90 @@
+[
+  {
+    "name": "rsqr20_lowliq_q20_top5_take035_no_timing",
+    "strategy": {
+      "factor_group": "factor:RSQR20",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.80
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "beta20_lowliq_q20_top5_take035_no_timing",
+    "strategy": {
+      "factor_group": "factor:BETA20",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.80
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "max60_inv_lowliq_q35_top5_take035_no_timing",
+    "strategy": {
+      "factor_group": "inverse_factor:MAX60",
+      "top_n": 5,
+      "rank_buffer": 10,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  },
+  {
+    "name": "roc60_lowliq_q35_top10_take035_no_timing",
+    "strategy": {
+      "factor_group": "factor:ROC60",
+      "top_n": 10,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.65
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": 0.35,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    }
+  }
+]

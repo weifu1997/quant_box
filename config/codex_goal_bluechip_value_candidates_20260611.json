@@ -1,0 +1,65 @@
+[
+  {
+    "name": "bc_large_value_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_LARGE_VALUE", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_large_quality_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_LARGE_QUALITY", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_blue_mom_value_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_BLUE_MOM_VALUE", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_mom_value_rsqr_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_MOM_VALUE_RSQR", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_defensive_value_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_DEFENSIVE_VALUE", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_lowvol_big_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_LOWVOL_BIG", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_value_mom_lowvol_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_VALUE_MOM_LOWVOL", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_deep_value_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_DEEP_VALUE", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  },
+  {
+    "name": "bc_high_div_big_q65_top15_take035",
+    "strategy": {"factor_group": "factor:BC_HIGH_DIV_BIG", "top_n": 15, "rank_buffer": 25, "rebalance_freq": "monthly", "target_vol": "__remove__"},
+    "liquidity_filter": {"enabled": true, "side": "high", "quantile": 0.65},
+    "defensive_timing": false,
+    "backtest": {"stop_loss_pct": null, "take_profit_pct": 0.35, "circuit_breaker_drawdown": null, "rebalance_drift_threshold": 0.02}
+  }
+]

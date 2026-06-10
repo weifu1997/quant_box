@@ -37,6 +37,31 @@ qlib:
 factors:
   cache_file: "data/factors/alpha158.parquet"
 
+fundamentals:
+  fina_indicator_file: "data/fundamentals/fina_indicator.parquet"
+  dividend_file: "data/fundamentals/dividend.parquet"
+  fallback_lag_days: 120
+  update_sleep_seconds: 0.0
+
+fundamental_screen:
+  include_in_auto_report: true
+  auto_report_top_n: 10
+  top_n: 30
+  min_roe: 0.08
+  max_debt_to_assets: 0.60
+  min_dividend_yield: 0.015
+  min_positive_dividend_years: 2
+  dividend_lookback_years: 5
+  min_ocf_to_opincome: 0.80
+  min_fcf_yield: 0.0
+  max_pe_ttm: 30.0
+  max_pb: 5.0
+  watch_min_score: 4
+  market_cap_unit: 10000.0
+  statement_amount_unit: 1.0
+  prefer_annual_fina: true
+  max_annual_report_age_days: 550
+
 ml_strategy:
   enabled: false
   model_type: "ridge_numpy"
@@ -233,7 +258,7 @@ strategy:
 validated_strategy:
   enabled: true
   candidate: "momentum_lowliq_q35_no_blend_top15_take035_overlay_signal_ma90_side05_bear05_ma90_schedsig_bear06_selrisk3"
-  summary_file: "outputs/goal_formal_candidate_summary_selrisk_20260607.csv"
+  summary_file: "outputs/goal_formal_fullsearch_20260610_042506.csv"
   require_is_acceptable: true
 
 backtest:

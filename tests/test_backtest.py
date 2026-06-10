@@ -9,7 +9,16 @@ import weakref
 import numpy as np
 import pandas as pd
 
-from src.backtest import _PRICE_FIELD_CACHE, _field, _lot_size, _max_drawdown_duration, calculate_metrics, run_backtest
+from src.backtest import (
+    _NORMALIZED_PRICE_CACHE,
+    _PRICE_FIELD_CACHE,
+    _field,
+    _lot_size,
+    _max_drawdown_duration,
+    _normalize_price_frame,
+    calculate_metrics,
+    run_backtest,
+)
 from tests.fixtures.real_data import require_real_market_data
 
 
@@ -105,6 +114,25 @@ class BacktestTests(unittest.TestCase):
         buy = result.trades[result.trades["side"] == "BUY"].iloc[0]
         self.assertEqual(pd.Timestamp(buy["date"]), pd.Timestamp("2024-01-02"))
         self.assertAlmostEqual(float(buy["price"]), 10.0)
+
+    def test_normalized_price_frame_cache_reuses_same_source_panel(self) -> None:
+        """函数说明：验证回测会复用同一价格面板的规范化结果。"""
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+        stock = "000001.SZ"
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 10.1]}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+        _NORMALIZED_PRICE_CACHE.clear()
+
+        first = _normalize_price_frame(prices)
+        second = _normalize_price_frame(prices)
+
+        self.assertIs(first, second)
+        self.assertEqual(len(_NORMALIZED_PRICE_CACHE), 1)
 
     def test_run_backtest_matches_score_and_price_instruments_case_insensitively(self) -> None:
         """函数说明：验证 test_run_backtest_matches_score_and_price_instruments_case_insensitively 覆盖的行为场景。"""

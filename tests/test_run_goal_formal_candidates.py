@@ -11,9 +11,11 @@ import pandas as pd
 
 from scripts.run_goal_formal_candidates import (
     _candidate_specs,
+    _candidate_error_row,
     _load_existing_candidate_rows,
     _quality_flags,
     _score_key,
+    _scoring_config,
     _write_candidate_artifacts,
     _yearly_pass_counts,
 )
@@ -36,6 +38,9 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
                 "max_drawdown": -0.19,
                 "annual_turnover": 19.0,
                 "annual_trade_cost_ratio": 0.1,
+                "year_count": 3,
+                "year_ann_pass": 3,
+                "year_dd_pass": 3,
             },
             quality,
         )
@@ -45,6 +50,9 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
                 "max_drawdown": -0.50,
                 "annual_turnover": 10.0,
                 "annual_trade_cost_ratio": 0.1,
+                "year_count": 3,
+                "year_ann_pass": 3,
+                "year_dd_pass": 3,
             },
             quality,
         )
@@ -52,6 +60,31 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertTrue(passing["is_acceptable"])
         self.assertFalse(failing["is_acceptable"])
         self.assertFalse(failing["drawdown_pass"])
+
+    def test_quality_flags_require_every_year_to_pass_when_counts_are_available(self) -> None:
+        quality = {
+            "min_backtest_annual_return": 0.20,
+            "max_backtest_drawdown_limit": -0.20,
+            "max_annual_turnover": 20.0,
+            "max_annual_trade_cost_ratio": 0.2,
+        }
+
+        flags = _quality_flags(
+            {
+                "annual_return": 0.30,
+                "max_drawdown": -0.10,
+                "annual_turnover": 10.0,
+                "annual_trade_cost_ratio": 0.1,
+                "year_count": 3,
+                "year_ann_pass": 2,
+                "year_dd_pass": 3,
+            },
+            quality,
+        )
+
+        self.assertFalse(flags["is_acceptable"])
+        self.assertFalse(flags["yearly_annual_return_pass"])
+        self.assertTrue(flags["yearly_drawdown_pass"])
 
     def test_yearly_pass_counts_use_quality_thresholds(self) -> None:
         """函数说明：验证 test_yearly_pass_counts_use_quality_thresholds 覆盖的行为场景。"""
@@ -114,6 +147,26 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
 
         self.assertNotEqual(_score_key(base), _score_key(filtered))
 
+    def test_score_key_and_config_include_dynamic_ic_selector(self) -> None:
+        base = {
+            "strategy": {"factor_group": "dynamic_ic_selector"},
+            "dynamic_ic_selector": {"candidates": ["factor:ROC60"], "top_k": 1},
+        }
+        changed = {
+            "strategy": {"factor_group": "dynamic_ic_selector"},
+            "dynamic_ic_selector": {"candidates": ["factor:ROC60", "inverse_factor:MAX60"], "top_k": 2},
+        }
+        config = {
+            "strategy": {"factor_group": "momentum"},
+            "dynamic_ic_selector": {"candidates": ["factor:LOW0"], "top_k": 1},
+        }
+
+        scoring = _scoring_config(config, base["strategy"], base)
+
+        self.assertNotEqual(_score_key(base), _score_key(changed))
+        self.assertEqual(scoring["dynamic_ic_selector"]["candidates"], ["factor:ROC60"])
+        self.assertEqual(scoring["dynamic_ic_selector"]["top_k"], 1)
+
     def test_load_existing_candidate_rows_returns_completed_names(self) -> None:
         """函数说明：验证 test_load_existing_candidate_rows_returns_completed_names 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
@@ -129,6 +182,27 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
 
             self.assertEqual(len(rows), 2)
             self.assertEqual(completed, {"candidate_a", "candidate_b"})
+
+    def test_candidate_specs_loads_explicit_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidates.json"
+            path.write_text('[{"name":"candidate_a","strategy":{"factor_group":"factor:KLEN"}}]', encoding="utf-8")
+
+            candidates = _candidate_specs(path)
+
+            self.assertEqual(candidates[0]["name"], "candidate_a")
+
+    def test_candidate_error_row_is_not_acceptable(self) -> None:
+        row = _candidate_error_row(
+            {"name": "bad_candidate"},
+            0.0,
+            RuntimeError("boom"),
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},
+        )
+
+        self.assertEqual(row["candidate"], "bad_candidate")
+        self.assertIn("RuntimeError", row["error"])
+        self.assertFalse(row["is_acceptable"])
 
     def test_candidate_specs_include_overlay_industry_cap_variants(self) -> None:
         """函数说明：验证 test_candidate_specs_include_overlay_industry_cap_variants 覆盖的行为场景。"""

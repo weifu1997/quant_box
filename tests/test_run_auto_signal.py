@@ -74,6 +74,58 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertIn("## Data Governance", report)
             self.assertIn("## Execution Loop", report)
 
+    def test_auto_signal_reuses_factor_cache_by_default(self) -> None:
+        """函数说明：验证自动流程默认不强制重算因子缓存。"""
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+
+            with _patched_auto_run(
+                module,
+                config,
+                factors,
+                ["run_auto_signal.py", "--skip-update", "--skip-convert", "--skip-optimize", "--skip-backtest", "--no-archive"],
+            ) as patches:
+                module.main()
+
+            kwargs = patches["load_or_compute_factors"].call_args.kwargs
+            self.assertFalse(kwargs["force"])
+
+    def test_auto_signal_report_includes_optional_fundamental_screen(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            fundamental_summary = {
+                "enabled": True,
+                "status": "ok",
+                "as_of_date": "2024-01-03",
+                "rows": 2,
+                "covered_rows": 1,
+                "passed": 0,
+                "watch": 1,
+                "fundamental_coverage": "50.00%",
+                "dividend_coverage": "50.00%",
+                "top_watch": [{"ts_code": "000001.SZ", "name": "Alpha Bank", "industry": "Bank", "total_score": 4}],
+            }
+            fundamental_files = {"fundamental_screen_report": str(root / "fundamental_screen_report.md")}
+
+            with _patched_auto_run(
+                module,
+                config,
+                factors,
+                ["run_auto_signal.py", "--skip-update", "--skip-convert", "--skip-optimize", "--skip-backtest", "--no-archive"],
+            ), patch.object(module, "_maybe_build_fundamental_screen", return_value=(fundamental_summary, fundamental_files)):
+                module.main()
+
+            json_report = json.loads((root / "auto_signal_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(json_report["fundamental_screen"]["watch"], 1)
+            self.assertEqual(json_report["files"]["fundamental_screen_report"], str(root / "fundamental_screen_report.md"))
+            markdown_report = (root / "daily_signal_report.md").read_text(encoding="utf-8")
+            self.assertIn("## Fundamental Screen", markdown_report)
+            self.assertIn("- Covered rows: 1/2", markdown_report)
+
     def test_empty_latest_signal_uses_factor_date_for_candidate_outputs(self) -> None:
         """函数说明：验证 test_empty_latest_signal_uses_factor_date_for_candidate_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
@@ -409,8 +461,10 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertIn("## Research Diagnostics", report)
             self.assertIn("## Failure Analysis", report)
             self.assertIn("Parameter/backtest mismatch: True", report)
+            self.assertIn("failure scope: cross_window_full_history", report)
             failure = json.loads((root / "auto_failure_analysis.json").read_text(encoding="utf-8"))
             self.assertTrue(failure["parameter_backtest_mismatch"])
+            self.assertEqual(failure["failure_scope_summary"]["primary_scope"], "cross_window_full_history")
             self.assertAlmostEqual(failure["backtest_threshold_gaps"]["annual_return_gap"], -0.01)
             self.assertEqual(failure["drawdown_summary"]["trough_date"], "2024-01-04")
             self.assertAlmostEqual(failure["drawdown_summary"]["strategy_return_peak_to_trough"], -0.1)
@@ -552,14 +606,14 @@ def _patched_auto_run(module, config: dict, factors: pd.DataFrame, argv: list[st
     with ExitStack() as stack:
         stack.enter_context(patch.object(sys, "argv", argv))
         stack.enter_context(patch.object(module, "load_config", return_value=config))
-        stack.enter_context(patch.object(module, "load_or_compute_factors", return_value=factors))
+        load_factors = stack.enter_context(patch.object(module, "load_or_compute_factors", return_value=factors))
         stack.enter_context(patch.object(module, "build_data_health_report", return_value=health))
         stack.enter_context(patch.object(module, "write_data_health_report", side_effect=lambda *args, **kwargs: _write_health_files(root)))
         stack.enter_context(patch.object(module, "build_adj_factor_metadata", return_value=adj_meta))
         stack.enter_context(patch.object(module, "write_adj_factor_metadata", side_effect=lambda *args, **kwargs: _write_adj_meta_file(root)))
         stack.enter_context(patch.object(module, "build_data_governance_report", return_value=governance))
         stack.enter_context(patch.object(module, "write_data_governance_report", side_effect=lambda report, *_args, **_kwargs: _write_governance_file(root, report)))
-        yield
+        yield {"load_or_compute_factors": load_factors}
 
 
 def _write_health_files(root: Path) -> tuple[Path, Path]:

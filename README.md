@@ -109,6 +109,8 @@ setx TUSHARE_TOKEN "你的token"
 | `12_全量重刷股票数据.bat` | 维护工具：从配置起始日或上市日全量重刷 raw 股票数据，慢于 `04`，仅在历史数据疑似损坏时使用 |
 | `13_一键补齐历史数据_无人值守.bat` | 无人值守工具：分批补齐 2012 年以来 raw 日线，转换数据，补齐 daily_basic，并可重算 Alpha158 因子 |
 | `scripts/run_update_point_in_time_data.py` | 命令行工具：补齐 daily_basic、HS300 指数成分权重和 ST 历史日历，并重写点时数据治理报告 |
+| `scripts/run_update_fundamentals.py` | 命令行工具：补齐 fina_indicator 和 dividend 基本面缓存，用于质量、分红和负债筛选 |
+| `scripts/run_fundamental_screen.py` | 命令行工具：生成基本面筛选 CSV 和 Markdown 解释报告 |
 | `run_all.bat` | 命令行自动全流程入口：刷新缺失和过期股票、转换、重算因子、data health、回测、候选信号；不含 walk-forward 参数优化 |
 
 常用入口：
@@ -172,6 +174,18 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_update_point_in_time_data.py --max-dates 20 --max-index-windows 1
+```
+
+补齐基础财务依赖，包括 `fina_indicator` 和 `dividend`：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_update_fundamentals.py
+```
+
+首次试跑可以限制股票数量：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_update_fundamentals.py --max-symbols 50
 ```
 
 ## 数据处理与回测流程
@@ -275,6 +289,7 @@ instrument,shares
 
 - 研究诊断：`auto_research_diagnostics.json`、基准净值、个股/行业归因、行业/市值暴露，用来判断策略到底赚亏在哪里
 - 数据治理：`data_governance_report.json`，检查上市/退市字段、ST 历史日历、指数成分日期/权重、复权因子和因子缓存元数据
+- 可选基本面筛选：`fundamental_screen_YYYY-MM-DD.csv` 和 `fundamental_screen_report.md`，用质量、分红、负债、估值阈值解释候选公司
 - 人工确认：`outputs/order_confirmations/order_confirmation*_YYYY-MM-DD.csv`
 - 成交回填：`outputs/fill_feedback/fill_feedback*_YYYY-MM-DD.csv`
 
@@ -287,6 +302,14 @@ instrument,shares
 4. 手工下单后，在 fill_feedback_*.csv 填入 FILLED/PARTIAL/CANCELLED/SKIPPED、executed_shares、executed_price 等字段；不要保留 PENDING 行
 5. 用成交回填更新 config/current_holdings.csv
 ```
+
+生成基本面筛选报告：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_fundamental_screen.py --date latest
+```
+
+这份报告暂时不改变正式交易信号；它用于先把“好公司、好价格、低负债、能分红”这层长期股权过滤独立看清楚。
 
 成交回填命令：
 
@@ -315,6 +338,8 @@ data/factors/alpha158.parquet          Alpha158 因子缓存
 data/factors/alpha158.parquet.meta.json 因子缓存元数据
 data/factors/adj_factor_meta.json      复权因子版本元数据
 data/factors/rolling_ic_weights.parquet rolling IC 权重缓存
+data/fundamentals/fina_indicator.parquet 基础财务指标缓存
+data/fundamentals/dividend.parquet      分红缓存
 outputs/backtest_equity.csv            回测净值
 outputs/backtest_holdings.csv          回测持仓
 outputs/backtest_trades.csv            回测成交
@@ -344,6 +369,8 @@ outputs/auto_research_instrument_attribution.csv 个股收益归因
 outputs/auto_research_industry_attribution.csv 行业收益归因
 outputs/auto_research_industry_exposure.csv 行业暴露
 outputs/auto_research_market_cap_exposure.csv 市值暴露
+outputs/fundamental_screen_YYYY-MM-DD.csv 基本面筛选结果
+outputs/fundamental_screen_report.md   基本面筛选解释报告
 outputs/daily_signal_report.md         每日信号 Markdown 报告
 outputs/manual_orders_YYYY-MM-DD.csv   人工执行交易单
 outputs/manual_orders_candidate_YYYY-MM-DD.csv 门槛未通过时的候选交易单

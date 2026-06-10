@@ -182,6 +182,88 @@ class FactorCalculatorTests(unittest.TestCase):
         compute.assert_called_once()
         self.assertEqual(factors.columns.tolist(), ["LOW0", "ROC5"])
 
+    def test_load_or_compute_factors_reuses_custom_cache_without_meta(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            default_cache_path = root / "alpha158.parquet"
+            custom_cache_path = root / "extended_factors.parquet"
+            price_path = root / "ohlcv.parquet"
+            dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+            instruments = ["A", "B"]
+            index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+            cached = pd.DataFrame(
+                {
+                    "DB_pb": range(len(index)),
+                    "ROC60": range(100, 100 + len(index)),
+                },
+                index=index,
+            )
+            cached.to_parquet(custom_cache_path)
+            prices = pd.concat(
+                {
+                    "close": pd.DataFrame(
+                        {
+                            "A": [10.0, 10.1, 10.2],
+                            "B": [20.0, 20.1, 20.2],
+                        },
+                        index=dates,
+                    ),
+                },
+                axis=1,
+            )
+            prices.to_parquet(price_path)
+            config = {"factors": {"cache_file": str(default_cache_path)}, "ic": {"price_file": str(price_path)}}
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors") as compute:
+                factors = load_or_compute_factors(
+                    "2024-01-02",
+                    "2024-01-03",
+                    cache_file=custom_cache_path,
+                    columns=["DB_pb"],
+                )
+
+        compute.assert_not_called()
+        self.assertEqual(factors.columns.tolist(), ["DB_pb"])
+        self.assertEqual(set(factors.index.get_level_values("instrument")), set(instruments))
+        self.assertEqual(
+            set(pd.to_datetime(factors.index.get_level_values("datetime")).normalize()),
+            {pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")},
+        )
+
+    def test_load_or_compute_factors_rejects_custom_cache_missing_requested_columns(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            default_cache_path = root / "alpha158.parquet"
+            custom_cache_path = root / "extended_factors.parquet"
+            price_path = root / "ohlcv.parquet"
+            dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+            index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
+            pd.DataFrame({"DB_pb": [1.0, 2.0]}, index=index).to_parquet(custom_cache_path)
+            pd.concat(
+                {
+                    "close": pd.DataFrame({"A": [10.0, 10.1]}, index=dates),
+                },
+                axis=1,
+            ).to_parquet(price_path)
+            config = {"factors": {"cache_file": str(default_cache_path)}, "ic": {"price_file": str(price_path)}}
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors") as compute:
+                with self.assertRaisesRegex(ValueError, "missing requested columns: DB_missing"):
+                    load_or_compute_factors(
+                        "2024-01-02",
+                        "2024-01-03",
+                        cache_file=custom_cache_path,
+                        columns=["DB_pb", "DB_missing"],
+                    )
+            remaining_columns = pd.read_parquet(custom_cache_path).columns.tolist()
+
+        compute.assert_not_called()
+        self.assertEqual(remaining_columns, ["DB_pb"])
+
     def test_load_or_compute_factors_reuses_cache_when_request_starts_before_first_trading_day(self) -> None:
         """函数说明：验证 test_load_or_compute_factors_reuses_cache_when_request_starts_before_first_trading_day 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
@@ -297,6 +379,67 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(len(factors), 2)
         self.assertFalse(cache_path.exists())
         self.assertFalse(cache_path.with_name(f"{cache_path.name}.meta.json").exists())
+
+    def test_load_or_compute_factors_writes_default_cache_when_request_matches_auto_target(self) -> None:
+        """函数说明：验证盘中 auto 目标日前的完整请求会写入默认缓存。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            price_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+            pd.DataFrame({"A": [10.0, 10.1, 10.2]}, index=price_dates).to_parquet(price_path)
+            computed_index = pd.MultiIndex.from_product(
+                [pd.to_datetime(["2024-01-02", "2024-01-03"]), ["A"]],
+                names=["datetime", "instrument"],
+            )
+            computed = pd.DataFrame({"F1": [1.0, 2.0]}, index=computed_index)
+            config = {
+                "data": {"start_date": "2024-01-02", "end_date": "auto"},
+                "factors": {"cache_file": str(cache_path)},
+                "ic": {"price_file": str(price_path)},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.resolve_target_date_value", return_value="2024-01-03"), patch(
+                "src.factor_calculator.compute_alpha158_factors", return_value=computed
+            ) as compute:
+                factors = load_or_compute_factors("2024-01-02", "2024-01-03", cache_file=cache_path)
+
+            compute.assert_called_once()
+            self.assertEqual(len(factors), 2)
+            self.assertTrue(cache_path.exists())
+            meta = json.loads(cache_path.with_name(f"{cache_path.name}.meta.json").read_text(encoding="utf-8"))
+            self.assertEqual(meta["end_date"], "2024-01-03")
+
+    def test_load_or_compute_factors_writes_default_cache_from_first_available_price_date(self) -> None:
+        """函数说明：验证配置历史早于可用价格时不会误判为部分区间。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            price_dates = pd.to_datetime(["2015-01-05", "2015-01-06"])
+            pd.DataFrame({"A": [10.0, 10.1]}, index=price_dates).to_parquet(price_path)
+            computed_index = pd.MultiIndex.from_product(
+                [price_dates, ["A"]],
+                names=["datetime", "instrument"],
+            )
+            computed = pd.DataFrame({"F1": [1.0, 2.0]}, index=computed_index)
+            config = {
+                "data": {"history_start_date": "2012-01-01", "end_date": "auto"},
+                "factors": {"cache_file": str(cache_path)},
+                "ic": {"price_file": str(price_path)},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.resolve_target_date_value", return_value="2015-01-06"), patch(
+                "src.factor_calculator.compute_alpha158_factors", return_value=computed
+            ) as compute:
+                load_or_compute_factors("2015-01-05", "2015-01-06", cache_file=cache_path)
+
+            compute.assert_called_once()
+            self.assertTrue(cache_path.exists())
 
     def test_load_or_compute_factors_recomputes_when_qlib_metadata_changes(self) -> None:
         """函数说明：验证 test_load_or_compute_factors_recomputes_when_qlib_metadata_changes 覆盖的行为场景。"""
