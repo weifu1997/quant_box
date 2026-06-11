@@ -344,6 +344,9 @@ outputs/backtest_equity.csv            回测净值
 outputs/backtest_holdings.csv          回测持仓
 outputs/backtest_trades.csv            回测成交
 outputs/backtest_metrics.json          回测指标
+outputs/backtest_yearly.csv            Backtest yearly return/drawdown summary
+outputs/backtest_run_summary.json      Backtest run inputs, trade, cost, drawdown, and coverage summary
+outputs/logs/backtest_*.log            Backtest run logs
 outputs/optimization_results.csv       参数优化结果
 outputs/auto_run_status.json           自动流程阶段状态
 outputs/data_health_report.json        数据健康检查
@@ -386,6 +389,10 @@ outputs/data_update_progress.json      数据补齐进度
 data/raw/failed_fetches.csv             本轮补数据失败的股票及原因
 outputs/history/YYYY-MM-DD/            每次自动运行的归档快照
 ```
+
+Backtest logs and summaries include run context, sanitized config snapshots, input file/data coverage, price-factor
+alignment, yearly target pass/fail flags, failed-year lists, equity/drawdown/trade/cost summaries, output paths, and
+exception tracebacks when a run fails.
 
 ## 策略与回测要点
 

@@ -163,7 +163,8 @@ def _factor_cache_matches_request(
         if not requested_columns.issubset(cached_columns):
             return False
 
-    if not _factor_cache_meta_matches(config, start_date, end_date, cache_file=cache_file):
+    allow_stale_tail = _allow_stale_factor_tail(config)
+    if not _factor_cache_meta_matches(config, start_date, end_date, cache_file=cache_file, allow_stale_end=allow_stale_tail):
         return False
 
     return _factor_cache_data_matches_request(factors, start_date, end_date, config)
@@ -207,6 +208,7 @@ def _factor_cache_data_matches_request(
     requested_start = pd.Timestamp(start_date).normalize()
     requested_end = pd.Timestamp(end_date).normalize()
     latest_factor_date = factor_dates.max()
+
     price_dates, price_symbols = _price_cache_state(config, start_date, end_date)
     if not price_dates.empty:
         first_required_date = pd.Timestamp(price_dates.min()).normalize()
@@ -215,7 +217,14 @@ def _factor_cache_data_matches_request(
     if factor_dates.min() > first_required_date:
         return False
     if not price_dates.empty and latest_factor_date < price_dates.max():
-        return False
+        if not _can_reuse_stale_factor_tail(latest_factor_date, price_dates, config):
+            return False
+        logger.warning(
+            "Reusing factor cache through %s although price data extends to %s; missing tail sessions=%d.",
+            pd.Timestamp(latest_factor_date).date(),
+            pd.Timestamp(price_dates.max()).date(),
+            int((price_dates > latest_factor_date).sum()),
+        )
 
     if price_symbols:
         factor_symbols = _normalize_symbols(factors.index.get_level_values(1))
@@ -224,7 +233,14 @@ def _factor_cache_data_matches_request(
 
     if price_dates.empty:
         if latest_factor_date < requested_end:
-            return False
+            requested_dates = pd.DatetimeIndex([requested_end])
+            if not _can_reuse_stale_factor_tail(latest_factor_date, requested_dates, config):
+                return False
+            logger.warning(
+                "Reusing factor cache through %s although requested end date is %s.",
+                pd.Timestamp(latest_factor_date).date(),
+                requested_end.date(),
+            )
     return True
 
 
@@ -269,7 +285,13 @@ def _factor_cache_meta_path(cache_path: str | Path | None, config: dict) -> Path
     return path.with_name(f"{path.name}.meta.json")
 
 
-def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cache_file: str | Path | None = None) -> bool:
+def _factor_cache_meta_matches(
+    config: dict,
+    start_date: str,
+    end_date: str,
+    cache_file: str | Path | None = None,
+    allow_stale_end: bool = False,
+) -> bool:
     """函数说明：处理 factor_cache_meta_matches 的内部辅助逻辑。"""
     meta_path = _factor_cache_meta_path(cache_file or config["factors"]["cache_file"], config)
     if not meta_path.exists():
@@ -292,9 +314,36 @@ def _factor_cache_meta_matches(config: dict, start_date: str, end_date: str, cac
         requested_end = pd.Timestamp(expected.get("end_date")).normalize()
     except (TypeError, ValueError):
         return False
-    if cached_start > requested_start or cached_end < requested_end:
+    if cached_start > requested_start:
+        return False
+    if cached_end < requested_end and not allow_stale_end:
         return False
     return True
+
+
+def _allow_stale_factor_tail(config: dict) -> bool:
+    """函数说明：判断是否允许复用只缺尾部少量日期的因子缓存。"""
+    factor_cfg = config.get("factors", {})
+    return bool(factor_cfg.get("allow_stale_tail", True))
+
+
+def _can_reuse_stale_factor_tail(latest_factor_date: pd.Timestamp, required_dates: pd.DatetimeIndex, config: dict) -> bool:
+    """函数说明：判断因子缓存尾部缺口是否仍在安全复用阈值内。"""
+    if not _allow_stale_factor_tail(config):
+        return False
+    required_dates = pd.DatetimeIndex(required_dates).dropna().normalize().unique()
+    if required_dates.empty:
+        return False
+    required_end = pd.Timestamp(required_dates.max()).normalize()
+    latest = pd.Timestamp(latest_factor_date).normalize()
+    if latest >= required_end:
+        return True
+    factor_cfg = config.get("factors", {})
+    max_days = int(factor_cfg.get("max_stale_tail_days", 10))
+    max_sessions = int(factor_cfg.get("max_stale_tail_sessions", 5))
+    calendar_gap = int((required_end - latest).days)
+    session_gap = int((required_dates > latest).sum())
+    return calendar_gap <= max_days and session_gap <= max_sessions
 
 
 def _write_factor_cache(path: Path, factors: pd.DataFrame, start_date: str, end_date: str, config: dict) -> None:

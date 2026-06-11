@@ -67,6 +67,19 @@ class RunFactorColumnTests(unittest.TestCase):
 
         self.assertEqual(columns, ["LOW0", "ROC20"])
 
+    def test_backtest_requested_columns_include_static_factor_blend_weights(self) -> None:
+        with patch("scripts._shared.factor_cache_columns", return_value=["KLEN", "LOW0", "STD20"]):
+            columns = backtest_factor_columns(
+                "unused.parquet",
+                {"factor_group": "factor_blend", "factor_weights": {"KLEN": -1.0, "LOW0": 0.3}},
+                {},
+                {},
+                {"enabled": False},
+                {},
+            )
+
+        self.assertEqual(columns, ["KLEN", "LOW0"])
+
 
 if __name__ == "__main__":
     unittest.main()

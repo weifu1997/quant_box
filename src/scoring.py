@@ -23,6 +23,7 @@ WEIGHTS_CACHE_VERSION = 2
 WEIGHTS_CACHE_SOURCE = "quant_box.scoring.rolling_ic_weights"
 
 DYNAMIC_IC_SELECTOR_GROUPS = {"dynamic_ic_selector", "dynamic_ic"}
+STATIC_FACTOR_BLEND_GROUPS = {"factor_blend", "fixed_factor_blend", "static_factor_blend"}
 DEFAULT_DYNAMIC_IC_CANDIDATES = [
     "factor:LOW0",
     "factor:VMA60",
@@ -66,6 +67,17 @@ def build_strategy_scores(
         scores = _build_dynamic_ic_selector_scores(factors, prices, config, min_obs=min_obs)
         scores = _apply_regime_score_blend(scores, factors, prices, config)
         return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+
+    if factor_group in STATIC_FACTOR_BLEND_GROUPS:
+        scores = composite_factor(factors, method="ic_weighted", factor_weights=_static_factor_weights(strategy_cfg), min_obs=min_obs)
+        if prices is None and _regime_score_adjustment_enabled(config):
+            prices = _load_ic_price_frame(price_path)
+        if prices is not None:
+            scores = _apply_regime_score_blend(scores, factors, prices, config)
+        if _liquidity_filter_enabled(config.get("liquidity_filter", {})):
+            prices = prices if prices is not None else _load_ic_price_frame(price_path)
+            scores = _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+        return scores
 
     if factor_group != "ic_weighted":
         scores = composite_factor(factors, method=factor_group, min_obs=min_obs)
@@ -124,6 +136,17 @@ def build_latest_strategy_scores(
         scores = composite_factor(signed_factors, method="ic_weighted", factor_weights=weights, min_obs=min_obs)
         scores = _apply_regime_score_blend(scores, factors, prices, config)
         return _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+
+    if factor_group in STATIC_FACTOR_BLEND_GROUPS:
+        scores = composite_factor(latest_factors, method="ic_weighted", factor_weights=_static_factor_weights(strategy_cfg), min_obs=min_obs)
+        if prices is None and _regime_score_adjustment_enabled(config):
+            prices = _load_ic_price_frame(price_path)
+        if prices is not None:
+            scores = _apply_regime_score_blend(scores, factors, prices, config)
+        if _liquidity_filter_enabled(config.get("liquidity_filter", {})):
+            prices = prices if prices is not None else _load_ic_price_frame(price_path)
+            scores = _apply_liquidity_filter(scores, prices, config.get("liquidity_filter", {}))
+        return scores
 
     if factor_group != "ic_weighted":
         scores = composite_factor(latest_factors, method=factor_group, min_obs=min_obs)
@@ -230,6 +253,18 @@ def _dynamic_ic_candidates(config: dict) -> list[str]:
     selector_cfg = config.get("dynamic_ic_selector", {})
     candidates = selector_cfg.get("candidates", DEFAULT_DYNAMIC_IC_CANDIDATES)
     return [str(candidate) for candidate in candidates]
+
+
+def _static_factor_weights(strategy_cfg: dict) -> pd.Series:
+    """鍑芥暟璇存槑锛氬鐞?static_factor_weights 鐨勫唴閮ㄨ緟鍔╅€昏緫銆?"""
+    weights = strategy_cfg.get("factor_weights")
+    if not isinstance(weights, dict) or not weights:
+        raise ValueError("factor_blend strategy requires non-empty strategy.factor_weights.")
+    parsed = pd.Series({str(column): float(value) for column, value in weights.items()}, dtype=float)
+    parsed = parsed[parsed != 0]
+    if parsed.empty:
+        raise ValueError("factor_blend strategy.factor_weights must contain at least one non-zero weight.")
+    return parsed
 
 
 def _dynamic_ic_fallback_weights(signed_factors: pd.DataFrame, selector_cfg: dict) -> pd.Series:

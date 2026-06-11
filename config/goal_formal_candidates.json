@@ -4277,5 +4277,62 @@
         "rebalance_on_signal_only": true
       }
     }
+  },
+  {
+    "name": "klen_single_highliq_q20_top7_no_timing_no_stop",
+    "strategy": {
+      "factor_group": "inverse_factor:KLEN",
+      "top_n": 7,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.8
+    },
+    "regime_score_blend": {
+      "enabled": false
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": null,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    },
+    "research_note": "Single fixed-rule KLEN candidate; no yearly strategy switching."
+  },
+  {
+    "name": "fixed_blend_klen_min5_low0_highliq_q20_top7_no_timing",
+    "strategy": {
+      "factor_group": "factor_blend",
+      "factor_weights": {
+        "KLEN": -0.6,
+        "MIN5": -0.2,
+        "LOW0": 0.2
+      },
+      "top_n": 7,
+      "rank_buffer": 20,
+      "rebalance_freq": "monthly",
+      "target_vol": "__remove__"
+    },
+    "liquidity_filter": {
+      "enabled": true,
+      "side": "high",
+      "quantile": 0.8
+    },
+    "regime_score_blend": {
+      "enabled": false
+    },
+    "defensive_timing": false,
+    "backtest": {
+      "stop_loss_pct": null,
+      "take_profit_pct": null,
+      "circuit_breaker_drawdown": null,
+      "rebalance_drift_threshold": 0.02
+    },
+    "research_note": "Single fixed formula; no yearly strategy switching."
   }
 ]

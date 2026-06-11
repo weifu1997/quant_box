@@ -354,17 +354,10 @@ def _price_field_slice(
     if dates.empty or instruments.empty or not _has_price_field(prices, field):
         return pd.DataFrame(index=dates)
 
-    row_slice = prices.reindex(dates)
-    fields = pd.Index([_normalize_price_field(value) for value in row_slice.columns.get_level_values("field")])
-    symbols = pd.Index(row_slice.columns.get_level_values("instrument").astype(str))
-    columns = (fields == field) & symbols.isin(instruments)
-    if not bool(columns.any()):
+    field_frame = _price_field(prices, field)
+    if field_frame.empty:
         return pd.DataFrame(index=dates, columns=instruments)
-    frame = row_slice.loc[:, columns].copy(deep=False)
-    frame.columns = frame.columns.get_level_values("instrument").astype(str)
-    if frame.columns.has_duplicates:
-        frame = frame.loc[:, ~frame.columns.duplicated(keep="last")]
-    return frame.reindex(columns=instruments)
+    return field_frame.reindex(dates).reindex(columns=instruments)
 
 
 def _lookback_with_previous_dates(prices: pd.DataFrame, lookback_dates: pd.DatetimeIndex) -> pd.DatetimeIndex:
@@ -404,6 +397,6 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
 def _numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
     """函数说明：处理 numeric_frame 的内部辅助逻辑。"""
     try:
-        return frame.astype("float64", copy=False)
+        return frame.astype("float64")
     except (TypeError, ValueError):
         return frame.apply(pd.to_numeric, errors="coerce")

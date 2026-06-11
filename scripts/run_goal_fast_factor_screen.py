@@ -6,19 +6,25 @@ import argparse
 from pathlib import Path
 import sys
 import time
+import weakref
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.common import normalize_instrument
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import factor_cache_columns
 from src.fast_monthly_backtest import prepare_fast_period_data, run_fast_prepared_backtest
 from src.scoring import _apply_liquidity_filter, build_strategy_scores
+from src.selection_risk import _base_limit_down_threshold_for_stock, _normalize_price_frame, _price_field
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
-from scripts._shared import dated_output_path
+from scripts._shared import dated_output_path, yearly_stats
+
+_SELECTION_RISK_ELIGIBILITY_CACHE: dict[tuple[int, str], tuple[weakref.ReferenceType[pd.DataFrame], pd.DataFrame]] = {}
 
 
 def main() -> None:
@@ -30,7 +36,8 @@ def main() -> None:
     parser.add_argument("--liquidity-modes", default="none,high:0.80,high:0.65")
     parser.add_argument("--limit-columns", type=int, default=0)
     parser.add_argument("--factor-file", default="", help="Factor parquet file to screen.")
-    parser.add_argument("--columns", default="", help="Comma-separated factor columns to screen; defaults to all columns.")
+    parser.add_argument("--columns", default="", help="Comma-separated factor columns to screen; defaults to all cache columns.")
+    parser.add_argument("--directions", default="long_high,long_low", help="Comma-separated directions: long_high,long_low.")
     args = parser.parse_args()
 
     config = load_config()
@@ -44,10 +51,12 @@ def main() -> None:
     component_columns = _score_component_columns(config, available_columns)
     top_ns = [int(value.strip()) for value in args.top_n.split(",") if value.strip()]
     liquidity_modes = [_parse_liquidity_mode(value) for value in args.liquidity_modes.split(",") if value.strip()]
+    directions = _selected_directions(args.directions)
     trade_price_field = str(config.get("backtest", {}).get("trade_price_field", "close")).lower()
     price_fields = {"close", trade_price_field}
     if any(bool(mode.get("enabled", False)) for mode in liquidity_modes):
         price_fields.add(str(config.get("liquidity_filter", {}).get("field", "amount")).lower())
+    price_fields.update(_selection_risk_price_fields(config))
     prices = _read_price_fields(
         config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"),
         sorted(price_fields),
@@ -69,6 +78,8 @@ def main() -> None:
                 ("long_high", f"factor:{column}"),
                 ("long_low", f"inverse_factor:{column}"),
             ]:
+                if direction_name not in directions:
+                    continue
                 try:
                     directional_scores = build_strategy_scores(
                         factors[score_columns],
@@ -86,6 +97,7 @@ def main() -> None:
                         rows.append(_error_row(column, direction_name, liquidity_mode, str(exc)))
                         continue
                     scores = resample_signals(scores, "monthly")
+                    scores = _filter_scores_by_selection_risk(scores, prices, config)
                     prepared = prepare_fast_period_data(scores, prices, start_date, end_date, trade_price_field=trade_price_field)
                     for top_n in top_ns:
                         bt_config = {
@@ -157,6 +169,139 @@ def _filter_scores(
     return _apply_liquidity_filter(scores, prices, filter_config)
 
 
+def _filter_scores_by_selection_risk(scores: pd.Series, prices: pd.DataFrame, config: dict) -> pd.Series:
+    """鍑芥暟璇存槑锛氳繃婊?filter_scores_by_selection_risk 鐨勫唴閮ㄨ緟鍔╅€昏緫銆?"""
+    risk_cfg = config.get("selection_risk_filter", {})
+    if not isinstance(risk_cfg, dict) or not bool(risk_cfg.get("enabled", False)) or scores.empty:
+        return scores
+    if not isinstance(scores.index, pd.MultiIndex):
+        return scores
+    eligibility = _selection_risk_eligibility(prices, config)
+    if eligibility.empty:
+        return scores.where(False)
+    score_dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0), errors="coerce")).normalize()
+    signal_dates = pd.DatetimeIndex(score_dates.dropna().unique()).sort_values()
+    eligible_by_signal = eligibility.reindex(signal_dates, method="ffill").fillna(False)
+    pieces = []
+    for date, daily in scores.groupby(level=0, sort=True):
+        signal_date = pd.Timestamp(date).normalize()
+        daily_scores = daily.droplevel(0)
+        if signal_date not in eligible_by_signal.index:
+            filtered = daily_scores.where(False)
+        else:
+            eligible_row = eligible_by_signal.loc[signal_date]
+            normalized_instruments = [normalize_instrument(value) for value in daily_scores.index]
+            mask = pd.Series(
+                [bool(eligible_row.get(instrument, False)) for instrument in normalized_instruments],
+                index=daily_scores.index,
+            )
+            filtered = daily_scores.where(mask)
+        filtered.index = pd.MultiIndex.from_arrays([[signal_date] * len(filtered), filtered.index.astype(str)], names=scores.index.names)
+        pieces.append(filtered)
+    return pd.concat(pieces).sort_index().rename(scores.name) if pieces else scores
+
+
+def _selection_risk_eligibility(prices: pd.DataFrame, config: dict) -> pd.DataFrame:
+    cache_key = (id(prices), repr((config.get("selection_risk_filter", {}), config.get("backtest", {}))))
+    cached = _SELECTION_RISK_ELIGIBILITY_CACHE.get(cache_key)
+    if cached is not None and cached[0]() is prices:
+        return cached[1]
+    eligibility = _build_selection_risk_eligibility(prices, config)
+    _SELECTION_RISK_ELIGIBILITY_CACHE[cache_key] = (weakref.ref(prices), eligibility)
+    return eligibility
+
+
+def _build_selection_risk_eligibility(prices: pd.DataFrame, config: dict) -> pd.DataFrame:
+    risk_cfg = config.get("selection_risk_filter", {})
+    if not isinstance(risk_cfg, dict) or not bool(risk_cfg.get("enabled", False)):
+        return pd.DataFrame()
+    normalized_prices = _normalize_price_frame(prices)
+    close = _price_field(normalized_prices, "close")
+    if close.empty:
+        raise ValueError("selection_risk_filter requires a close field in the price panel.")
+    dates = pd.DatetimeIndex(normalized_prices.index).unique().sort_values()
+    instruments = pd.Index(close.columns.astype(str)).drop_duplicates()
+    instruments = instruments[instruments != ""]
+    if dates.empty or instruments.empty:
+        return pd.DataFrame(index=dates, columns=instruments, dtype=bool)
+
+    required_fields = [str(value).strip().lower() for value in risk_cfg.get("required_price_fields", ["open", "close"])]
+    required_fields = [field for field in required_fields if field]
+    require_positive_volume = bool(risk_cfg.get("require_positive_volume", True))
+    max_missing = max(0, int(risk_cfg.get("max_missing_price_sessions", 0)))
+    lookback = max(1, int(risk_cfg.get("lookback_sessions", 5)))
+
+    missing_sessions = pd.DataFrame(False, index=dates, columns=instruments)
+    for field in required_fields:
+        missing_sessions |= _missing_selection_risk_field(normalized_prices, field, dates, instruments)
+    if require_positive_volume:
+        missing_sessions |= _missing_selection_risk_field(normalized_prices, "volume", dates, instruments)
+    missing_count = missing_sessions.rolling(lookback, min_periods=1).sum()
+    eligible = missing_count <= max_missing
+
+    max_limit_down_days = risk_cfg.get("max_limit_down_days", 0)
+    if max_limit_down_days is not None:
+        limit_down = _selection_risk_limit_down_days(normalized_prices, dates, instruments, config, risk_cfg)
+        limit_down_count = limit_down.rolling(lookback, min_periods=1).sum()
+        eligible &= limit_down_count <= max(0, int(max_limit_down_days))
+    return eligible.fillna(False).astype(bool)
+
+
+def _missing_selection_risk_field(
+    prices: pd.DataFrame,
+    field: str,
+    dates: pd.DatetimeIndex,
+    instruments: pd.Index,
+) -> pd.DataFrame:
+    frame = _price_field(prices, field)
+    if frame.empty:
+        return pd.DataFrame(True, index=dates, columns=instruments)
+    values = frame.reindex(dates).reindex(columns=instruments).astype("float64")
+    return values.isna() | (values <= 0)
+
+
+def _selection_risk_limit_down_days(
+    prices: pd.DataFrame,
+    dates: pd.DatetimeIndex,
+    instruments: pd.Index,
+    config: dict,
+    risk_cfg: dict,
+) -> pd.DataFrame:
+    close = _price_field(prices, "close").reindex(dates).reindex(columns=instruments).astype("float64")
+    low = _price_field(prices, "low")
+    probe = low.reindex(dates).reindex(columns=instruments).astype("float64") if not low.empty else close
+    previous_close = close.shift(1)
+    thresholds = pd.Series(
+        [_base_limit_down_threshold_for_stock(str(stock), config) for stock in instruments],
+        index=instruments,
+        dtype="float64",
+    )
+    threshold_frame = pd.DataFrame(np.tile(thresholds.to_numpy(), (len(dates), 1)), index=dates, columns=instruments)
+    is_st = _price_field(prices, "is_st")
+    if not is_st.empty:
+        st_flags = is_st.reindex(dates).reindex(columns=instruments).fillna(False).astype(bool)
+        threshold_frame = threshold_frame.where(~st_flags, float(config.get("backtest", {}).get("st_limit_down_threshold", 0.049)))
+    buffer = max(float(risk_cfg.get("limit_down_buffer", 0.0)), 0.0)
+    threshold_frame = threshold_frame.sub(buffer).clip(lower=0.0)
+    limit_down = probe <= previous_close * (1 - threshold_frame)
+    limit_down &= previous_close.notna() & probe.notna() & (previous_close > 0)
+    return limit_down.fillna(False)
+
+
+def _selection_risk_price_fields(config: dict) -> set[str]:
+    """鍑芥暟璇存槑锛氬鐞?selection_risk_price_fields 鐨勫唴閮ㄨ緟鍔╅€昏緫銆?"""
+    risk_cfg = config.get("selection_risk_filter", {})
+    if not isinstance(risk_cfg, dict) or not bool(risk_cfg.get("enabled", False)):
+        return set()
+    fields = {str(field).strip().lower() for field in risk_cfg.get("required_price_fields", ["open", "close"]) if str(field).strip()}
+    fields.add("close")
+    if bool(risk_cfg.get("require_positive_volume", True)):
+        fields.add("volume")
+    if risk_cfg.get("max_limit_down_days", 0) is not None:
+        fields.add("low")
+    return fields
+
+
 def _parse_liquidity_mode(value: str) -> dict[str, object]:
     """函数说明：解析 parse_liquidity_mode 的内部辅助逻辑。"""
     mode = value.strip().lower()
@@ -166,11 +311,46 @@ def _parse_liquidity_mode(value: str) -> dict[str, object]:
     return {"enabled": True, "side": side, "quantile": float(quantile or 0.20)}
 
 
+def _selected_columns(available_columns: list[str], raw_value: str) -> list[str]:
+    """鍑芥暟璇存槑锛氬鐞?selected_columns 鐨勫唴閮ㄨ緟鍔╅€昏緫銆?"""
+    available_by_lower = {str(column).lower(): str(column) for column in available_columns}
+    selected: list[str] = []
+    missing: list[str] = []
+    for value in raw_value.split(","):
+        name = value.strip()
+        if not name:
+            continue
+        column = available_by_lower.get(name.lower())
+        if column is None:
+            missing.append(name)
+            continue
+        if column not in selected:
+            selected.append(column)
+    if missing:
+        raise ValueError(f"Selected factor columns not found in cache: {', '.join(missing)}")
+    if not selected:
+        raise ValueError("--columns did not contain any usable factor column names.")
+    return selected
+
+
+def _selected_directions(raw_value: str) -> set[str]:
+    selected = {value.strip() for value in raw_value.split(",") if value.strip()}
+    allowed = {"long_high", "long_low"}
+    invalid = sorted(selected - allowed)
+    if invalid:
+        raise ValueError(f"Unsupported directions: {', '.join(invalid)}")
+    return selected or allowed
+
+
 def _liquidity_row(liquidity_mode: dict[str, object]) -> dict[str, object]:
     """函数说明：处理 liquidity_row 的内部辅助逻辑。"""
+    side = str(liquidity_mode.get("side", ""))
+    kept_side = {"low": "higher_liquidity", "high": "lower_liquidity"}.get(side, "")
     return {
         "liquidity_enabled": bool(liquidity_mode.get("enabled", False)),
-        "liquidity_side": liquidity_mode.get("side", ""),
+        "liquidity_side": side,
+        "liquidity_rejected_side": side,
+        "liquidity_kept_side": kept_side,
         "liquidity_quantile": liquidity_mode.get("quantile", ""),
     }
 
@@ -190,7 +370,12 @@ def _error_row(column: str, direction_name: str, liquidity_mode: dict[str, objec
         "year_ann_pass": 0,
         "year_dd_pass": 0,
         "min_yearly_annual_return": 0.0,
+        "yearly_all_pass": False,
+        "yearly_target_gap": 1.0,
+        "min_yearly_annual_return_observed": 0.0,
         "worst_yearly_drawdown": -1.0,
+        "years_below_return_target": "",
+        "years_breaching_drawdown_limit": "",
         "target_gap": 1.0,
         "meets_full_target": False,
     }
@@ -235,17 +420,35 @@ def _yearly_quality_fields(yearly: pd.DataFrame | None, return_threshold: float,
             "year_count": 0,
             "year_ann_pass": 0,
             "year_dd_pass": 0,
+            "yearly_all_pass": False,
+            "yearly_target_gap": 1.0,
             "min_yearly_annual_return": 0.0,
+            "min_yearly_annual_return_observed": 0.0,
             "worst_yearly_drawdown": 0.0,
+            "years_below_return_target": "",
+            "years_breaching_drawdown_limit": "",
         }
     annual = pd.to_numeric(yearly.get("annual_return"), errors="coerce")
     drawdown = pd.to_numeric(yearly.get("max_drawdown"), errors="coerce")
+    years = pd.to_numeric(yearly.get("year"), errors="coerce").astype("Int64")
+    return_fail = (annual < return_threshold).fillna(True)
+    drawdown_fail = (drawdown < drawdown_limit).fillna(True)
+    return_shortfall = (return_threshold - annual).clip(lower=0.0).fillna(return_threshold)
+    drawdown_shortfall = (drawdown_limit - drawdown).clip(lower=0.0).fillna(abs(drawdown_limit))
+    min_annual = float(annual.min()) if not annual.dropna().empty else 0.0
+    worst_drawdown = float(drawdown.min()) if not drawdown.dropna().empty else 0.0
+    year_count = int(len(yearly))
     return {
-        "year_count": int(len(yearly)),
-        "year_ann_pass": int((annual >= return_threshold).sum()),
-        "year_dd_pass": int((drawdown >= drawdown_limit).sum()),
-        "min_yearly_annual_return": float(annual.min()) if not annual.dropna().empty else 0.0,
-        "worst_yearly_drawdown": float(drawdown.min()) if not drawdown.dropna().empty else 0.0,
+        "year_count": year_count,
+        "year_ann_pass": int((~return_fail).sum()),
+        "year_dd_pass": int((~drawdown_fail).sum()),
+        "yearly_all_pass": bool(year_count > 0 and not bool(return_fail.any()) and not bool(drawdown_fail.any())),
+        "yearly_target_gap": float(return_shortfall.sum() + drawdown_shortfall.sum()),
+        "min_yearly_annual_return": min_annual,
+        "min_yearly_annual_return_observed": min_annual,
+        "worst_yearly_drawdown": worst_drawdown,
+        "years_below_return_target": ";".join(str(int(year)) for year in years[return_fail].dropna().to_list()),
+        "years_breaching_drawdown_limit": ";".join(str(int(year)) for year in years[drawdown_fail].dropna().to_list()),
     }
 
 
@@ -286,6 +489,44 @@ def _quality_thresholds(config: dict) -> tuple[float, float, float]:
     return return_threshold, drawdown_limit, turnover_limit
 
 
+def _screen_yearly_quality_fields(yearly: pd.DataFrame, config: dict) -> dict[str, object]:
+    """鍑芥暟璇存槑锛氬鐞?screen_yearly_quality_fields 鐨勫唴閮ㄨ緟鍔╅€昏緫銆?"""
+    return_threshold, drawdown_limit, _turnover_limit = _quality_thresholds(config)
+    if yearly.empty:
+        return {
+            "year_count": 0,
+            "year_ann_pass": 0,
+            "year_dd_pass": 0,
+            "yearly_all_pass": False,
+            "yearly_target_gap": 1.0,
+            "min_yearly_annual_return_observed": 0.0,
+            "worst_yearly_drawdown": 0.0,
+            "years_below_return_target": "",
+            "years_breaching_drawdown_limit": "",
+        }
+
+    rows = yearly.copy()
+    years = pd.to_numeric(rows["year"], errors="coerce").astype("Int64")
+    annual = pd.to_numeric(rows["annual_return"], errors="coerce")
+    drawdown = pd.to_numeric(rows["max_drawdown"], errors="coerce")
+    return_fail = (annual < return_threshold).fillna(True)
+    drawdown_fail = (drawdown < drawdown_limit).fillna(True)
+    return_shortfall = (return_threshold - annual).clip(lower=0.0).fillna(return_threshold)
+    drawdown_shortfall = (drawdown_limit - drawdown).clip(lower=0.0).fillna(abs(drawdown_limit))
+    year_count = int(len(rows))
+    return {
+        "year_count": year_count,
+        "year_ann_pass": int((~return_fail).sum()),
+        "year_dd_pass": int((~drawdown_fail).sum()),
+        "yearly_all_pass": bool(year_count > 0 and not bool(return_fail.any()) and not bool(drawdown_fail.any())),
+        "yearly_target_gap": float(return_shortfall.sum() + drawdown_shortfall.sum()),
+        "min_yearly_annual_return_observed": float(annual.min()) if annual.notna().any() else 0.0,
+        "worst_yearly_drawdown": float(drawdown.min()) if drawdown.notna().any() else 0.0,
+        "years_below_return_target": ";".join(str(int(year)) for year in years[return_fail].dropna().to_list()),
+        "years_breaching_drawdown_limit": ";".join(str(int(year)) for year in years[drawdown_fail].dropna().to_list()),
+    }
+
+
 def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:
     """函数说明：处理 sorted 的内部辅助逻辑。"""
     frame = pd.DataFrame(rows)
@@ -296,15 +537,27 @@ def _sorted(rows: list[dict[str, object]]) -> pd.DataFrame:
         "max_drawdown",
         "sharpe",
         "target_gap",
+        "min_yearly_annual_return",
+        "year_count",
         "year_ann_pass",
         "year_dd_pass",
-        "min_yearly_annual_return",
+        "yearly_target_gap",
+        "min_yearly_annual_return_observed",
         "worst_yearly_drawdown",
     ]:
         frame[column] = pd.to_numeric(frame.get(column, 0.0), errors="coerce")
     return frame.sort_values(
-        ["meets_full_target", "target_gap", "year_ann_pass", "year_dd_pass", "annual_return", "max_drawdown"],
-        ascending=[False, True, False, False, False, False],
+        [
+            "yearly_all_pass",
+            "yearly_target_gap",
+            "year_ann_pass",
+            "year_dd_pass",
+            "meets_full_target",
+            "target_gap",
+            "annual_return",
+            "max_drawdown",
+        ],
+        ascending=[False, True, False, False, False, True, False, False],
     )
 
 

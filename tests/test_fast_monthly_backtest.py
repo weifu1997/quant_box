@@ -149,6 +149,34 @@ class FastMonthlyBacktestTests(unittest.TestCase):
 
         self.assertAlmostEqual(result.equity_curve.iloc[-1], 200.0)
 
+    def test_fast_period_backtest_marks_intraperiod_drawdown_to_market(self) -> None:
+        dates = pd.to_datetime(["2024-02-01", "2024-02-15", "2024-02-29"])
+        prices = pd.DataFrame(
+            {
+                ("close", "A"): [10.0, 5.0, 10.0],
+            },
+            index=dates,
+        )
+        prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(pd.Timestamp("2024-01-31"), "A")], names=["datetime", "instrument"]),
+            name="score",
+        )
+
+        result = run_fast_period_backtest(
+            scores,
+            prices,
+            "2024-01-01",
+            "2024-02-29",
+            {"initial_capital": 100.0, "top_n": 1, "max_turnover": 1},
+        )
+
+        self.assertIn(pd.Timestamp("2024-02-15"), result.equity_curve.index)
+        self.assertAlmostEqual(float(result.equity_curve.loc[pd.Timestamp("2024-02-15")]), 50.0)
+        self.assertAlmostEqual(result.equity_curve.iloc[-1], 100.0)
+        self.assertAlmostEqual(result.metrics["max_drawdown"], -0.5)
+
     def test_fast_period_backtest_rejects_flat_ohlcv_price_frame(self) -> None:
         """函数说明：验证 test_fast_period_backtest_rejects_flat_ohlcv_price_frame 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-31", "2024-02-01", "2024-02-29"])

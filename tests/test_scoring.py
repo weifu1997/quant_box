@@ -68,6 +68,26 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(set(scores.index.get_level_values("instrument")).issubset(set(market.instruments)))
         _assert_scores_have_cross_sectional_dispersion(self, scores)
 
+    def test_build_strategy_scores_supports_static_factor_blend(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [[pd.Timestamp("2024-01-02")], ["A", "B", "C", "D", "E"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"F1": [1, 2, 3, 4, 5], "F2": [5, 4, 3, 2, 1]}, index=index)
+        config = {
+            "strategy": {
+                "factor_group": "factor_blend",
+                "factor_weights": {"F1": 1.0, "F2": -1.0},
+                "min_cross_section_obs": 2,
+            }
+        }
+
+        scores = build_strategy_scores(factors, config)
+        daily = scores.xs(pd.Timestamp("2024-01-02"), level="datetime")
+
+        self.assertEqual(scores.name, "score")
+        self.assertGreater(float(daily.loc["E"]), float(daily.loc["A"]))
+
     def test_dynamic_ic_selector_uses_configured_top_k_weights(self) -> None:
         """函数说明：验证 test_dynamic_ic_selector_uses_configured_top_k_weights 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(

@@ -272,9 +272,16 @@ def _quality_flags(metrics: dict[str, Any], quality_cfg: dict[str, Any]) -> dict
         "annual_turnover_limit": turnover_limit,
         "annual_trade_cost_ratio_limit": cost_limit,
     }
+    year_count = int(metrics.get("year_count", 0) or 0)
+    year_ann_pass = int(metrics.get("year_ann_pass", 0) or 0)
+    year_dd_pass = int(metrics.get("year_dd_pass", 0) or 0)
+    flags["yearly_return_pass"] = bool(year_count > 0 and year_ann_pass >= year_count)
+    flags["yearly_drawdown_pass"] = bool(year_count > 0 and year_dd_pass >= year_count)
+    flags["yearly_all_pass"] = bool(flags["yearly_return_pass"] and flags["yearly_drawdown_pass"])
     flags["is_acceptable"] = bool(
         flags["annual_return_pass"]
         and flags["drawdown_pass"]
+        and flags["yearly_all_pass"]
         and flags["annual_turnover_pass"]
         and flags["annual_trade_cost_ratio_pass"]
         and flags["yearly_annual_return_pass"]
@@ -358,7 +365,8 @@ def _yearly_stats(equity_curve: pd.Series) -> pd.DataFrame:
         if len(group) <= 1 or float(group.iloc[0]) <= 0:
             continue
         total_return = float(group.iloc[-1] / group.iloc[0] - 1.0)
-        annual_return = float((1.0 + total_return) ** (252 / max(len(group) - 1, 1)) - 1.0) if total_return > -1 else -1.0
+        years = max((group.index.max() - group.index.min()).days / 365.25, 1 / 252)
+        annual_return = float((1.0 + total_return) ** (1.0 / years) - 1.0) if total_return > -1 else -1.0
         max_drawdown = float((group / group.cummax() - 1.0).min())
         rows.append({"year": int(year), "days": int(len(group)), "annual_return": annual_return, "max_drawdown": max_drawdown})
     return pd.DataFrame(rows)

@@ -52,7 +52,7 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
                 "annual_trade_cost_ratio": 0.1,
                 "year_count": 3,
                 "year_ann_pass": 3,
-                "year_dd_pass": 3,
+                "year_dd_pass": 2,
             },
             quality,
         )
@@ -60,6 +60,32 @@ class RunGoalFormalCandidatesTests(unittest.TestCase):
         self.assertTrue(passing["is_acceptable"])
         self.assertFalse(failing["is_acceptable"])
         self.assertFalse(failing["drawdown_pass"])
+        self.assertFalse(failing["yearly_drawdown_pass"])
+
+    def test_quality_flags_require_all_years_to_pass(self) -> None:
+        quality = {
+            "min_backtest_annual_return": 0.20,
+            "max_backtest_drawdown_limit": -0.20,
+            "max_annual_turnover": 20.0,
+            "max_annual_trade_cost_ratio": 0.2,
+        }
+
+        flags = _quality_flags(
+            {
+                "annual_return": 0.30,
+                "max_drawdown": -0.10,
+                "annual_turnover": 5.0,
+                "annual_trade_cost_ratio": 0.05,
+                "year_count": 3,
+                "year_ann_pass": 2,
+                "year_dd_pass": 3,
+            },
+            quality,
+        )
+
+        self.assertFalse(flags["yearly_return_pass"])
+        self.assertFalse(flags["yearly_all_pass"])
+        self.assertFalse(flags["is_acceptable"])
 
     def test_quality_flags_require_every_year_to_pass_when_counts_are_available(self) -> None:
         quality = {

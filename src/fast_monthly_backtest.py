@@ -35,6 +35,7 @@ class FastBacktestData:
     """类说明：封装 FastBacktestData 相关数据和行为。"""
     periods: list[FastPeriod]
     price_dates: pd.DatetimeIndex
+    prices: pd.DataFrame
     initial_date: pd.Timestamp | None
 
 
@@ -75,14 +76,14 @@ def prepare_fast_period_data(
     end = pd.Timestamp(end_date).normalize()
     price_dates = pd.DatetimeIndex(trade_prices.index[(trade_prices.index >= start) & (trade_prices.index <= end)]).unique().sort_values()
     if price_dates.empty:
-        return FastBacktestData(periods=[], price_dates=price_dates, initial_date=None)
+        return FastBacktestData(periods=[], price_dates=price_dates, prices=trade_prices, initial_date=None)
 
     signal_dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0)).unique()).sort_values()
     signal_dates = signal_dates[(signal_dates >= start) & (signal_dates <= end)]
     trade_dates = [_next_price_date(price_dates, signal_date) for signal_date in signal_dates]
     schedule = [(signal, trade) for signal, trade in zip(signal_dates, trade_dates) if trade is not None]
     if not schedule:
-        return FastBacktestData(periods=[], price_dates=price_dates, initial_date=pd.Timestamp(price_dates[0]))
+        return FastBacktestData(periods=[], price_dates=price_dates, prices=trade_prices, initial_date=pd.Timestamp(price_dates[0]))
 
     periods: list[FastPeriod] = []
     for idx, (signal_date, trade_date) in enumerate(schedule):
@@ -105,7 +106,7 @@ def prepare_fast_period_data(
             )
         )
     initial_date = periods[0].trade_date if periods else pd.Timestamp(price_dates[0])
-    return FastBacktestData(periods=periods, price_dates=price_dates, initial_date=initial_date)
+    return FastBacktestData(periods=periods, price_dates=price_dates, prices=trade_prices, initial_date=initial_date)
 
 
 def run_fast_prepared_backtest(prepared: FastBacktestData, config: dict[str, Any]) -> FastBacktestResult:
@@ -167,10 +168,18 @@ def run_fast_prepared_backtest(prepared: FastBacktestData, config: dict[str, Any
         period_returns = period.returns.reindex(target_weights.index).fillna(0.0)
         if not target_weights.empty and target_weights.sum() > 0:
             period_return = float((period_returns.reindex(target_weights.index).fillna(0.0) * target_weights).sum())
-            capital *= 1.0 + period_return
+            period_equity = _portfolio_equity_path(capital, target_weights, prepared.prices, trade_date, next_trade_date)
+            period_equity = period_equity[period_equity.index > pd.Timestamp(trade_date)]
+            if period_equity.empty:
+                capital *= 1.0 + period_return
+                equity_rows.append((pd.Timestamp(next_trade_date), capital))
+            else:
+                for date, equity_value in period_equity.items():
+                    equity_rows.append((pd.Timestamp(date), float(equity_value)))
+                capital = float(period_equity.iloc[-1])
         else:
             period_return = 0.0
-        equity_rows.append((pd.Timestamp(next_trade_date), capital))
+            equity_rows.append((pd.Timestamp(next_trade_date), capital))
         for stock, weight in target_weights.items():
             weight_rows.append({"date": trade_date, "signal_date": signal_date, "instrument": stock, "weight": float(weight)})
         current_weights = _drift_weights_after_returns(target_weights, period_returns, period_return)
@@ -361,6 +370,46 @@ def _period_returns(close: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp,
     end_prices = close.loc[end_date].reindex(instruments)
     returns = end_prices.divide(start_prices).sub(1.0)
     return returns.replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def _period_price_path(close: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, instruments: pd.Index) -> pd.DataFrame:
+    """Return available prices for daily mark-to-market inside a fast period."""
+    start_date = _first_index_on_or_after(close.index, start)
+    end_date = _last_index_on_or_before(close.index, end)
+    if start_date is None or end_date is None or end_date <= start_date:
+        return pd.DataFrame()
+    path = close.loc[(close.index >= start_date) & (close.index <= end_date), instruments].copy()
+    return path.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+
+def _portfolio_equity_path(
+    capital: float,
+    weights: pd.Series,
+    close: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.Series:
+    """Mark a fast-period portfolio to market on every available price date."""
+    if close.empty or weights.empty:
+        return pd.Series(dtype=float, name="equity")
+    price_path = _period_price_path(close, start, end, weights.index)
+    if price_path.empty:
+        return pd.Series(dtype=float, name="equity")
+    path = price_path.reindex(columns=weights.index).ffill()
+    if path.empty:
+        return pd.Series(dtype=float, name="equity")
+    start_prices = pd.to_numeric(path.iloc[0], errors="coerce")
+    valid = start_prices.replace(0.0, np.nan).dropna().index
+    if len(valid) == 0:
+        return pd.Series(dtype=float, name="equity")
+    path = path.loc[:, valid].ffill()
+    aligned_weights = pd.to_numeric(weights.reindex(valid), errors="coerce").fillna(0.0)
+    relative_returns = path.divide(start_prices.reindex(valid), axis=1).sub(1.0)
+    relative_returns = relative_returns.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    portfolio_returns = relative_returns.mul(aligned_weights, axis=1).sum(axis=1)
+    equity = float(capital) * (1.0 + portfolio_returns)
+    equity.name = "equity"
+    return equity
 
 
 def _first_index_on_or_after(index: pd.Index, value: pd.Timestamp) -> pd.Timestamp | None:

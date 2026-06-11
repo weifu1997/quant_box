@@ -351,6 +351,110 @@ class FactorCalculatorTests(unittest.TestCase):
         self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).date), set(requested_dates.date))
         self.assertEqual(set(factors.index.get_level_values("instrument")), set(market.instruments))
 
+    def test_load_or_compute_factors_reuses_cache_with_short_stale_tail(self) -> None:
+        """函数说明：验证因子缓存只缺少量尾部日期时不会全量重算。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            provider = root / "qlib"
+            factor_dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+            price_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+            index = pd.MultiIndex.from_product([factor_dates, ["A", "B"]], names=["datetime", "instrument"])
+            cached = pd.DataFrame({"F1": range(len(index))}, index=index)
+            cached.to_parquet(cache_path)
+            prices = pd.concat(
+                {
+                    "close": pd.DataFrame(
+                        {"A": [10.0, 10.1, 10.2, 10.3], "B": [20.0, 20.1, 20.2, 20.3]},
+                        index=price_dates,
+                    ),
+                },
+                axis=1,
+            )
+            prices.to_parquet(price_path)
+            (cache_path.with_name(f"{cache_path.name}.meta.json")).write_text(
+                json.dumps(
+                    {
+                        "provider_uri": str(provider),
+                        "region": "cn",
+                        "instruments": "mainboard_a",
+                        "start_date": "2024-01-02",
+                        "end_date": "2024-01-03",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "factors": {
+                    "cache_file": str(cache_path),
+                    "allow_stale_tail": True,
+                    "max_stale_tail_days": 10,
+                    "max_stale_tail_sessions": 2,
+                },
+                "ic": {"price_file": str(price_path)},
+                "qlib": {"provider_uri": str(provider), "region": "cn", "instruments": "mainboard_a"},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors") as compute:
+                factors = load_or_compute_factors("2024-01-02", "2024-01-05", cache_file=cache_path)
+
+        compute.assert_not_called()
+        self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).date), set(factor_dates.date))
+
+    def test_load_or_compute_factors_recomputes_when_stale_tail_exceeds_limit(self) -> None:
+        """函数说明：验证因子缓存尾部缺口超过阈值时仍然重算。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            provider = root / "qlib"
+            factor_dates = pd.to_datetime(["2024-01-02", "2024-01-03"])
+            price_dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+            cached_index = pd.MultiIndex.from_product([factor_dates, ["A"]], names=["datetime", "instrument"])
+            cached = pd.DataFrame({"F1": [1.0, 2.0]}, index=cached_index)
+            cached.to_parquet(cache_path)
+            pd.concat(
+                {
+                    "close": pd.DataFrame({"A": [10.0, 10.1, 10.2, 10.3]}, index=price_dates),
+                },
+                axis=1,
+            ).to_parquet(price_path)
+            (cache_path.with_name(f"{cache_path.name}.meta.json")).write_text(
+                json.dumps(
+                    {
+                        "provider_uri": str(provider),
+                        "region": "cn",
+                        "instruments": "mainboard_a",
+                        "start_date": "2024-01-02",
+                        "end_date": "2024-01-03",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            recomputed_index = pd.MultiIndex.from_product([price_dates, ["A"]], names=["datetime", "instrument"])
+            recomputed = pd.DataFrame({"F1": range(len(recomputed_index))}, index=recomputed_index)
+            config = {
+                "factors": {
+                    "cache_file": str(cache_path),
+                    "allow_stale_tail": True,
+                    "max_stale_tail_days": 10,
+                    "max_stale_tail_sessions": 1,
+                },
+                "ic": {"price_file": str(price_path)},
+                "qlib": {"provider_uri": str(provider), "region": "cn", "instruments": "mainboard_a"},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors", return_value=recomputed) as compute:
+                factors = load_or_compute_factors("2024-01-02", "2024-01-05", cache_file=cache_path)
+
+        compute.assert_called_once()
+        self.assertEqual(set(pd.to_datetime(factors.index.get_level_values("datetime")).date), set(price_dates.date))
+
     def test_load_or_compute_factors_does_not_overwrite_default_cache_for_partial_range(self) -> None:
         """函数说明：验证 test_load_or_compute_factors_does_not_overwrite_default_cache_for_partial_range 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:

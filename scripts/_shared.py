@@ -11,7 +11,7 @@ import pandas as pd
 
 from src.config_loader import resolve_path
 from src.factor_calculator import factor_cache_columns
-from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS
+from src.scoring import DEFAULT_DYNAMIC_IC_CANDIDATES, DYNAMIC_IC_SELECTOR_GROUPS, STATIC_FACTOR_BLEND_GROUPS
 from src.strategy import factor_columns_for_method
 
 
@@ -66,6 +66,10 @@ def requested_factor_columns(
             method = strip_direction_prefix(str(candidate))
             requested.update(str(column) for column in factor_columns_for_method(available_columns, method))
         return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
+    if group in STATIC_FACTOR_BLEND_GROUPS:
+        weights = strategy_cfg.get("factor_weights", {})
+        requested = [str(column) for column in weights if str(column) in available_columns] if isinstance(weights, dict) else []
+        return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
     requested = [str(column) for column in factor_columns_for_method(available_columns, group)]
     return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
 
@@ -91,8 +95,8 @@ def yearly_stats(equity_curve: pd.Series, config: dict) -> pd.DataFrame:
         if segment.empty:
             continue
         total_return = float(segment.iloc[-1] / segment.iloc[0] - 1) if segment.iloc[0] else 0.0
-        periods = max(len(segment) - 1, 1)
-        annual_return = float((1 + total_return) ** (annual_days / periods) - 1) if total_return > -1 else -1.0
+        years = max((segment.index.max() - segment.index.min()).days / 365.25, 1 / annual_days)
+        annual_return = float((1 + total_return) ** (1 / years) - 1) if total_return > -1 else -1.0
         drawdown = segment / segment.cummax() - 1
         rows.append(
             {
