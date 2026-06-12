@@ -35,7 +35,36 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
     renamed = renamed.dropna(subset=["ts_code", "trade_date", "close"])
     renamed = renamed[renamed["ts_code"] != ""].sort_values(["ts_code", "trade_date"])
     renamed = renamed.drop_duplicates(["ts_code", "trade_date"], keep="last")
+    _validate_daily_ohlcv(renamed)
     return renamed.reset_index(drop=True)
+
+
+def _validate_daily_ohlcv(frame: pd.DataFrame) -> None:
+    """Reject final normalized daily rows with impossible OHLCV values."""
+    if frame.empty:
+        return
+    price_columns = ["open", "high", "low", "close"]
+    price_values = frame[price_columns]
+    missing_prices = price_values.isna().any(axis=1)
+    missing_flows = frame[["vol", "amount"]].isna().any(axis=1)
+    non_positive_prices = price_values.le(0).any(axis=1)
+    negative_flows = frame[["vol", "amount"]].lt(0).any(axis=1)
+    high_below_range = frame["high"] < frame[["open", "low", "close"]].max(axis=1)
+    low_above_range = frame["low"] > frame[["open", "high", "close"]].min(axis=1)
+    invalid = missing_prices | missing_flows | non_positive_prices | negative_flows | high_below_range | low_above_range
+    if not bool(invalid.any()):
+        return
+    examples = ", ".join(_daily_row_labels(frame.loc[invalid].head(5)))
+    raise ValueError(f"Daily data has invalid OHLCV values in {int(invalid.sum())} rows: {examples}")
+
+
+def _daily_row_labels(frame: pd.DataFrame) -> list[str]:
+    """Return compact row labels for validation errors."""
+    labels: list[str] = []
+    for row in frame.itertuples(index=False):
+        date_text = "" if pd.isna(row.trade_date) else pd.Timestamp(row.trade_date).date().isoformat()
+        labels.append(f"{row.ts_code}@{date_text}")
+    return labels
 
 
 def normalize_daily_basic_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -100,6 +129,8 @@ def normalize_st_calendar_frame(df: pd.DataFrame) -> pd.DataFrame:
     is_st = renamed["name"].str.contains(r"\*?ST", case=False, regex=True) | renamed["change_reason"].str.contains(
         r"\bST\b|\*ST|鐗瑰埆澶勭悊", case=False, regex=True
     )
+    st_reason_pattern = r"\bST\b|\*ST|特别处理|退市风险警示|其他风险警示|实施ST|实施\*ST"
+    is_st = is_st | renamed["change_reason"].str.contains(st_reason_pattern, case=False, regex=True)
     renamed = renamed[is_st].copy()
     if renamed.empty:
         return pd.DataFrame(columns=ST_CALENDAR_FIELDS)

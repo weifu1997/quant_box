@@ -54,6 +54,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
+如果需要复现 CI 使用的版本，可以改用直接依赖锁定文件：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+```
+
 如果 `python` 命令不可用，脚本会自动尝试 `py -3`。
 
 ## 配置 Tushare 代理
@@ -349,6 +355,7 @@ outputs/backtest_run_summary.json      Backtest run inputs, trade, cost, drawdow
 outputs/logs/backtest_*.log            Backtest run logs
 outputs/optimization_results.csv       参数优化结果
 outputs/auto_run_status.json           自动流程阶段状态
+outputs/auto_run_metrics.prom          自动流程 Prometheus textfile 指标
 outputs/data_health_report.json        数据健康检查
 outputs/data_health_report.csv         数据健康检查表
 outputs/auto_validation_windows.csv    自动选参逐窗口验证
@@ -388,6 +395,12 @@ outputs/latest_holdings.csv            最新持仓
 outputs/data_update_progress.json      数据补齐进度
 data/raw/failed_fetches.csv             本轮补数据失败的股票及原因
 outputs/history/YYYY-MM-DD/            每次自动运行的归档快照
+```
+
+导出自动流程监控指标：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_auto_status_metrics.py --status-file outputs\auto_run_status.json --output outputs\auto_run_metrics.prom
 ```
 
 Backtest logs and summaries include run context, sanitized config snapshots, input file/data coverage, price-factor
@@ -433,6 +446,8 @@ exception tracebacks when a run fails.
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
+
+GitHub Actions 会在 Windows/Python 3.11 上安装 `requirements-lock.txt`，并运行项目的最小回归测试集。
 
 ## 换电脑迁移数据
 

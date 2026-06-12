@@ -28,13 +28,14 @@ from src.backtest_exposure import (
     _scheduled_exposure_scale,
 )
 from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
-from src.selection_risk import filter_scores_by_selection_risk
+from src.risk_policy import RiskPolicy
 from src.strategy import select_stocks
 
 
 LOT_SIZE = 100
 _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str], dict[str, pd.DataFrame]]] = {}
 _NORMALIZED_PRICE_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], pd.DataFrame]] = {}
+_PRICE_FIELD_CACHE_MAX_SIZE = 8
 _NORMALIZED_PRICE_CACHE_MAX_SIZE = 8
 
 
@@ -92,6 +93,7 @@ def run_backtest(
     max_weight = config.get("max_weight_per_stock")
     max_weight = float(max_weight) if max_weight is not None else None
     rebalance_drift_threshold = float(config.get("rebalance_drift_threshold", 0.0) or 0.0)
+    risk_policy = RiskPolicy(config)
 
     holdings: dict[str, int] = {}
     entry_prices: dict[str, float] = {}
@@ -266,7 +268,7 @@ def run_backtest(
             daily_scores = score_panel.xs(rebalance_signal_date, level=0, drop_level=True)
             daily_scores.index = daily_scores.index.astype(str)
             daily_scores = daily_scores[daily_scores.index.isin(tradability["priced"])]
-            daily_scores = filter_scores_by_selection_risk(daily_scores, prices, rebalance_signal_date, config)
+            daily_scores = risk_policy.filter_selection_scores(daily_scores, prices, rebalance_signal_date)
 
             target_holdings = select_stocks(
                 daily_scores,
@@ -693,9 +695,15 @@ def _field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
     cached = _PRICE_FIELD_CACHE.get(cache_key)
     if cached is None or cached[0]() is not prices:
         _prune_price_field_cache()
+        if len(_PRICE_FIELD_CACHE) >= _PRICE_FIELD_CACHE_MAX_SIZE:
+            _PRICE_FIELD_CACHE.pop(next(iter(_PRICE_FIELD_CACHE)), None)
         field_names = set(prices.columns.get_level_values("field"))
         cache: dict[str, pd.DataFrame] = {}
-        _PRICE_FIELD_CACHE[cache_key] = (weakref.ref(prices), field_names, cache)
+        _PRICE_FIELD_CACHE[cache_key] = (
+            weakref.ref(prices, lambda _ref, key=cache_key: _PRICE_FIELD_CACHE.pop(key, None)),
+            field_names,
+            cache,
+        )
     else:
         _, field_names, cache = cached
     if field in cache:

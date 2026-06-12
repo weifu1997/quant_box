@@ -25,8 +25,8 @@ from src.auto_tuning import apply_strategy_params
 from src.config_loader import load_config, resolve_path
 from src.fast_monthly_backtest import prepare_fast_period_data, run_fast_prepared_backtest
 from src.market_regime import apply_defensive_timing_to_backtest_config
+from src.risk_policy import RiskPolicy
 from src.scoring import build_strategy_scores
-from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
 
@@ -121,7 +121,7 @@ def main() -> None:
                                             _with_timing_probe(run_config, sideways_exposure, bear_exposure),
                                         )
                                         bt_config["rebalance_drift_threshold"] = drift_threshold
-                                        bt_config = apply_selection_constraints_to_backtest_config(bt_config, run_config)
+                                        bt_config = RiskPolicy(run_config).apply_to_backtest_config(bt_config)
                                         result = run_fast_prepared_backtest(prepared, bt_config)
                                         row = {
                                             "approximate": True,

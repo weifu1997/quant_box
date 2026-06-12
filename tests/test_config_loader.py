@@ -8,7 +8,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from src.config_loader import DEFAULT_CONFIG, DEFAULT_CONFIG_PATH, _expand_env_values, load_config
+import yaml
+
+from src.config_loader import DEFAULT_CONFIG, DEFAULT_CONFIG_PATH, _expand_env_values, load_config, validate_config
 
 
 class ConfigLoaderTests(unittest.TestCase):
@@ -55,9 +57,11 @@ class ConfigLoaderTests(unittest.TestCase):
         """函数说明：验证 test_settings_yaml_loads_current_strategy_overrides 覆盖的行为场景。"""
         with self.assertNoLogs("src.config_loader", level="WARNING"):
             config = load_config(DEFAULT_CONFIG_PATH)
+        with DEFAULT_CONFIG_PATH.open("r", encoding="utf-8") as f:
+            raw_config = yaml.safe_load(f) or {}
 
-        self.assertEqual(config["tushare"]["http_url"], "http://your-proxy-server:8020/")
-        self.assertEqual(config["tushare"]["token"], "your_token")
+        self.assertEqual(config["tushare"]["http_url"], raw_config["tushare"]["http_url"])
+        self.assertEqual(config["tushare"]["token"], raw_config["tushare"]["token"])
         self.assertEqual(config["strategy"]["rank_buffer"], 20)
         self.assertEqual(config["strategy"]["factor_group"], "momentum")
         self.assertIsNone(config["strategy"]["circuit_breaker_drawdown"])
@@ -67,7 +71,9 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertFalse(config["regime_score_blend"]["enabled"])
         self.assertTrue(config["selection_risk_filter"]["enabled"])
         self.assertEqual(config["selection_risk_filter"]["lookback_sessions"], 3)
-        self.assertTrue(config["validated_strategy"]["enabled"])
+        self.assertFalse(config["validated_strategy"]["enabled"])
+        self.assertEqual(config["validated_strategy"]["candidate"], "")
+        self.assertIsNone(config["validated_strategy"]["summary_file"])
         self.assertTrue(config["validated_strategy"]["require_is_acceptable"])
         self.assertTrue(config["backtest"]["exposure_schedule_rebalance_on_signal_only"])
         self.assertTrue(config["backtest"]["equity_overlay"]["enabled"])
@@ -95,6 +101,38 @@ unknown_section:
         output = "\n".join(logs.output)
         self.assertIn("strategy.typo_top_n", output)
         self.assertIn("unknown_section", output)
+
+    def test_validate_config_accepts_default_and_current_settings(self) -> None:
+        """函数说明：验证默认配置和当前 settings.yaml 能通过 schema 校验。"""
+        self.assertEqual(validate_config(DEFAULT_CONFIG), [])
+        self.assertEqual(validate_config(load_config(DEFAULT_CONFIG_PATH)), [])
+
+    def test_load_config_rejects_known_section_with_wrong_type(self) -> None:
+        """函数说明：验证已知配置段类型错误会被拒绝。"""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.yaml"
+            path.write_text("strategy: disabled\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "strategy must be a mapping"):
+                load_config(path)
+
+    def test_load_config_rejects_invalid_known_value_range(self) -> None:
+        """函数说明：验证已知配置值范围错误会被拒绝。"""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.yaml"
+            path.write_text(
+                """
+strategy:
+  top_n: 0
+quality:
+  min_raw_coverage: 1.5
+""",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "strategy.top_n must be >= 1") as ctx:
+                load_config(path)
+            self.assertIn("quality.min_raw_coverage must be between 0 and 1", str(ctx.exception))
 
     def test_default_data_config_includes_daily_basic_cache(self) -> None:
         """函数说明：验证 test_default_data_config_includes_daily_basic_cache 覆盖的行为场景。"""
@@ -172,6 +210,8 @@ unknown_section:
         self.assertEqual(quality["min_backtest_annual_return"], 0.20)
         self.assertEqual(quality["max_backtest_drawdown_limit"], -0.20)
         self.assertEqual(quality["max_drawdown_limit"], -0.20)
+        self.assertIsNone(quality["optimizer_timeout_seconds"])
+        self.assertIsNone(quality["max_optimizer_combinations"])
 
     def test_default_ml_strategy_is_configured_but_disabled_for_existing_pipeline(self) -> None:
         """函数说明：验证 test_default_ml_strategy_is_configured_but_disabled_for_existing_pipeline 覆盖的行为场景。"""

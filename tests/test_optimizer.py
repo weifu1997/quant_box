@@ -11,6 +11,7 @@ import pandas as pd
 from src.optimizer import (
     BASELINE_GRID,
     DEFAULT_GRID,
+    OptimizationTimeoutError,
     _optimization_score,
     _sorted_results,
     _slice_factor_dates,
@@ -117,6 +118,73 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(len(result), 4)
         self.assertEqual(set(result["top_n"]), {1, 2})
         self.assertEqual(set(result["rebalance_freq"]), {"daily", "weekly"})
+
+    def test_grid_validation_timeout_error_keeps_partial_results(self) -> None:
+        """函数说明：验证超时错误携带已经完成的验证结果。"""
+        factors, prices = _minimal_walk_forward_data()
+        grid = {
+            "factor_group": ["momentum"],
+            "top_n": [1],
+            "max_turnover": [1],
+            "rank_buffer": [0],
+            "rebalance_freq": ["daily"],
+        }
+        callbacks: list[pd.DataFrame] = []
+
+        class FakeBacktestResult:
+            """类说明：提供 FakeBacktestResult 测试替身实现。"""
+
+            metrics = {"annual_return": 0.1, "sharpe": 1.0, "max_drawdown": -0.05}
+
+        def fake_build_scores(factor_df: pd.DataFrame, config: dict, price_df: pd.DataFrame | None = None) -> pd.Series:
+            """函数说明：处理 fake_build_scores 主要逻辑。"""
+            return factor_df["ROC5"].rename("score")
+
+        with patch("src.optimizer.build_strategy_scores", side_effect=fake_build_scores), patch(
+            "src.optimizer.run_backtest",
+            return_value=FakeBacktestResult(),
+        ), patch("src.optimizer.time.monotonic", side_effect=[0.0, 0.0, 2.0]):
+            with self.assertRaises(OptimizationTimeoutError) as context:
+                run_walk_forward_grid_validation(
+                    factors,
+                    prices,
+                    base_config=_base_backtest_config(),
+                    start_date="2023-01-02",
+                    end_date="2024-02-01",
+                    grid=grid,
+                    train_years=1,
+                    test_months=1,
+                    step_months=12,
+                    use_rolling_ic=False,
+                    deadline=1.0,
+                    on_result=lambda _row, frame: callbacks.append(frame.copy()),
+                )
+
+        error = context.exception
+        self.assertEqual(error.completed_windows, 0)
+        self.assertEqual(error.completed_combinations, 1)
+        self.assertEqual(len(error.partial_results), 1)
+        self.assertEqual(len(callbacks), 1)
+        self.assertIn("timed out", str(error))
+
+    def test_grid_validation_rejects_grid_above_max_combinations(self) -> None:
+        """函数说明：验证网格组合数保护能提前拒绝过大的参数网格。"""
+        factors, prices = _minimal_walk_forward_data()
+
+        with self.assertRaisesRegex(ValueError, "above max_grid_combinations=3"):
+            run_walk_forward_grid_validation(
+                factors,
+                prices,
+                base_config=_base_backtest_config(),
+                start_date="2023-01-02",
+                end_date="2024-02-01",
+                grid=_small_grid(),
+                train_years=1,
+                test_months=1,
+                step_months=12,
+                use_rolling_ic=False,
+                max_grid_combinations=3,
+            )
 
     def test_grid_validation_passes_full_scoring_config(self) -> None:
         """函数说明：验证 test_grid_validation_passes_full_scoring_config 覆盖的行为场景。"""
@@ -328,6 +396,22 @@ def _walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
         factor_columns=("ROC5", "LOW0", "ROC20"),
     )
     return market.factors, market.close
+
+
+def _minimal_walk_forward_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """函数说明：构造轻量 walk-forward 测试数据。"""
+    dates = pd.to_datetime(["2023-01-02", "2024-01-02"])
+    instruments = ["A", "B", "C", "D", "E"]
+    index = pd.MultiIndex.from_product([dates, instruments], names=["datetime", "instrument"])
+    factors = pd.DataFrame({"ROC5": [float(pos) for pos in range(len(index))]}, index=index)
+    prices = pd.DataFrame(
+        {
+            instrument: [10.0 + offset, 10.5 + offset]
+            for offset, instrument in enumerate(instruments)
+        },
+        index=dates,
+    )
+    return factors, prices
 
 
 def _small_grid() -> dict[str, list]:

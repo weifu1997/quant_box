@@ -6,7 +6,17 @@ import unittest
 
 import pandas as pd
 
-from src.strategy import composite_factor, factor_columns_for_method, generate_holdings_by_day, resample_signals, select_stocks
+from src.strategy import (
+    _NORMALIZED_FACTOR_FRAME_CACHE,
+    _normalize_factor_frame_for_scoring,
+    _required_row_mean_factor_count,
+    composite_factor,
+    factor_columns_for_method,
+    generate_holdings_by_day,
+    resample_signals,
+    ROW_MEAN_REQUIRED_FACTOR_FRACTION,
+    select_stocks,
+)
 
 
 class StrategyTests(unittest.TestCase):
@@ -179,6 +189,24 @@ class StrategyTests(unittest.TestCase):
 
         self.assertTrue(pd.notna(scores.loc[(pd.Timestamp("2024-01-02"), "C")]))
 
+    def test_composite_factor_requires_named_fraction_of_valid_factors(self) -> None:
+        """函数说明：验证行均值评分使用命名的有效因子比例阈值。"""
+        factors = pd.DataFrame(
+            {
+                "ROC5": [1.0, 2.0, 3.0, 4.0],
+                "MOM10": [None, 3.0, 4.0, 5.0],
+                "BIAS20": [None, 4.0, 5.0, 6.0],
+            },
+            index=["A", "B", "C", "D"],
+        )
+
+        scores = composite_factor(factors, method="momentum", min_obs=1)
+
+        self.assertEqual(ROW_MEAN_REQUIRED_FACTOR_FRACTION, 0.5)
+        self.assertEqual(_required_row_mean_factor_count(3), 2)
+        self.assertTrue(pd.isna(scores.loc["A"]))
+        self.assertTrue(pd.notna(scores.loc["B"]))
+
     def test_composite_factor_groups_intraday_rows_by_trade_date(self) -> None:
         """函数说明：验证 test_composite_factor_groups_intraday_rows_by_trade_date 覆盖的行为场景。"""
         index = pd.MultiIndex.from_tuples(
@@ -199,6 +227,33 @@ class StrategyTests(unittest.TestCase):
         self.assertGreater(float(daily.loc["A"]), float(daily.loc["B"]))
         self.assertGreater(float(daily.loc["B"]), float(daily.loc["C"]))
 
+    def test_normalize_factor_frame_for_scoring_caches_same_source_frame(self) -> None:
+        """函数说明：验证重复规范化同一个因子框架会复用缓存结果。"""
+        _NORMALIZED_FACTOR_FRAME_CACHE.clear()
+        index = pd.MultiIndex.from_tuples(
+            [
+                (pd.Timestamp("2024-01-02 09:30"), "B"),
+                (pd.Timestamp("2024-01-02 15:00"), "A"),
+                (pd.Timestamp("2024-01-02 09:30"), "A"),
+            ],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame({"ROC5": [2.0, 3.0, 1.0]}, index=index)
+
+        try:
+            first = _normalize_factor_frame_for_scoring(factors)
+            second = _normalize_factor_frame_for_scoring(factors)
+
+            self.assertIs(first, second)
+            self.assertEqual(len(_NORMALIZED_FACTOR_FRAME_CACHE), 1)
+            self.assertEqual(
+                first.index.tolist(),
+                [(pd.Timestamp("2024-01-02"), "A"), (pd.Timestamp("2024-01-02"), "B")],
+            )
+            self.assertAlmostEqual(float(first.loc[(pd.Timestamp("2024-01-02"), "A"), "ROC5"]), 3.0)
+        finally:
+            _NORMALIZED_FACTOR_FRAME_CACHE.clear()
+
     def test_composite_factor_selects_group_columns_before_scoring(self) -> None:
         """函数说明：验证 test_composite_factor_selects_group_columns_before_scoring 覆盖的行为场景。"""
         index = pd.MultiIndex.from_product(
@@ -218,6 +273,13 @@ class StrategyTests(unittest.TestCase):
         expected = composite_factor(factors[["STD5"]], method="volatility")
 
         pd.testing.assert_series_equal(scores, expected)
+
+    def test_factor_columns_for_volume_group_includes_alpha158_volume_families(self) -> None:
+        columns = ["VWAP0", "VMA20", "VSTD20", "WVMA60", "VSUMP20", "VSUMN30", "VSUMD60", "ROC20"]
+
+        selected = factor_columns_for_method(columns, "volume")
+
+        self.assertEqual(selected, ["VWAP0", "VMA20", "VSTD20", "WVMA60", "VSUMP20", "VSUMN30", "VSUMD60"])
 
     def test_composite_factor_supports_inverse_factor_group(self) -> None:
         """函数说明：验证 test_composite_factor_supports_inverse_factor_group 覆盖的行为场景。"""

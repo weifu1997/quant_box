@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,63 @@ def normalize_instrument(value: object) -> str:
     if pd.isna(value):
         return ""
     return str(value).strip().upper()
+
+
+def normalize_instrument_index(values: Iterable[object], name: object | None = None) -> pd.Index:
+    """Normalize instrument labels while preserving input length and order."""
+    return pd.Index([normalize_instrument(value) for value in values], name=name)
+
+
+def normalize_instruments(values: Iterable[object]) -> list[str]:
+    """Normalize instrument labels, dropping blanks and duplicates."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for instrument in normalize_instrument_index(values):
+        if not instrument or instrument in seen:
+            continue
+        result.append(str(instrument))
+        seen.add(str(instrument))
+    return result
+
+
+def normalize_datetime_index(
+    values: object,
+    *,
+    normalize: bool = True,
+    dropna: bool = False,
+    unique: bool = False,
+    sort: bool = False,
+) -> pd.DatetimeIndex:
+    """Parse datetime-like values into a DatetimeIndex with optional cleanup."""
+    dates = pd.DatetimeIndex(pd.to_datetime(values, errors="coerce"))
+    if dropna:
+        dates = dates[~dates.isna()]
+    if normalize:
+        dates = dates.normalize()
+    if unique:
+        dates = dates.unique()
+    if sort:
+        dates = dates.sort_values()
+    return pd.DatetimeIndex(dates)
+
+
+def normalize_multiindex_date_instrument(
+    index: pd.MultiIndex,
+    *,
+    date_level: int | str = 0,
+    instrument_level: int | str = 1,
+    names: list[str | None] | None = None,
+    drop_invalid: bool = True,
+) -> pd.MultiIndex:
+    """Normalize the date/instrument levels of a two-level MultiIndex."""
+    dates = normalize_datetime_index(index.get_level_values(date_level), normalize=True)
+    instruments = normalize_instrument_index(index.get_level_values(instrument_level))
+    if drop_invalid:
+        keep = (~dates.isna()) & (instruments != "")
+        dates = dates[keep]
+        instruments = instruments[keep]
+    output_names = names or [index.names[0], index.names[1]]
+    return pd.MultiIndex.from_arrays([dates, instruments], names=output_names)
 
 
 def looks_like_field_table(columns: pd.Index, price_fields: set[str] | frozenset[str] = PRICE_FIELD_COLUMNS) -> bool:

@@ -26,8 +26,8 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.fundamental_data import normalize_dividend_frame, normalize_fina_indicator_frame
 from src.market_regime import _benchmark_close, apply_defensive_timing_to_backtest_config, detect_market_regime, regime_for_date
+from src.risk_policy import RiskPolicy
 from src.scoring import _apply_liquidity_filter
-from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import composite_factor, resample_signals
 from src.trading_calendar import resolve_target_date_value
 
@@ -154,7 +154,7 @@ def main() -> None:
     if args.no_defensive_timing:
         timing_config.setdefault("defensive_timing", {})["enabled"] = False
     bt_config = apply_defensive_timing_to_backtest_config(bt_config, prices, timing_config)
-    bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
+    bt_config = RiskPolicy(config).apply_to_backtest_config(bt_config)
     result = run_backtest(scores, prices, start_date, end_date, bt_config)
     yearly = yearly_stats(result.equity_curve, bt_config)
     return_target, drawdown_limit = goal_thresholds(config)

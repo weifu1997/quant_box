@@ -6,6 +6,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from itertools import product
 import logging
+import time
 from typing import Iterable
 
 import numpy as np
@@ -51,6 +52,22 @@ BASELINE_GRID = {
 }
 
 
+class OptimizationTimeoutError(TimeoutError):
+    """Raised when walk-forward validation exceeds its configured time budget."""
+
+    def __init__(
+        self,
+        message: str,
+        partial_results: pd.DataFrame | None = None,
+        completed_windows: int = 0,
+        completed_combinations: int = 0,
+    ) -> None:
+        super().__init__(message)
+        self.partial_results = partial_results if partial_results is not None else pd.DataFrame()
+        self.completed_windows = int(completed_windows)
+        self.completed_combinations = int(completed_combinations)
+
+
 def run_parameter_grid(
     factor_df: pd.DataFrame,
     price_df: pd.DataFrame,
@@ -82,7 +99,7 @@ def run_parameter_grid(
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
 ) -> pd.DataFrame:
     """函数说明：运行 run_parameter_grid 相关流程。"""
-    grid = grid or DEFAULT_GRID
+    grid = {key: list(values) for key, values in (grid or DEFAULT_GRID).items()}
     dynamic_weights = None
     if "ic_weighted" in set(grid.get("factor_group", [])) and use_rolling_ic:
         rolling_ic = calculate_rolling_ic(
@@ -348,17 +365,26 @@ def run_walk_forward_grid_validation(
     calmar_weight: float = 0.25,
     scoring_config: dict | None = None,
     on_result: Callable[[dict[str, object], pd.DataFrame], None] | None = None,
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
+    max_grid_combinations: int | None = None,
 ) -> pd.DataFrame:
     """Evaluate every parameter combination on rolling out-of-sample windows."""
     price_df = _normalize_window_price_frame(price_df)
     grid = grid or DEFAULT_GRID
     keys = list(grid)
+    grid_combinations = _grid_combination_count(grid)
+    if max_grid_combinations is not None and grid_combinations > int(max_grid_combinations):
+        raise ValueError(f"Optimization grid has {grid_combinations} combinations, above max_grid_combinations={max_grid_combinations}.")
+    deadline = _resolve_deadline(timeout_seconds, deadline)
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
     rows: list[dict[str, object]] = []
     train_start = start
+    completed_windows = 0
 
     while True:
+        _check_optimization_deadline(deadline, rows, completed_windows)
         train_end = train_start + pd.DateOffset(years=train_years) - pd.Timedelta(days=1)
         test_start = train_end + pd.Timedelta(days=1)
         test_end = min(test_start + pd.DateOffset(months=test_months) - pd.Timedelta(days=1), end)
@@ -409,6 +435,7 @@ def run_walk_forward_grid_validation(
 
         score_cache: dict[tuple[str, str], pd.Series] = {}
         for values in product(*(grid[key] for key in keys)):
+            _check_optimization_deadline(deadline, rows, completed_windows)
             params = dict(zip(keys, values))
             factor_group = str(params["factor_group"])
             rebalance_freq = str(params.get("rebalance_freq", "daily"))
@@ -462,9 +489,43 @@ def run_walk_forward_grid_validation(
             rows.append(row)
             if on_result is not None:
                 on_result(row, pd.DataFrame(rows))
+            _check_optimization_deadline(deadline, rows, completed_windows)
+        completed_windows += 1
         train_start += pd.DateOffset(months=step_months)
 
     return pd.DataFrame(rows)
+
+
+def _resolve_deadline(timeout_seconds: float | None, deadline: float | None) -> float | None:
+    """Return an absolute monotonic deadline, or None when timeout is disabled."""
+    if deadline is not None:
+        return float(deadline)
+    if timeout_seconds is None:
+        return None
+    seconds = float(timeout_seconds)
+    if seconds <= 0:
+        return None
+    return time.monotonic() + seconds
+
+
+def _check_optimization_deadline(deadline: float | None, rows: list[dict[str, object]], completed_windows: int) -> None:
+    """Raise with partial validation rows when the configured deadline has passed."""
+    if deadline is None or time.monotonic() < deadline:
+        return
+    partial = pd.DataFrame(rows)
+    message = (
+        "Walk-forward grid validation timed out "
+        f"after {completed_windows} completed windows and {len(rows)} completed combinations."
+    )
+    raise OptimizationTimeoutError(message, partial, completed_windows=completed_windows, completed_combinations=len(rows))
+
+
+def _grid_combination_count(grid: dict[str, Iterable]) -> int:
+    """Return the number of parameter combinations in a grid."""
+    total = 1
+    for values in grid.values():
+        total *= len(values)
+    return int(total)
 
 
 def _slice_factor_dates(factor_df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:

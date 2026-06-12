@@ -18,6 +18,8 @@ data/qlib_data/*
 !data/qlib_data/.gitkeep
 data/factors/*
 !data/factors/.gitkeep
+data/fundamentals/*
+!data/fundamentals/.gitkeep
 data/prices/*
 !data/prices/.gitkeep
 outputs/*

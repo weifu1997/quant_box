@@ -10,7 +10,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.signal_generator import generate_signal, read_previous_holdings, save_candidate_signal, save_signal
+from src.config_loader import load_config
+from src.signal_generator import generate_signal, read_signal_previous_holdings, save_candidate_signal, save_signal
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -28,15 +29,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    previous = args.previous_holdings if args.previous_holdings is not None else read_previous_holdings()
-    signal_df, holdings = generate_signal(args.date, previous_holdings=previous)
+    config = load_config()
+    if args.previous_holdings is not None:
+        previous = args.previous_holdings
+        previous_source = "command_line"
+    else:
+        previous, previous_source = read_signal_previous_holdings(config)
+    logger.info("Previous holdings source: %s (%d instruments)", previous_source, len(previous))
+    signal_df, holdings = generate_signal(args.date, previous_holdings=previous, config=config)
     output_date = _signal_output_date(signal_df, args.date)
     if args.official:
-        signal_path, holdings_path = save_signal(signal_df, holdings, output_date)
+        signal_path, holdings_path = save_signal(signal_df, holdings, output_date, config=config)
         logger.info("Official signal saved to %s", signal_path)
         logger.info("Latest holdings saved to %s", holdings_path)
     else:
-        signal_path, holdings_path = save_candidate_signal(signal_df, holdings, output_date)
+        signal_path, holdings_path = save_candidate_signal(signal_df, holdings, output_date, config=config)
         logger.info("Candidate signal saved to %s", signal_path)
         logger.info("Candidate holdings saved to %s", holdings_path)
 

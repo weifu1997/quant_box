@@ -1,0 +1,17 @@
+# Direct dependency lock for quant_box.
+# Generated from the project virtual environment on 2026-06-11.
+# Refresh by updating requirements.txt, reinstalling the venv, then pinning the direct dependencies below.
+
+pandas==3.0.3
+numpy==2.4.6
+scipy==1.17.1
+lightgbm==4.6.0
+scikit-learn==1.9.0
+PyYAML==6.0.3
+requests==2.34.2
+pyarrow==24.0.0
+pyqlib==0.9.7
+a-trade-calendar==2028.4.11.1
+protobuf==3.20.3
+setuptools==69.5.1
+pytest==9.0.3

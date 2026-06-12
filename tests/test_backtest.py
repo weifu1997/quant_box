@@ -12,6 +12,7 @@ import pandas as pd
 from src.backtest import (
     _NORMALIZED_PRICE_CACHE,
     _PRICE_FIELD_CACHE,
+    _PRICE_FIELD_CACHE_MAX_SIZE,
     _field,
     _lot_size,
     _max_drawdown_duration,
@@ -288,6 +289,24 @@ class BacktestTests(unittest.TestCase):
             self.assertNotIn(dead_key, _PRICE_FIELD_CACHE)
         finally:
             _PRICE_FIELD_CACHE.pop(dead_key, None)
+
+    def test_price_field_cache_is_size_limited(self) -> None:
+        """函数说明：验证价格字段缓存会限制源面板数量。"""
+        _PRICE_FIELD_CACHE.clear()
+        frames = []
+        try:
+            for idx in range(_PRICE_FIELD_CACHE_MAX_SIZE + 2):
+                prices = pd.concat(
+                    {"close": pd.DataFrame({f"A{idx}": [1.0]}, index=[pd.Timestamp("2024-01-02")])},
+                    axis=1,
+                )
+                prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+                frames.append(prices)
+                _field(prices, "close")
+
+            self.assertLessEqual(len(_PRICE_FIELD_CACHE), _PRICE_FIELD_CACHE_MAX_SIZE)
+        finally:
+            _PRICE_FIELD_CACHE.clear()
 
     def test_run_backtest_produces_equity_curve(self) -> None:
         """函数说明：验证 test_run_backtest_produces_equity_curve 覆盖的行为场景。"""

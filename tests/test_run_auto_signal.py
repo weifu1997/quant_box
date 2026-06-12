@@ -49,6 +49,26 @@ class RunAutoSignalTests(unittest.TestCase):
 
         self.assertEqual(output_date, "2024-01-03")
 
+    def test_backtest_stage_skip_writes_metrics_and_quality(self) -> None:
+        """Verify the extracted backtest stage keeps skip-backtest artifacts stable."""
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            prices = pd.read_parquet(config["ic"]["price_file"])
+            args = SimpleNamespace(skip_backtest=True, allow_low_quality=False, start_date="2024-01-01")
+            status = module._new_status()
+            artifacts: list[Path] = []
+
+            result = module._run_backtest_stage(args, config, factors, prices, "2024-01-04", root, status, artifacts)
+
+            metrics = json.loads((root / "auto_backtest_metrics.json").read_text(encoding="utf-8"))
+            self.assertTrue(metrics["backtest_skipped"])
+            self.assertTrue((root / "auto_backtest_quality.json").exists())
+            self.assertEqual(result.research_diagnostics["issues"], ["backtest_skipped"])
+            self.assertIn(root / "auto_backtest_metrics.json", artifacts)
+            self.assertEqual([stage["state"] for stage in status["stages"] if stage["name"] == "backtest"], ["skipped"])
+
     def test_skip_optimize_defaults_to_candidate_outputs(self) -> None:
         """函数说明：验证 test_skip_optimize_defaults_to_candidate_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
@@ -70,6 +90,8 @@ class RunAutoSignalTests(unittest.TestCase):
             status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
             self.assertEqual(status["status"], "blocked")
             self.assertIn("params:parameter_validation_skipped", status["block_reasons"])
+            json_report = json.loads((root / "auto_signal_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(json_report["previous_holdings_source"], "outputs.holdings_file")
             report = (root / "daily_signal_report.md").read_text(encoding="utf-8")
             self.assertIn("## Data Governance", report)
             self.assertIn("## Execution Loop", report)
@@ -475,6 +497,69 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertIn("max_drawdown", ",".join(comparison["failure_driver"].astype(str).tolist()))
             yearly = pd.read_csv(root / "auto_backtest_yearly_breakdown.csv")
             self.assertEqual(yearly["year"].tolist(), [2024])
+
+    def test_auto_signal_writes_partial_validation_outputs_on_optimizer_timeout(self) -> None:
+        """函数说明：验证优化超时时自动流程会保留部分验证结果。"""
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            partial_validation = pd.DataFrame(
+                [
+                    {
+                        "factor_group": "momentum",
+                        "top_n": 1,
+                        "max_turnover": 1,
+                        "rank_buffer": 0,
+                        "rebalance_freq": "daily",
+                        "rebalance_drift_threshold": 0.02,
+                        "optimization_score": 1.0,
+                        "annual_return": 0.10,
+                        "sharpe": 1.0,
+                        "max_drawdown": -0.05,
+                        "annual_turnover": 1.0,
+                        "annual_trade_cost_ratio": 0.01,
+                    }
+                ]
+            )
+            timeout = module.OptimizationTimeoutError(
+                "Walk-forward grid validation timed out after 0 completed windows and 1 completed combinations.",
+                partial_results=partial_validation,
+                completed_windows=0,
+                completed_combinations=1,
+            )
+
+            with self.assertRaises(module.OptimizationTimeoutError):
+                with _patched_auto_run(
+                    module,
+                    config,
+                    factors,
+                    [
+                        "run_auto_signal.py",
+                        "--skip-update",
+                        "--skip-convert",
+                        "--skip-backtest",
+                        "--no-archive",
+                        "--optimize-timeout-seconds",
+                        "30",
+                        "--max-optimize-combinations",
+                        "8",
+                    ],
+                ), patch.object(module, "run_walk_forward_grid_validation", side_effect=timeout) as validate:
+                    module.main()
+
+            kwargs = validate.call_args.kwargs
+            self.assertEqual(kwargs["timeout_seconds"], 30)
+            self.assertEqual(kwargs["max_grid_combinations"], 8)
+            validation = pd.read_csv(root / "auto_validation_windows.csv")
+            self.assertEqual(len(validation), 1)
+            summary = pd.read_csv(root / "auto_parameter_summary.csv")
+            self.assertEqual(len(summary), 1)
+            status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["status"], "failed")
+            self.assertEqual(status["optimizer_timeout"]["completed_combinations"], 1)
+            timeout_stages = [stage for stage in status["stages"] if stage["name"] == "optimize_params" and stage["state"] == "timeout"]
+            self.assertEqual(len(timeout_stages), 1)
 
     def test_no_acceptable_optimized_params_falls_back_to_current_config(self) -> None:
         """函数说明：验证 test_no_acceptable_optimized_params_falls_back_to_current_config 覆盖的行为场景。"""

@@ -7,7 +7,7 @@ import logging
 import os
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -334,6 +334,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_backtest_drawdown_limit": -0.20,
         "max_annual_turnover": 20.0,
         "max_annual_trade_cost_ratio": 0.2,
+        "optimizer_timeout_seconds": None,
+        "max_optimizer_combinations": None,
     },
     "account": {
         "file": "config/account.yaml",
@@ -396,7 +398,36 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             local_config = yaml.safe_load(f) or {}
         _warn_unknown_config_keys(local_config)
         config = _deep_merge(config, local_config)
-    return _expand_env_values(config)
+    config = _expand_env_values(config)
+    errors = validate_config(config)
+    if errors:
+        formatted = "\n- ".join(errors)
+        raise ValueError(f"Invalid config:\n- {formatted}")
+    return config
+
+
+def validate_config(config: dict[str, Any]) -> list[str]:
+    """函数说明：校验已合并配置的结构、类型和关键取值范围。"""
+    errors: list[str] = []
+    if not isinstance(config, dict):
+        return ["config must be a mapping"]
+
+    for key, default_value in DEFAULT_CONFIG.items():
+        if isinstance(default_value, dict):
+            value = config.get(key)
+            if not isinstance(value, dict):
+                errors.append(f"{key} must be a mapping")
+
+    for key_path, validator in _CONFIG_VALIDATORS.items():
+        value = _get_nested_config_value(config, key_path)
+        if value is _MISSING:
+            errors.append(f"{key_path} is required")
+            continue
+        message = validator(value)
+        if message:
+            errors.append(f"{key_path} {message}")
+
+    return errors
 
 
 def resolve_path(value: str | Path) -> Path:
@@ -429,6 +460,259 @@ def _warn_unknown_config_keys(override: dict[str, Any], schema: dict[str, Any] |
         schema_value = schema[key]
         if isinstance(value, dict) and isinstance(schema_value, dict):
             _warn_unknown_config_keys(value, schema_value, key_path)
+
+
+_MISSING = object()
+_Validator = Callable[[Any], str | None]
+
+
+def _get_nested_config_value(config: dict[str, Any], key_path: str) -> Any:
+    value: Any = config
+    for key in key_path.split("."):
+        if not isinstance(value, dict) or key not in value:
+            return _MISSING
+        value = value[key]
+    return value
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _optional(validator: _Validator) -> _Validator:
+    def _validate(value: Any) -> str | None:
+        if value is None:
+            return None
+        return validator(value)
+
+    return _validate
+
+
+def _bool_value(value: Any) -> str | None:
+    return None if isinstance(value, bool) else "must be a boolean"
+
+
+def _string_value(value: Any) -> str | None:
+    return None if isinstance(value, (str, Path)) else "must be a string"
+
+
+def _int_at_least(min_value: int) -> _Validator:
+    def _validate(value: Any) -> str | None:
+        if not isinstance(value, int) or isinstance(value, bool):
+            return "must be an integer"
+        if value < min_value:
+            return f"must be >= {min_value}"
+        return None
+
+    return _validate
+
+
+def _number_at_least(min_value: float) -> _Validator:
+    def _validate(value: Any) -> str | None:
+        if not _is_number(value):
+            return "must be a number"
+        if float(value) < min_value:
+            return f"must be >= {min_value:g}"
+        return None
+
+    return _validate
+
+
+def _number_between(min_value: float, max_value: float) -> _Validator:
+    def _validate(value: Any) -> str | None:
+        if not _is_number(value):
+            return "must be a number"
+        number = float(value)
+        if number < min_value or number > max_value:
+            return f"must be between {min_value:g} and {max_value:g}"
+        return None
+
+    return _validate
+
+
+def _list_of_strings(value: Any) -> str | None:
+    if not isinstance(value, list):
+        return "must be a list"
+    if any(not isinstance(item, str) for item in value):
+        return "must contain only strings"
+    return None
+
+
+_CONFIG_VALIDATORS: dict[str, _Validator] = {
+    "tushare.http_url": _string_value,
+    "tushare.token": _string_value,
+    "tushare.timeout": _number_at_least(0),
+    "data.start_date": _string_value,
+    "data.history_start_date": _string_value,
+    "data.end_date": _string_value,
+    "data.target_date_cutoff_time": _string_value,
+    "data.timezone": _string_value,
+    "data.raw_dir": _string_value,
+    "data.constituents_file": _string_value,
+    "data.daily_basic_file": _string_value,
+    "data.trade_calendar_lookback_days": _int_at_least(1),
+    "data.daily_batch_size": _int_at_least(1),
+    "data.daily_window_days": _int_at_least(1),
+    "data.max_new_symbols_per_run": _optional(_int_at_least(1)),
+    "data.update_chunk_size": _int_at_least(1),
+    "data.update_sleep_seconds": _number_at_least(0),
+    "data.retries": _int_at_least(0),
+    "data.retry_max_wait": _number_at_least(0),
+    "data.exclude_st": _bool_value,
+    "qlib.provider_uri": _string_value,
+    "factors.cache_file": _string_value,
+    "fundamentals.fallback_lag_days": _int_at_least(0),
+    "fundamentals.update_sleep_seconds": _number_at_least(0),
+    "fundamental_screen.include_in_auto_report": _bool_value,
+    "fundamental_screen.auto_report_top_n": _int_at_least(1),
+    "fundamental_screen.top_n": _int_at_least(1),
+    "fundamental_screen.min_positive_dividend_years": _int_at_least(0),
+    "fundamental_screen.dividend_lookback_years": _int_at_least(1),
+    "validated_strategy.enabled": _bool_value,
+    "validated_strategy.candidate": _string_value,
+    "validated_strategy.summary_file": _optional(_string_value),
+    "validated_strategy.require_is_acceptable": _bool_value,
+    "ml_strategy.enabled": _bool_value,
+    "ml_strategy.train_years": _int_at_least(1),
+    "ml_strategy.label_horizon_sessions": _int_at_least(1),
+    "ml_strategy.label_volatility_floor": _number_at_least(0),
+    "ml_strategy.label_min_cross_section_obs": _int_at_least(1),
+    "ml_strategy.label_top_quantile": _number_between(0, 1),
+    "ml_strategy.label_bottom_quantile": _number_between(0, 1),
+    "ml_strategy.ensemble_window": _int_at_least(1),
+    "ml_strategy.feature_columns": _optional(_list_of_strings),
+    "ml_strategy.feature_limit": _int_at_least(1),
+    "ml_strategy.min_price_history_sessions": _int_at_least(1),
+    "ml_strategy.min_feature_fraction": _number_between(0, 1),
+    "ml_strategy.min_train_rows": _int_at_least(1),
+    "ml_strategy.max_train_rows": _int_at_least(1),
+    "market_regime.enabled": _bool_value,
+    "market_regime.ma_window": _int_at_least(1),
+    "market_regime.momentum_window": _int_at_least(1),
+    "market_regime.volatility_window": _int_at_least(1),
+    "market_regime.min_periods": _int_at_least(1),
+    "market_regime.high_volatility_quantile": _number_between(0, 1),
+    "market_regime.lag_days": _int_at_least(0),
+    "reporting_regime.enabled": _bool_value,
+    "reporting_regime.lag_days": _int_at_least(0),
+    "defensive_timing.enabled": _bool_value,
+    "defensive_timing.bull_exposure": _number_between(0, 1),
+    "defensive_timing.sideways_exposure": _number_between(0, 1),
+    "defensive_timing.bear_exposure": _number_between(0, 1),
+    "defensive_timing.exposure_rebalance_threshold": _number_between(0, 1),
+    "neutralization.enabled": _bool_value,
+    "neutralization.min_obs": _int_at_least(1),
+    "feature_extensions.enabled": _bool_value,
+    "feature_extensions.daily_basic": _bool_value,
+    "feature_extensions.price_derived": _bool_value,
+    "feature_extensions.daily_basic_lag_days": _int_at_least(0),
+    "feature_extensions.price_feature_lag_sessions": _int_at_least(0),
+    "feature_extensions.daily_basic_fields": _list_of_strings,
+    "feature_extensions.price_features": _list_of_strings,
+    "feature_extensions.min_coverage": _number_between(0, 1),
+    "regime_score_blend.enabled": _bool_value,
+    "regime_score_blend.bull_defensive_weight": _number_between(0, 1),
+    "regime_score_blend.sideways_defensive_weight": _number_between(0, 1),
+    "regime_score_blend.bear_defensive_weight": _number_between(0, 1),
+    "regime_score_filter.enabled": _bool_value,
+    "ic.window": _int_at_least(1),
+    "ic.min_periods": _int_at_least(1),
+    "ic.min_abs_ic": _number_at_least(0),
+    "ic.corr_threshold": _number_between(0, 1),
+    "ic.correlation_rebalance_sessions": _int_at_least(1),
+    "ic.top_k": _int_at_least(1),
+    "ic.weight_smoothing": _number_between(0, 1),
+    "ic.max_weight_turnover": _number_between(0, 1),
+    "ic.price_file": _string_value,
+    "ic.weights_cache_enabled": _bool_value,
+    "ic.weights_cache_file": _string_value,
+    "dynamic_ic_selector.candidates": _list_of_strings,
+    "dynamic_ic_selector.horizon": _int_at_least(1),
+    "dynamic_ic_selector.window": _int_at_least(1),
+    "dynamic_ic_selector.min_periods": _int_at_least(1),
+    "dynamic_ic_selector.min_obs": _int_at_least(1),
+    "dynamic_ic_selector.top_k": _int_at_least(1),
+    "liquidity_filter.enabled": _bool_value,
+    "liquidity_filter.field": _string_value,
+    "liquidity_filter.window": _int_at_least(1),
+    "liquidity_filter.min_periods": _int_at_least(1),
+    "liquidity_filter.quantile": _number_between(0, 1),
+    "liquidity_filter.side": _string_value,
+    "selection_risk_filter.enabled": _bool_value,
+    "selection_risk_filter.lookback_sessions": _int_at_least(1),
+    "selection_risk_filter.required_price_fields": _list_of_strings,
+    "selection_risk_filter.max_missing_price_sessions": _int_at_least(0),
+    "selection_risk_filter.max_limit_down_days": _int_at_least(0),
+    "selection_risk_filter.limit_down_buffer": _number_at_least(0),
+    "selection_risk_filter.require_positive_volume": _bool_value,
+    "strategy.top_n": _int_at_least(1),
+    "strategy.max_turnover": _int_at_least(0),
+    "strategy.rank_buffer": _int_at_least(0),
+    "strategy.factor_group": _string_value,
+    "strategy.rebalance_freq": _string_value,
+    "strategy.stop_loss_pct": _optional(_number_between(0, 1)),
+    "strategy.take_profit_pct": _optional(_number_at_least(0)),
+    "strategy.circuit_breaker_drawdown": _optional(_number_between(0, 1)),
+    "strategy.circuit_breaker_cooldown_days": _int_at_least(0),
+    "strategy.circuit_breaker_target_exposure": _number_between(0, 1),
+    "strategy.max_industry_weight": _optional(_number_between(0, 1)),
+    "strategy.rebalance_drift_threshold": _number_between(0, 1),
+    "strategy.min_cross_section_obs": _int_at_least(1),
+    "backtest.initial_capital": _number_at_least(0),
+    "backtest.commission": _number_between(0, 1),
+    "backtest.min_commission_per_order": _number_at_least(0),
+    "backtest.stamp_tax": _number_between(0, 1),
+    "backtest.transfer_fee": _number_between(0, 1),
+    "backtest.annual_trading_days": _int_at_least(1),
+    "backtest.trade_price_field": _string_value,
+    "backtest.valuation_price_field": _string_value,
+    "backtest.slippage": _number_between(0, 1),
+    "backtest.dynamic_slippage_enabled": _bool_value,
+    "backtest.dynamic_slippage_threshold": _number_between(0, 1),
+    "backtest.dynamic_slippage_multiplier": _number_at_least(0),
+    "backtest.max_slippage": _number_between(0, 1),
+    "backtest.max_participation_rate": _number_between(0, 1),
+    "backtest.capacity_window": _int_at_least(1),
+    "backtest.capacity_warning_threshold": _number_between(0, 1),
+    "backtest.amount_unit": _number_at_least(0),
+    "backtest.stale_price_exit_days": _int_at_least(0),
+    "backtest.stale_price_exit_policy": _string_value,
+    "backtest.stale_price_haircut": _number_between(0, 1),
+    "backtest.stop_fill_policy": _string_value,
+    "backtest.stop_fill_buffer": _number_between(0, 1),
+    "backtest.exposure_schedule_rebalance_on_signal_only": _bool_value,
+    "backtest.equity_overlay.enabled": _bool_value,
+    "backtest.equity_overlay.min_periods": _int_at_least(1),
+    "backtest.equity_overlay.ma_window": _int_at_least(1),
+    "backtest.equity_overlay.momentum_window": _int_at_least(1),
+    "backtest.equity_overlay.drawdown_window": _int_at_least(1),
+    "backtest.equity_overlay.drawdown_cut": _number_between(0, 1),
+    "backtest.equity_overlay.bull_exposure": _number_between(0, 1),
+    "backtest.equity_overlay.sideways_exposure": _number_between(0, 1),
+    "backtest.equity_overlay.bear_exposure": _number_between(0, 1),
+    "backtest.equity_overlay.max_exposure": _number_between(0, 1),
+    "backtest.equity_overlay.rebalance_threshold": _number_between(0, 1),
+    "backtest.equity_overlay.rebalance_on_signal_only": _bool_value,
+    "quality.min_raw_coverage": _number_between(0, 1),
+    "quality.min_price_coverage": _number_between(0, 1),
+    "quality.min_factor_coverage": _number_between(0, 1),
+    "quality.require_latest_end_date": _bool_value,
+    "quality.min_validation_windows": _int_at_least(1),
+    "quality.min_positive_return_rate": _number_between(0, 1),
+    "quality.max_annual_turnover": _number_at_least(0),
+    "quality.max_annual_trade_cost_ratio": _number_between(0, 1),
+    "quality.optimizer_timeout_seconds": _optional(_number_at_least(0)),
+    "quality.max_optimizer_combinations": _optional(_int_at_least(1)),
+    "account.total_asset": _number_at_least(0),
+    "account.cash": _number_at_least(0),
+    "account.max_position_pct": _optional(_number_between(0, 1)),
+    "account.lot_size": _int_at_least(1),
+    "account.star_market_lot_size": _int_at_least(1),
+    "manual_orders.limit_price_buffer": _number_between(0, 1),
+    "manual_orders.cash_redistribution_overweight_tolerance": _number_between(0, 1),
+    "outputs.dir": _string_value,
+    "outputs.holdings_file": _string_value,
+}
 
 
 def _expand_env_values(value: Any) -> Any:

@@ -6,7 +6,14 @@ import unittest
 
 import pandas as pd
 
-from src.selection_risk import _NORMALIZED_PRICE_CACHE, _normalize_price_frame, filter_scores_by_selection_risk
+from src.selection_risk import (
+    _NORMALIZED_PRICE_CACHE,
+    _PRICE_FIELD_CACHE,
+    _PRICE_FIELD_CACHE_MAX_SIZE,
+    _normalize_price_frame,
+    _price_field,
+    filter_scores_by_selection_risk,
+)
 
 
 class SelectionRiskTests(unittest.TestCase):
@@ -153,6 +160,26 @@ class SelectionRiskTests(unittest.TestCase):
 
         self.assertIs(first, second)
         self.assertEqual(len(_NORMALIZED_PRICE_CACHE), 1)
+
+    def test_price_field_cache_is_size_limited(self) -> None:
+        """函数说明：验证价格字段切片缓存会限制源面板数量。"""
+        _PRICE_FIELD_CACHE.clear()
+        frames = []
+        try:
+            for idx in range(_PRICE_FIELD_CACHE_MAX_SIZE + 2):
+                prices = _price_panel(
+                    pd.to_datetime(["2024-01-02"]),
+                    open_values={f"A{idx}": [10.0]},
+                    close_values={f"A{idx}": [10.0]},
+                    low_values={f"A{idx}": [9.9]},
+                )
+                prices.columns = pd.MultiIndex.from_tuples(prices.columns, names=["field", "instrument"])
+                frames.append(prices)
+                _price_field(prices, "close")
+
+            self.assertLessEqual(len(_PRICE_FIELD_CACHE), _PRICE_FIELD_CACHE_MAX_SIZE)
+        finally:
+            _PRICE_FIELD_CACHE.clear()
 
 
 def _config() -> dict:

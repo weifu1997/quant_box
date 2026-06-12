@@ -353,6 +353,30 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(frame.columns.tolist(), list(dict.fromkeys(frame.columns)))
         self.assertEqual(frame["st_start_date"].tolist(), [pd.Timestamp("2024-01-04")])
 
+    def test_normalize_st_calendar_frame_keeps_chinese_special_treatment_reason(self) -> None:
+        frame = normalize_st_calendar_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "name": "NORMAL NAME",
+                        "start_date": "20240102",
+                        "ann_date": "20240101",
+                        "change_reason": "特别处理",
+                    },
+                    {
+                        "ts_code": "000002.SZ",
+                        "name": "NORMAL NAME",
+                        "start_date": "20240102",
+                        "ann_date": "20240101",
+                        "change_reason": "更名",
+                    },
+                ]
+            )
+        )
+
+        self.assertEqual(frame["ts_code"].tolist(), ["000001.SZ"])
+
     def test_normalize_daily_frame_deduplicates_symbol_date_pairs(self) -> None:
         """函数说明：验证 test_normalize_daily_frame_deduplicates_symbol_date_pairs 覆盖的行为场景。"""
         daily = normalize_daily_frame(
@@ -387,6 +411,46 @@ class DataFetcherTests(unittest.TestCase):
         self.assertEqual(len(daily), 1)
         self.assertAlmostEqual(float(daily["close"].iloc[0]), 11.2)
         self.assertAlmostEqual(float(daily["adj_factor"].iloc[0]), 1.1)
+
+    def test_normalize_daily_frame_rejects_invalid_ohlc_range(self) -> None:
+        """函数说明：验证日线 OHLC 区间错误会被拒绝。"""
+        with self.assertRaisesRegex(ValueError, "invalid OHLCV"):
+            normalize_daily_frame(
+                pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "trade_date": "20240102",
+                            "open": 10.0,
+                            "high": 9.9,
+                            "low": 9.8,
+                            "close": 10.2,
+                            "vol": 1000,
+                            "amount": 10000,
+                        }
+                    ]
+                )
+            )
+
+    def test_normalize_daily_frame_rejects_missing_or_negative_flow_fields(self) -> None:
+        """函数说明：验证成交量和成交额的缺失或负值会被拒绝。"""
+        with self.assertRaisesRegex(ValueError, "invalid OHLCV"):
+            normalize_daily_frame(
+                pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.SZ",
+                            "trade_date": "20240102",
+                            "open": 10.0,
+                            "high": 10.5,
+                            "low": 9.8,
+                            "close": 10.2,
+                            "vol": -1,
+                            "amount": None,
+                        }
+                    ]
+                )
+            )
 
     def test_fetch_daily_basic_requests_tushare_daily_basic_fields(self) -> None:
         """函数说明：验证 test_fetch_daily_basic_requests_tushare_daily_basic_fields 覆盖的行为场景。"""

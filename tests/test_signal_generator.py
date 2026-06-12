@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.selection_constraints import load_industry_group_map
-from src.signal_generator import generate_signal
+from src.signal_generator import generate_signal, read_signal_previous_holdings
 from tests.fixtures.real_data import require_real_market_data
 
 
@@ -232,6 +232,45 @@ class SignalGeneratorTests(unittest.TestCase):
 
         self.assertEqual(holdings, ["B"])
         self.assertEqual(signal[["instrument", "action"]].to_dict("records"), [{"instrument": "B", "action": "HOLD"}])
+
+    def test_read_signal_previous_holdings_prefers_account_file_with_positive_shares(self) -> None:
+        """函数说明：验证调仓信号使用账户实际持仓并过滤零股。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            account_holdings = root / "current_holdings.csv"
+            latest_holdings = root / "latest_holdings.csv"
+            pd.DataFrame(
+                {
+                    "instrument": ["000001.sz", "000002.SZ", "000003.SZ", "000004.SZ"],
+                    "shares": [100, 0, -100, None],
+                }
+            ).to_csv(account_holdings, index=False)
+            pd.DataFrame({"instrument": ["600519.SH"]}).to_csv(latest_holdings, index=False)
+            config = {
+                "account": {"current_holdings_file": str(account_holdings)},
+                "outputs": {"holdings_file": str(latest_holdings)},
+            }
+
+            holdings, source = read_signal_previous_holdings(config)
+
+        self.assertEqual(holdings, ["000001.SZ"])
+        self.assertEqual(source, "account.current_holdings_file")
+
+    def test_read_signal_previous_holdings_falls_back_when_account_file_is_missing(self) -> None:
+        """函数说明：验证账户持仓文件缺失时回退到最新目标持仓。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            latest_holdings = root / "latest_holdings.csv"
+            pd.DataFrame({"ticker": ["600519.sh"]}).to_csv(latest_holdings, index=False)
+            config = {
+                "account": {"current_holdings_file": str(root / "missing_current_holdings.csv")},
+                "outputs": {"holdings_file": str(latest_holdings)},
+            }
+
+            holdings, source = read_signal_previous_holdings(config)
+
+        self.assertEqual(holdings, ["600519.SH"])
+        self.assertEqual(source, "outputs.holdings_file")
 
 
 def _signal_config(

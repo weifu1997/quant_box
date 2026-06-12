@@ -53,7 +53,8 @@ def requested_factor_columns(
             )
         return None
 
-    group = str(strategy_cfg.get("factor_group", "momentum")).strip().lower()
+    raw_group = str(strategy_cfg.get("factor_group", "momentum")).strip()
+    group = raw_group.lower()
     if group in {"all", "ic_weighted"}:
         return None
     available_columns = factor_cache_columns(factor_file)
@@ -64,14 +65,28 @@ def requested_factor_columns(
         requested: set[str] = set()
         for candidate in candidates:
             method = strip_direction_prefix(str(candidate))
-            requested.update(str(column) for column in factor_columns_for_method(available_columns, method))
+            matched = [str(column) for column in factor_columns_for_method(available_columns, method)]
+            if len(matched) != 1:
+                raise ValueError(
+                    f"dynamic_ic_selector candidate '{candidate}' matched {len(matched)} columns "
+                    f"in factor cache {factor_file}; use factor:<name>."
+                )
+            requested.update(matched)
         return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
     if group in STATIC_FACTOR_BLEND_GROUPS:
         weights = strategy_cfg.get("factor_weights", {})
-        requested = [str(column) for column in weights if str(column) in available_columns] if isinstance(weights, dict) else []
+        if not isinstance(weights, dict) or not weights:
+            raise ValueError("factor_blend strategy requires non-empty strategy.factor_weights.")
+        available = {str(column) for column in available_columns}
+        requested = [str(column) for column in weights if str(column) in available]
+        missing = [str(column) for column in weights if str(column) not in available]
+        if missing:
+            raise ValueError(f"factor_blend references columns missing from factor cache {factor_file}: {', '.join(missing)}")
         return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
     requested = [str(column) for column in factor_columns_for_method(available_columns, group)]
-    return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg) if requested else None
+    if not requested:
+        raise ValueError(f"factor_group '{raw_group}' did not match any columns in factor cache {factor_file}.")
+    return _with_regime_component_columns(sorted(requested), available_columns, score_blend_cfg, score_filter_cfg)
 
 
 def strip_direction_prefix(value: str) -> str:

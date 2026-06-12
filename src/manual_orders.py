@@ -13,6 +13,7 @@ import yaml
 from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
 from src.config_loader import load_config, resolve_path
 from src.market_regime import defensive_exposure_for_date
+from src.risk_policy import RiskPolicy
 
 
 @dataclass
@@ -109,7 +110,7 @@ def generate_manual_orders(
     indicative_targets = _target_share_plan(normalized_targets, signal_close, account, target_weight, cfg)
     account_issues = validate_account_inputs(account, current, cfg)
     order_actionable = bool(is_executable) and not reference_from_signal_date and not account_issues
-    stop_loss_pct = cfg.get("strategy", {}).get("stop_loss_pct")
+    stop_loss_pct = RiskPolicy(cfg).stop_loss_pct
     for instrument in all_symbols:
         action = action_map.get(instrument, "HOLD" if instrument in target_set else "SELL")
         reference_price = _reference_price(instrument, close)

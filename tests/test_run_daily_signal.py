@@ -25,12 +25,12 @@ class RunDailySignalTests(unittest.TestCase):
             signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
 
             with patch.object(sys, "argv", ["run_daily_signal.py", "--date", "latest"]), patch(
-                "scripts.run_daily_signal.read_previous_holdings",
-                return_value=["OLD.SZ"],
+                "scripts.run_daily_signal.read_signal_previous_holdings",
+                return_value=(["OLD.SZ"], "outputs.holdings_file"),
             ), patch(
                 "scripts.run_daily_signal.generate_signal",
                 return_value=(signal, ["000001.SZ"]),
-            ), patch("src.signal_generator.load_config", return_value=config):
+            ), patch("scripts.run_daily_signal.load_config", return_value=config):
                 module.main()
 
             self.assertTrue((root / "candidate_signal_2024-01-03.csv").exists())
@@ -49,12 +49,12 @@ class RunDailySignalTests(unittest.TestCase):
             signal.attrs["signal_date"] = "2024-01-03"
 
             with patch.object(sys, "argv", ["run_daily_signal.py", "--date", "latest"]), patch(
-                "scripts.run_daily_signal.read_previous_holdings",
-                return_value=[],
+                "scripts.run_daily_signal.read_signal_previous_holdings",
+                return_value=([], "outputs.holdings_file"),
             ), patch(
                 "scripts.run_daily_signal.generate_signal",
                 return_value=(signal, []),
-            ), patch("src.signal_generator.load_config", return_value=config):
+            ), patch("scripts.run_daily_signal.load_config", return_value=config):
                 module.main()
 
             self.assertTrue((root / "candidate_signal_2024-01-03.csv").exists())
@@ -72,12 +72,12 @@ class RunDailySignalTests(unittest.TestCase):
             signal = pd.DataFrame([{"date": "2024-01-03", "instrument": "000001.SZ", "action": "BUY"}])
 
             with patch.object(sys, "argv", ["run_daily_signal.py", "--date", "latest", "--official"]), patch(
-                "scripts.run_daily_signal.read_previous_holdings",
-                return_value=["OLD.SZ"],
+                "scripts.run_daily_signal.read_signal_previous_holdings",
+                return_value=(["OLD.SZ"], "outputs.holdings_file"),
             ), patch(
                 "scripts.run_daily_signal.generate_signal",
                 return_value=(signal, ["000001.SZ"]),
-            ), patch("src.signal_generator.load_config", return_value=config):
+            ), patch("scripts.run_daily_signal.load_config", return_value=config):
                 module.main()
 
             self.assertTrue((root / "signal_2024-01-03.csv").exists())

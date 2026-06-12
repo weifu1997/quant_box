@@ -80,6 +80,42 @@ class RunFactorColumnTests(unittest.TestCase):
 
         self.assertEqual(columns, ["KLEN", "LOW0"])
 
+    def test_backtest_requested_columns_reject_missing_exact_factor(self) -> None:
+        with patch("scripts._shared.factor_cache_columns", return_value=["LOW0", "ROC20"]):
+            with self.assertRaisesRegex(ValueError, "factor_group 'factor:DB_circ_mv' did not match"):
+                backtest_factor_columns(
+                    "unused.parquet",
+                    {"factor_group": "factor:DB_circ_mv"},
+                    {},
+                    {},
+                    {"enabled": False},
+                    {},
+                )
+
+    def test_backtest_requested_columns_reject_ambiguous_dynamic_candidate(self) -> None:
+        with patch("scripts._shared.factor_cache_columns", return_value=["ROC5", "ROC10", "LOW0"]):
+            with self.assertRaisesRegex(ValueError, "dynamic_ic_selector candidate 'momentum' matched 2 columns"):
+                backtest_factor_columns(
+                    "unused.parquet",
+                    {"factor_group": "dynamic_ic_selector"},
+                    {"candidates": ["momentum"]},
+                    {},
+                    {"enabled": False},
+                    {},
+                )
+
+    def test_backtest_requested_columns_reject_missing_static_blend_weight(self) -> None:
+        with patch("scripts._shared.factor_cache_columns", return_value=["KLEN", "LOW0"]):
+            with self.assertRaisesRegex(ValueError, "factor_blend references columns missing"):
+                backtest_factor_columns(
+                    "unused.parquet",
+                    {"factor_group": "factor_blend", "factor_weights": {"KLEN": -1.0, "DB_pb": 0.5}},
+                    {},
+                    {},
+                    {"enabled": False},
+                    {},
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

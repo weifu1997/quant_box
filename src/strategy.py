@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import weakref
 
 import numpy as np
 import pandas as pd
 
-from src.common import normalize_instrument as _normalize_instrument
+from src.common import (
+    normalize_datetime_index as _normalize_datetime_index,
+    normalize_instrument as _normalize_instrument,
+    normalize_instrument_index as _normalize_instrument_index,
+    normalize_instruments as _normalize_instruments,
+)
 
 
 FACTOR_GROUP_KEYWORDS = {
     "momentum": ("roc", "mom", "rsi", "bias"),
     "volatility": ("std", "var", "volatility"),
-    "volume": ("volume", "vol", "vwap", "amount"),
+    "volume": ("volume", "vol", "vwap", "amount", "vma", "vstd", "wvma", "vsump", "vsumn", "vsumd"),
 }
 INVERSE_FACTOR_PREFIXES = ("low_", "inverse_", "short_")
+ROW_MEAN_REQUIRED_FACTOR_FRACTION = 0.5
+_NORMALIZED_FACTOR_FRAME_ATTR = "quant_box_normalized_factor_frame_for_scoring"
+_NORMALIZED_FACTOR_FRAME_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], pd.DataFrame]] = {}
+_NORMALIZED_FACTOR_FRAME_CACHE_MAX_SIZE = 8
 
 
 def composite_factor(
@@ -29,6 +39,8 @@ def composite_factor(
     """函数说明：处理 composite_factor 主要逻辑。"""
     if factor_df.empty:
         raise ValueError("factor_df is empty.")
+    if isinstance(factor_df.index, pd.MultiIndex):
+        factor_df = _normalize_factor_frame_for_scoring(factor_df)
 
     numeric = factor_df.select_dtypes("number")
     if numeric.empty:
@@ -175,9 +187,14 @@ def _dynamic_ic_weighted_score(
 
 def _row_mean_with_min_count(df: pd.DataFrame) -> pd.Series:
     """函数说明：处理 row_mean_with_min_count 的内部辅助逻辑。"""
-    min_count = max(1, int(np.ceil(df.shape[1] / 2)))
+    min_count = _required_row_mean_factor_count(df.shape[1])
     means = df.mean(axis=1, skipna=True)
     return means.where(df.count(axis=1) >= min_count)
+
+
+def _required_row_mean_factor_count(column_count: int) -> int:
+    """函数说明：计算行均值评分至少需要的有效因子数。"""
+    return max(1, int(np.ceil(column_count * ROW_MEAN_REQUIRED_FACTOR_FRACTION)))
 
 
 def _average_prior_weights(prior_weights: list[pd.Series]) -> pd.Series:
@@ -353,25 +370,12 @@ def _normalize_score_series(score_series: pd.Series) -> pd.Series:
     if scores.empty:
         return scores
 
-    normalized_index = pd.Index([_normalize_instrument(code) for code in scores.index], name=scores.index.name)
+    normalized_index = _normalize_instrument_index(scores.index, name=scores.index.name)
     result = pd.Series(scores.to_numpy(), index=normalized_index, name=scores.name)
     result = result[result.index != ""]
     if result.index.has_duplicates:
         result = result[~result.index.duplicated(keep="first")]
     result.attrs = dict(getattr(score_series, "attrs", {}))
-    return result
-
-
-def _normalize_instruments(values: Iterable[object]) -> list[str]:
-    """函数说明：规范化 normalize_instruments 的内部辅助逻辑。"""
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        instrument = _normalize_instrument(value)
-        if not instrument or instrument in seen:
-            continue
-        result.append(instrument)
-        seen.add(instrument)
     return result
 
 
@@ -539,12 +543,12 @@ def resample_signals(score_panel: pd.Series, rebalance_freq: str) -> pd.Series:
     normalized = score_panel.copy()
     normalized.index = pd.MultiIndex.from_arrays(
         [
-            pd.to_datetime(score_panel.index.get_level_values(0)).normalize(),
+            _normalize_datetime_index(score_panel.index.get_level_values(0), normalize=True),
             score_panel.index.get_level_values(1).astype(str),
         ],
         names=score_panel.index.names,
     )
-    dates = pd.Index(pd.to_datetime(normalized.index.get_level_values(0).unique())).sort_values()
+    dates = pd.Index(_normalize_datetime_index(normalized.index.get_level_values(0).unique(), normalize=True, sort=True))
     date_series = pd.Series(dates, index=dates)
     if rebalance_freq == "weekly":
         keep_dates = set(date_series.resample("W-FRI").last().dropna())
@@ -590,7 +594,12 @@ def _normalize_factor_frame_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
         return df
     if df.index.nlevels != 2:
         raise ValueError("factor_df must use two index levels: datetime/instrument.")
-    raw_dates = pd.DatetimeIndex(pd.to_datetime(df.index.get_level_values(0), errors="coerce"))
+    if bool(df.attrs.get(_NORMALIZED_FACTOR_FRAME_ATTR, False)):
+        return df
+    cached = _get_cached_normalized_factor_frame(df)
+    if cached is not None:
+        return cached
+    raw_dates = _normalize_datetime_index(df.index.get_level_values(0), normalize=False)
     raw_instruments = pd.Index(df.index.get_level_values(1))
     frame = pd.DataFrame(
         {
@@ -605,7 +614,7 @@ def _normalize_factor_frame_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         result = df.iloc[0:0].copy()
         result.index = pd.MultiIndex.from_arrays([[], []], names=df.index.names)
-        return result
+        return _store_normalized_factor_frame(df, result)
     frame = frame.sort_values(
         ["date", "instrument_key", "raw_date", "position"],
         kind="mergesort",
@@ -613,7 +622,40 @@ def _normalize_factor_frame_for_scoring(df: pd.DataFrame) -> pd.DataFrame:
     ).drop_duplicates(["date", "instrument_key"], keep="last")
     result = df.iloc[frame["position"].to_numpy()].copy()
     result.index = pd.MultiIndex.from_arrays([frame["date"], frame["instrument"]], names=df.index.names)
-    return result.sort_index()
+    return _store_normalized_factor_frame(df, result.sort_index())
+
+
+def _get_cached_normalized_factor_frame(df: pd.DataFrame) -> pd.DataFrame | None:
+    """Read the normalized factor-frame cache for the same source object."""
+    cached = _NORMALIZED_FACTOR_FRAME_CACHE.get(id(df))
+    if cached is None:
+        return None
+    cached_source, normalized = cached
+    if cached_source() is df:
+        return normalized
+    _NORMALIZED_FACTOR_FRAME_CACHE.pop(id(df), None)
+    return None
+
+
+def _store_normalized_factor_frame(source: pd.DataFrame, normalized: pd.DataFrame) -> pd.DataFrame:
+    """Store a normalized factor frame and cap cache growth."""
+    normalized.attrs[_NORMALIZED_FACTOR_FRAME_ATTR] = True
+    _prune_normalized_factor_frame_cache()
+    if len(_NORMALIZED_FACTOR_FRAME_CACHE) >= _NORMALIZED_FACTOR_FRAME_CACHE_MAX_SIZE:
+        _NORMALIZED_FACTOR_FRAME_CACHE.pop(next(iter(_NORMALIZED_FACTOR_FRAME_CACHE)), None)
+    cache_key = id(source)
+    _NORMALIZED_FACTOR_FRAME_CACHE[cache_key] = (
+        weakref.ref(source, lambda _ref, key=cache_key: _NORMALIZED_FACTOR_FRAME_CACHE.pop(key, None)),
+        normalized,
+    )
+    return normalized
+
+
+def _prune_normalized_factor_frame_cache() -> None:
+    """Remove cache entries whose source factor frames were released."""
+    dead_keys = [key for key, (source_ref, _) in _NORMALIZED_FACTOR_FRAME_CACHE.items() if source_ref() is None]
+    for key in dead_keys:
+        _NORMALIZED_FACTOR_FRAME_CACHE.pop(key, None)
 
 
 def _mask_nonfinite(df: pd.DataFrame) -> pd.DataFrame:

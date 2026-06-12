@@ -21,8 +21,8 @@ from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.market_regime import apply_defensive_timing_to_backtest_config
+from src.risk_policy import RiskPolicy
 from src.scoring import build_strategy_scores
-from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
 from src.universe_coverage import summarize_universe_coverage
@@ -103,7 +103,7 @@ def main() -> None:
         logger.info("Score panel after resample: %s", json.dumps(score_summary, ensure_ascii=False, default=str))
 
         bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
-        bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
+        bt_config = RiskPolicy(config).apply_to_backtest_config(bt_config)
         logger.info("Backtest config snapshot: %s", json.dumps(_backtest_config_snapshot(bt_config), ensure_ascii=False, default=str))
         if args.benchmark_file:
             benchmark_path = resolve_path(args.benchmark_file)

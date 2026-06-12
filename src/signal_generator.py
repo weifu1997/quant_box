@@ -7,12 +7,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.common import normalize_instrument as _normalize_instrument
+from src.common import (
+    normalize_datetime_index as _normalize_datetime_index,
+    normalize_instrument_index as _normalize_instrument_index,
+    normalize_instruments as _normalize_instruments,
+)
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
+from src.risk_policy import RiskPolicy
 from src.scoring import build_latest_strategy_scores
-from src.selection_constraints import load_industry_group_map
-from src.selection_risk import filter_scores_by_selection_risk, selection_risk_filter_enabled
 from src.strategy import select_stocks
 from src.trading_calendar import resolve_target_date_value
 
@@ -32,6 +35,33 @@ def read_previous_holdings(path: str | Path | None = None, config: dict | None =
     return _normalize_instruments(df[col].dropna().tolist())
 
 
+def read_signal_previous_holdings(config: dict | None = None) -> tuple[list[str], str]:
+    """Read account holdings for signal actions, falling back to latest target holdings."""
+    config = config or load_config()
+    account_path_value = config.get("account", {}).get("current_holdings_file")
+    if account_path_value:
+        account_path = resolve_path(account_path_value)
+        if account_path.exists():
+            account_holdings = _read_holdings_csv(account_path, require_positive_shares=True)
+            if account_holdings is not None:
+                return account_holdings, "account.current_holdings_file"
+    return read_previous_holdings(config=config), "outputs.holdings_file"
+
+
+def _read_holdings_csv(path: str | Path, require_positive_shares: bool = False) -> list[str] | None:
+    holdings_path = resolve_path(path)
+    if not holdings_path.exists():
+        return []
+    df = pd.read_csv(holdings_path)
+    col = "instrument" if "instrument" in df.columns else "ticker"
+    if col not in df.columns:
+        return None
+    if require_positive_shares and "shares" in df.columns:
+        shares = pd.to_numeric(df["shares"], errors="coerce").fillna(0.0)
+        df = df[shares > 0]
+    return _normalize_instruments(df[col].dropna().tolist())
+
+
 def generate_signal(
     signal_date: str,
     previous_holdings: list[str] | None = None,
@@ -45,6 +75,7 @@ def generate_signal(
     config = config or load_config()
     data_cfg = config["data"]
     strategy_cfg = config["strategy"]
+    risk_policy = RiskPolicy(config)
     use_latest_date = str(signal_date).lower() == "latest"
     factor_end_date = resolve_target_date_value(
         data_cfg["end_date"] if use_latest_date else signal_date,
@@ -64,15 +95,15 @@ def generate_signal(
         signal_date = latest_date.strftime("%Y-%m-%d")
     else:
         signal_date = str(pd.Timestamp(score_date).date())
-    if selection_risk_filter_enabled(config):
+    if risk_policy.selection_risk_enabled():
         prices = price_df if price_df is not None else _load_price_frame(price_file, config)
-        latest_scores = filter_scores_by_selection_risk(latest_scores, prices, latest_date, config)
+        latest_scores = risk_policy.filter_selection_scores(latest_scores, prices, latest_date)
     latest_scores = _normalize_score_index(latest_scores)
-    previous_holdings = _normalize_instruments(
-        previous_holdings if previous_holdings is not None else read_previous_holdings(config=config)
-    )
-    max_industry_weight = strategy_cfg.get("max_industry_weight")
-    industry_map = load_industry_group_map(config) if max_industry_weight is not None else None
+    if previous_holdings is None:
+        previous_holdings, _source = read_signal_previous_holdings(config=config)
+    previous_holdings = _normalize_instruments(previous_holdings)
+    max_industry_weight = risk_policy.max_industry_weight
+    industry_map = risk_policy.industry_group_map()
     holdings = select_stocks(
         latest_scores,
         top_n=int(strategy_cfg.get("top_n", 7)),
@@ -107,13 +138,13 @@ def _latest_daily_scores(scores: pd.Series) -> tuple[pd.Timestamp, pd.Series]:
     """函数说明：处理 latest_daily_scores 的内部辅助逻辑。"""
     if scores.empty or not isinstance(scores.index, pd.MultiIndex):
         raise ValueError("scores must use MultiIndex: datetime/instrument.")
-    raw_dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0), errors="coerce"))
+    raw_dates = _normalize_datetime_index(scores.index.get_level_values(0), normalize=False)
     values = pd.to_numeric(pd.Series(scores.to_numpy()), errors="coerce").to_numpy()
     frame = pd.DataFrame(
         {
             "date": raw_dates.normalize(),
             "raw_date": raw_dates,
-            "instrument": [_normalize_instrument(value) for value in scores.index.get_level_values(1)],
+            "instrument": _normalize_instrument_index(scores.index.get_level_values(1)),
             "score": values,
             "position": range(len(scores)),
         }
@@ -156,7 +187,7 @@ def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
     if factors.empty or not isinstance(factors.index, pd.MultiIndex):
         raise ValueError("factors must use MultiIndex: date/instrument.")
     date_level = factors.index.names[0] or 0
-    return pd.DatetimeIndex(pd.to_datetime(factors.index.get_level_values(date_level)).normalize()).unique().sort_values()
+    return _normalize_datetime_index(factors.index.get_level_values(date_level), dropna=True, unique=True, sort=True)
 
 
 def _normalize_score_index(scores: pd.Series) -> pd.Series:
@@ -164,24 +195,11 @@ def _normalize_score_index(scores: pd.Series) -> pd.Series:
     if scores.empty:
         return scores
     result = scores.sort_values(ascending=False, kind="mergesort", na_position="last").copy()
-    result.index = pd.Index([_normalize_instrument(value) for value in result.index], name=result.index.name)
+    result.index = _normalize_instrument_index(result.index, name=result.index.name)
     result = result[result.index != ""]
     if result.index.has_duplicates:
         result = result[~result.index.duplicated(keep="first")]
     result.attrs = dict(getattr(scores, "attrs", {}))
-    return result
-
-
-def _normalize_instruments(values: list[str] | pd.Series) -> list[str]:
-    """函数说明：规范化 normalize_instruments 的内部辅助逻辑。"""
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        instrument = _normalize_instrument(value)
-        if not instrument or instrument in seen:
-            continue
-        result.append(instrument)
-        seen.add(instrument)
     return result
 
 

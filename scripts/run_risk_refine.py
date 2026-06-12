@@ -21,8 +21,8 @@ from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.market_regime import apply_defensive_timing_to_backtest_config
+from src.risk_policy import RiskPolicy
 from src.scoring import build_strategy_scores
-from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
 
@@ -208,7 +208,7 @@ def main() -> None:
                 "rebalance_drift_threshold": rebalance_drift_threshold,
             }
         )
-        bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
+        bt_config = RiskPolicy(config).apply_to_backtest_config(bt_config)
 
         row_start = time.monotonic()
         result = run_backtest(scores, prices, args.start_date, end_date, bt_config)

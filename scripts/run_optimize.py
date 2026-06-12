@@ -17,8 +17,8 @@ from src.factor_calculator import load_or_compute_factors
 from src.factor_ic import calculate_factor_ic, make_ic_weights, summarize_ic
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.optimizer import BASELINE_GRID, DEFAULT_GRID, run_parameter_grid, run_walk_forward_grid_validation, run_walk_forward_optimization
+from src.risk_policy import RiskPolicy
 from src.scoring import DYNAMIC_IC_SELECTOR_GROUPS
-from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.trading_calendar import resolve_target_date_value
 from scripts._shared import requested_factor_columns, strip_direction_prefix
 
@@ -166,11 +166,11 @@ def main() -> None:
         ic_summary_path.parent.mkdir(parents=True, exist_ok=True)
         ic_summary.to_csv(ic_summary_path, encoding="utf-8-sig")
 
+    risk_policy = RiskPolicy(config)
     base_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
-    base_config = apply_selection_constraints_to_backtest_config(
+    base_config = risk_policy.apply_to_backtest_config(
         base_config,
-        config,
-        force=_grid_has_enabled_value(grid, "max_industry_weight"),
+        force_industry_map=_grid_has_enabled_value(grid, "max_industry_weight"),
     )
     if args.walk_forward and args.selection_walk_forward:
         results = run_walk_forward_optimization(

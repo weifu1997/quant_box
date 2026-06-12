@@ -25,8 +25,8 @@ from src.auto_tuning import apply_strategy_params
 from src.config_loader import load_config, resolve_path
 from src.fast_monthly_backtest import prepare_fast_period_data, run_fast_prepared_backtest
 from src.market_regime import apply_defensive_timing_to_backtest_config
+from src.risk_policy import RiskPolicy
 from src.scoring import build_strategy_scores
-from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
 
@@ -75,7 +75,7 @@ def main() -> None:
     scores = build_strategy_scores(factors, config, price_df=prices)
     scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
     base_bt_config = apply_defensive_timing_to_backtest_config({**config["backtest"], **config["strategy"]}, prices, config)
-    base_bt_config = apply_selection_constraints_to_backtest_config(base_bt_config, config)
+    base_bt_config = RiskPolicy(config).apply_to_backtest_config(base_bt_config)
     prepared = prepare_fast_period_data(scores, prices, args.start_date, end_date)
 
     rows: list[dict[str, object]] = []

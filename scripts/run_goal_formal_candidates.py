@@ -21,8 +21,8 @@ from src.config_loader import load_config, resolve_path
 from src.factor_calculator import load_or_compute_factors
 from src.market_regime import apply_defensive_timing_to_backtest_config
 from src.research_diagnostics import build_research_diagnostics, write_research_diagnostics
+from src.risk_policy import RiskPolicy
 from src.scoring import build_strategy_scores
-from src.selection_constraints import apply_selection_constraints_to_backtest_config
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
 
@@ -113,7 +113,7 @@ def main() -> None:
                 bt_config.pop(key, None)
             else:
                 bt_config[key] = value
-        bt_config = apply_selection_constraints_to_backtest_config(bt_config, config)
+        bt_config = RiskPolicy(config).apply_to_backtest_config(bt_config)
 
         print(f"{idx}/{len(candidates)} {candidate['name']}: running formal backtest", flush=True)
         try:

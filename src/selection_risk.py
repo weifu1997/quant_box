@@ -9,10 +9,18 @@ import weakref
 import numpy as np
 import pandas as pd
 
-from src.common import PRICE_FIELD_COLUMNS, looks_like_field_table as _looks_like_field_table, normalize_instrument as _normalize_instrument
+from src.common import (
+    PRICE_FIELD_COLUMNS,
+    looks_like_field_table as _looks_like_field_table,
+    normalize_datetime_index as _normalize_datetime_index,
+    normalize_instrument as _normalize_instrument,
+    normalize_instrument_index as _normalize_instrument_index,
+    normalize_instruments as _normalize_instruments,
+)
 
 _PRICE_FIELD_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], set[str], dict[str, pd.DataFrame]]] = {}
 _NORMALIZED_PRICE_CACHE: dict[int, tuple[weakref.ReferenceType[pd.DataFrame], pd.DataFrame]] = {}
+_PRICE_FIELD_CACHE_MAX_SIZE = 8
 _NORMALIZED_PRICE_CACHE_MAX_SIZE = 8
 
 
@@ -52,7 +60,7 @@ def selection_risk_eligible_instruments(
     """函数说明：处理 selection_risk_eligible_instruments 主要逻辑。"""
     cfg = _selection_risk_config(config or {})
     if not bool(cfg.get("enabled", False)):
-        return {_normalize_instrument(code) for code in instruments if _normalize_instrument(code)}
+        return set(_normalize_instruments(instruments))
 
     normalized_prices = _normalize_price_frame(prices)
     signal_ts = pd.Timestamp(signal_date).normalize()
@@ -72,7 +80,7 @@ def selection_risk_eligible_instruments(
     max_limit_down_days = None if max_limit_down_days is None else max(0, int(max_limit_down_days))
     require_positive_volume = bool(cfg.get("require_positive_volume", True))
 
-    instrument_index = pd.Index([_normalize_instrument(code) for code in instruments]).drop_duplicates()
+    instrument_index = pd.Index(_normalize_instruments(instruments))
     instrument_index = instrument_index[instrument_index != ""]
     if instrument_index.empty:
         return set()
@@ -234,7 +242,7 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
     if cached is not None:
         return cached
 
-    raw_dates = pd.DatetimeIndex(pd.to_datetime(prices.index, errors="coerce"))
+    raw_dates = _normalize_datetime_index(prices.index, normalize=False)
     valid_dates = ~pd.isna(raw_dates)
     if not valid_dates.all():
         prices = prices.loc[valid_dates].copy(deep=False)
@@ -249,7 +257,7 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
         normalized_columns = pd.MultiIndex.from_arrays(
             [
                 [_normalize_price_field(value) for value in prices.columns.get_level_values(0)],
-                [_normalize_instrument(value) for value in prices.columns.get_level_values(1)],
+                _normalize_instrument_index(prices.columns.get_level_values(1)),
             ],
             names=["field", "instrument"],
         )
@@ -280,7 +288,7 @@ def _normalize_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
     if result.index.has_duplicates:
         result = result.loc[~result.index.duplicated(keep="last")]
     result.columns = pd.MultiIndex.from_product(
-        [["close"], [_normalize_instrument(value) for value in result.columns]],
+        [["close"], _normalize_instrument_index(result.columns)],
         names=["field", "instrument"],
     )
     non_empty_instruments = result.columns.get_level_values("instrument") != ""
@@ -348,8 +356,8 @@ def _price_field_slice(
 ) -> pd.DataFrame:
     """函数说明：处理 price_field_slice 的内部辅助逻辑。"""
     field = _normalize_price_field(field)
-    dates = pd.DatetimeIndex(pd.to_datetime(dates, errors="coerce")).dropna().normalize().unique().sort_values()
-    instruments = pd.Index([_normalize_instrument(value) for value in instruments]).drop_duplicates()
+    dates = _normalize_datetime_index(dates, dropna=True, unique=True, sort=True)
+    instruments = pd.Index(_normalize_instruments(instruments))
     instruments = instruments[instruments != ""]
     if dates.empty or instruments.empty or not _has_price_field(prices, field):
         return pd.DataFrame(index=dates)
@@ -377,9 +385,16 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
     cache_key = id(prices)
     cached = _PRICE_FIELD_CACHE.get(cache_key)
     if cached is None or cached[0]() is not prices:
+        _prune_price_field_cache()
+        if len(_PRICE_FIELD_CACHE) >= _PRICE_FIELD_CACHE_MAX_SIZE:
+            _PRICE_FIELD_CACHE.pop(next(iter(_PRICE_FIELD_CACHE)), None)
         field_names = set(_normalize_price_field(value) for value in prices.columns.get_level_values("field"))
         cache: dict[str, pd.DataFrame] = {}
-        _PRICE_FIELD_CACHE[cache_key] = (weakref.ref(prices), field_names, cache)
+        _PRICE_FIELD_CACHE[cache_key] = (
+            weakref.ref(prices, lambda _ref, key=cache_key: _PRICE_FIELD_CACHE.pop(key, None)),
+            field_names,
+            cache,
+        )
     else:
         _, field_names, cache = cached
     if field in cache:
@@ -392,6 +407,13 @@ def _price_field(prices: pd.DataFrame, field: str) -> pd.DataFrame:
         frame.columns = frame.columns.get_level_values("instrument").astype(str)
     cache[field] = frame
     return frame
+
+
+def _prune_price_field_cache() -> None:
+    """Remove cached field slices whose source price frames were released."""
+    dead_keys = [key for key, (prices_ref, _fields, _cache) in _PRICE_FIELD_CACHE.items() if prices_ref() is None]
+    for key in dead_keys:
+        _PRICE_FIELD_CACHE.pop(key, None)
 
 
 def _numeric_frame(frame: pd.DataFrame) -> pd.DataFrame:
