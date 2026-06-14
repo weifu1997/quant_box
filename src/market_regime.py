@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -159,6 +160,7 @@ def apply_defensive_timing_to_backtest_config(
         return result
 
     exposure = defensive_exposure_schedule(regimes, config, pd.Index(pd.to_datetime(price_df.index)))
+    exposure = _combine_exposure_schedules(result.get("exposure_schedule"), exposure)
     result["exposure_schedule"] = exposure
     result["exposure_rebalance_threshold"] = float(
         config.get("defensive_timing", {}).get(
@@ -167,6 +169,39 @@ def apply_defensive_timing_to_backtest_config(
         )
     )
     return result
+
+
+def _combine_exposure_schedules(existing: object, defensive: pd.Series) -> pd.Series:
+    if existing is None:
+        return defensive
+    target_index = pd.DatetimeIndex(pd.to_datetime(defensive.index).normalize())
+    if isinstance(existing, pd.Series):
+        base = existing.copy()
+    elif isinstance(existing, Mapping):
+        base = pd.Series(existing, dtype=float)
+    else:
+        try:
+            base = pd.Series(existing, dtype=float)
+        except (TypeError, ValueError):
+            return defensive
+    if base.empty:
+        return defensive
+    raw_dates = pd.DatetimeIndex(pd.to_datetime(base.index, errors="coerce"))
+    valid_dates = ~raw_dates.isna()
+    base = pd.to_numeric(base.loc[valid_dates], errors="coerce")
+    raw_dates = raw_dates[valid_dates]
+    if base.empty:
+        return defensive
+    order = np.argsort(raw_dates.to_numpy(), kind="mergesort")
+    base = base.iloc[order].copy()
+    base.index = raw_dates[order].normalize()
+    base = base.dropna()
+    base = base[~base.index.duplicated(keep="last")].sort_index()
+    if base.empty:
+        return defensive
+    aligned = base.reindex(target_index, method="ffill").fillna(1.0).clip(lower=0.0)
+    combined = defensive.astype(float).reindex(target_index).fillna(1.0) * aligned
+    return combined.rename("exposure_scale")
 
 
 def defensive_exposure_for_date(

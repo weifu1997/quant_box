@@ -432,6 +432,30 @@ class DataFetcherTests(unittest.TestCase):
                 )
             )
 
+    def test_normalize_daily_frame_fills_zero_ohlc_suspended_rows(self) -> None:
+        """函数说明：验证 Tushare 停牌零 OHLC 行使用有效收盘价补齐。"""
+        daily = normalize_daily_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "ts_code": "600717.SH",
+                        "trade_date": "20260612",
+                        "open": 0.0,
+                        "high": 0.0,
+                        "low": 0.0,
+                        "close": 4.31,
+                        "vol": 0.0,
+                        "amount": 0.0,
+                    }
+                ]
+            )
+        )
+
+        self.assertAlmostEqual(float(daily["open"].iloc[0]), 4.31)
+        self.assertAlmostEqual(float(daily["high"].iloc[0]), 4.31)
+        self.assertAlmostEqual(float(daily["low"].iloc[0]), 4.31)
+        self.assertAlmostEqual(float(daily["close"].iloc[0]), 4.31)
+
     def test_normalize_daily_frame_rejects_missing_or_negative_flow_fields(self) -> None:
         """函数说明：验证成交量和成交额的缺失或负值会被拒绝。"""
         with self.assertRaisesRegex(ValueError, "invalid OHLCV"):

@@ -256,10 +256,43 @@ strategy:
   min_cross_section_obs: 5
 
 validated_strategy:
-  enabled: true
-  candidate: "momentum_lowliq_q35_no_blend_top15_take035_overlay_signal_ma90_side05_bear05_ma90_schedsig_bear06_selrisk3"
-  summary_file: "outputs/goal_formal_fullsearch_20260610_042506.csv"
+  enabled: false
+  candidate: ""
+  summary_file: null
   require_is_acceptable: true
+
+annual_state_router:
+  enabled: true
+  factor_file: "data/factors/codex_goal_extended_factors_20260610.parquet"
+  industry_factor_file: "data/factors/codex_goal_industry_momentum_factors_20260611.parquet"
+  selector_file: "outputs/selector_weight_lb63_top5_posprop_top5_formal_20260611_selector.csv"
+  source_factor_files:
+    db_size: "data/factors/codex_goal_extended_factors_20260610.parquet"
+    db_total: "data/factors/codex_goal_extended_factors_20260610.parquet"
+    selector: "data/factors/codex_goal_extended_factors_20260610.parquet"
+  include_expanded_sources: true
+  initial_source: "beta"
+  missing_ret252_exposure: 0.70
+  flat_negative_exposure: 0.90
+  fallback_source: null
+  full_turnover_on_route_change: true
+  use_defensive_timing: true
+  disable_equity_overlay: false
+  moderate_positive_source: "roc60"
+  moderate_positive_ret252_min: 0.20
+  moderate_low_source: "beta20"
+  moderate_low_ret252_min: 0.18
+  moderate_low_ret252_max: 0.20
+  moderate_low_exposure: 0.40
+  strong_trailing_exposure: 0.80
+  turnover_mode: "rank10"
+  turnover_boost_reasons:
+    - "low_vol_moderate_uptrend"
+    - "moderate_positive_roc60"
+  turnover_boost_max_turnover: 2
+  turnover_boost_rank_buffer: 10
+  evidence_metrics_file: "outputs/codex_router_grid_20260614_beta20_exposure_hit_metrics.json"
+  evidence_years_file: "outputs/codex_router_grid_20260614_beta20_exposure_hit_years.csv"
 
 backtest:
   initial_capital: 1000000

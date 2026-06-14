@@ -46,6 +46,27 @@ class SignalGeneratorTests(unittest.TestCase):
         self.assertIn(holdings[0], market.instruments)
         self.assertEqual(signal["date"].unique().tolist(), ["2024-01-05"])
 
+    def test_generate_signal_accepts_precomputed_score_panel(self) -> None:
+        score_index = pd.MultiIndex.from_tuples(
+            [
+                (pd.Timestamp("2024-01-31"), "A"),
+                (pd.Timestamp("2024-01-31"), "B"),
+                (pd.Timestamp("2024-02-29"), "A"),
+                (pd.Timestamp("2024-02-29"), "B"),
+            ],
+            names=["date", "instrument"],
+        )
+        scores = pd.Series([1.0, 3.0, 4.0, 2.0], index=score_index, name="score")
+        config = _signal_config(start_date="2024-01-01", end_date="2024-03-01")
+
+        signal, holdings = generate_signal("2024-03-01", previous_holdings=[], config=config, scores=scores)
+
+        self.assertEqual(holdings, ["A"])
+        self.assertEqual(
+            signal[["date", "instrument", "action"]].to_dict("records"),
+            [{"date": "2024-02-29", "instrument": "A", "action": "BUY"}],
+        )
+
     def test_generate_signal_uses_latest_intraday_factors_for_signal_date(self) -> None:
         """函数说明：验证 test_generate_signal_uses_latest_intraday_factors_for_signal_date 覆盖的行为场景。"""
         index = pd.MultiIndex.from_tuples(

@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.common import is_stock_csv as _is_stock_csv
+from src.common import is_adj_factor_stock_csv as _is_adj_factor_stock_csv
 from src.config_loader import load_config, resolve_path
 
 
@@ -54,7 +54,7 @@ def build_adj_factor_metadata(config: dict | None = None) -> AdjFactorMetadata:
     """函数说明：构建 build_adj_factor_metadata 主要逻辑。"""
     cfg = config or load_config()
     raw_dir = resolve_path(cfg.get("data", {}).get("raw_dir", "data/raw"))
-    files = sorted(path for path in raw_dir.glob("*.csv") if _is_stock_csv(path)) if raw_dir.exists() else []
+    files = sorted(path for path in raw_dir.glob("*.csv") if _is_adj_factor_stock_csv(path)) if raw_dir.exists() else []
     digest = hashlib.sha256()
     symbols: list[dict[str, Any]] = []
     issues: list[str] = []

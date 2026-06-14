@@ -69,6 +69,128 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertIn(root / "auto_backtest_metrics.json", artifacts)
             self.assertEqual([stage["state"] for stage in status["stages"] if stage["name"] == "backtest"], ["skipped"])
 
+    def test_annual_state_router_quality_uses_formal_evidence(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            years_path = root / "router_years.csv"
+            pd.DataFrame(
+                [
+                    {"year": 2023, "annual_return": 0.22, "max_drawdown": -0.10},
+                    {"year": 2024, "annual_return": 0.24, "max_drawdown": -0.12},
+                    {"year": 2025, "annual_return": 0.21, "max_drawdown": -0.11},
+                ]
+            ).to_csv(years_path, index=False)
+            metrics_path = root / "router_metrics.json"
+            metrics_path.write_text(
+                json.dumps(
+                    {
+                        "metrics": {
+                            "annual_return": 0.25,
+                            "sharpe": 1.2,
+                            "max_drawdown": -0.12,
+                            "annual_turnover": 5.0,
+                            "annual_trade_cost_ratio": 0.02,
+                        },
+                        "audit": {"year_count": 3, "min_yearly_annual_return": 0.21, "worst_yearly_drawdown": -0.12},
+                        "full_gate": {"is_full_goal_met": True},
+                        "combo": {
+                            "missing_ret252_exposure": 0.7,
+                            "strong_trailing_exposure": 0.8,
+                            "moderate_positive_source": "roc60",
+                            "moderate_positive_ret252_min": 0.2,
+                            "moderate_low_source": "beta20",
+                            "moderate_low_ret252_min": 0.18,
+                            "moderate_low_ret252_max": 0.2,
+                            "moderate_low_exposure": 0.4,
+                            "turnover_boost_reasons": "low_vol_moderate_uptrend+moderate_positive_roc60",
+                            "turnover_boost_max_turnover": 2,
+                            "turnover_boost_rank_buffer": 10,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "annual_state_router": {
+                    "enabled": True,
+                    "missing_ret252_exposure": 0.7,
+                    "strong_trailing_exposure": 0.8,
+                    "moderate_positive_source": "roc60",
+                    "moderate_positive_ret252_min": 0.2,
+                    "moderate_low_source": "beta20",
+                    "moderate_low_ret252_min": 0.18,
+                    "moderate_low_ret252_max": 0.2,
+                    "moderate_low_exposure": 0.4,
+                    "turnover_boost_reasons": ["low_vol_moderate_uptrend", "moderate_positive_roc60"],
+                    "turnover_boost_max_turnover": 2,
+                    "turnover_boost_rank_buffer": 10,
+                    "evidence_metrics_file": str(metrics_path),
+                    "evidence_years_file": str(years_path),
+                }
+            }
+            quality = {
+                "min_validation_windows": 3,
+                "min_positive_return_rate": 0.5,
+                "min_optimizer_annual_return": 0.20,
+                "max_drawdown_limit": -0.20,
+                "max_annual_turnover": 20.0,
+                "max_annual_trade_cost_ratio": 0.2,
+            }
+
+            report = module._annual_state_router_quality(config, quality)
+
+            self.assertTrue(report.is_acceptable)
+            self.assertEqual(report.windows, 3)
+            self.assertAlmostEqual(report.annual_return_min, 0.21)
+
+    def test_backtest_stage_uses_annual_state_router_scores_when_enabled(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            config["annual_state_router"] = {"enabled": True}
+            prices = pd.read_parquet(config["ic"]["price_file"])
+            score_index = pd.MultiIndex.from_product([[pd.Timestamp("2024-01-03")], ["A", "B"]], names=["date", "instrument"])
+            routed_scores = pd.Series([2.0, 1.0], index=score_index, name="score")
+            routed = module.RoutedScoreRun(
+                scores=routed_scores,
+                score_routes=pd.DataFrame(
+                    [{"date": "2024-01-03", "source": "beta", "top_n": 2, "max_turnover": 2, "rank_buffer": 0}]
+                ),
+                year_routes=pd.DataFrame([{"decision_date": "2024-01-03", "exposure": 1.0}]),
+            )
+            runtime = module.AnnualStateRouterRuntime(
+                routed=routed,
+                source_definitions={},
+                backtest_config={"initial_capital": 100000, "top_n": 2, "selection_schedule": {"2024-01-03": {"top_n": 2}}},
+                files={},
+            )
+            result = module.BacktestResult(
+                equity_curve=pd.Series([100000.0, 130000.0], index=pd.to_datetime(["2024-01-03", "2024-01-04"]), name="equity"),
+                holdings=pd.DataFrame(),
+                trades=pd.DataFrame(),
+                metrics={"annual_return": 0.30, "max_drawdown": -0.10, "calmar": 3.0},
+            )
+            args = SimpleNamespace(skip_backtest=False, allow_low_quality=False, start_date="2024-01-01")
+            status = module._new_status()
+            artifacts: list[Path] = []
+
+            with patch.object(module, "_build_annual_state_router_runtime", return_value=runtime), patch.object(
+                module,
+                "build_strategy_scores",
+            ) as legacy_scores, patch.object(module, "run_backtest", return_value=result) as backtest, patch.object(
+                module,
+                "build_research_diagnostics",
+                return_value=({"enabled": False}, {}),
+            ), patch.object(module, "write_research_diagnostics", return_value={}):
+                stage = module._run_backtest_stage(args, config, factors, prices, "2024-01-04", root, status, artifacts)
+
+            legacy_scores.assert_not_called()
+            self.assertIs(stage.annual_state_router, runtime)
+            self.assertIs(backtest.call_args.args[0], routed_scores)
+            self.assertEqual(backtest.call_args.args[4]["selection_schedule"], {"2024-01-03": {"top_n": 2}})
+
     def test_skip_optimize_defaults_to_candidate_outputs(self) -> None:
         """函数说明：验证 test_skip_optimize_defaults_to_candidate_outputs 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
@@ -254,6 +376,7 @@ class RunAutoSignalTests(unittest.TestCase):
             config, factors = _auto_config_and_factors(root)
             latest = root / "latest_holdings.csv"
             latest.write_text("instrument\nOLD.SZ\n", encoding="utf-8")
+            (root / "current_holdings.csv").write_text("instrument,shares\n", encoding="utf-8")
 
             argv = [
                 "run_auto_signal.py",
@@ -271,6 +394,13 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertTrue((root / "manual_orders_candidate_2024-01-03.csv").exists())
             self.assertFalse((root / "signal_2024-01-03.csv").exists())
             self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")
+            status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
+            report = json.loads((root / "auto_signal_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["status"], "blocked")
+            self.assertFalse(status["is_executable"])
+            self.assertEqual(status["block_reasons"], status["quality_warnings"])
+            self.assertEqual(report["block_reasons"], report["quality_warnings"])
+            self.assertTrue(status["block_reasons"])
 
     def test_force_official_promotes_allowed_low_quality_run(self) -> None:
         """函数说明：验证 test_force_official_promotes_allowed_low_quality_run 覆盖的行为场景。"""

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality checklist"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Generated data and artifact boundary checks"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Validation and CLI failure review"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Status/log diagnostics review"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Focused tests and gate integrity checks"}

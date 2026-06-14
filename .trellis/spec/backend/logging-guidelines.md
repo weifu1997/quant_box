@@ -73,6 +73,65 @@ For workflows with multiple stages, JSON status files are as important as logs:
 
 When adding a new long-running workflow, write a status artifact that records stage name, state, timestamp, and a short message.
 
+### Scenario: Non-Executable Candidate Diagnostics
+
+#### 1. Scope / Trigger
+
+- Trigger: auto-signal runs can continue to candidate outputs after quality gates fail, especially with `--allow-low-quality`.
+- Owners: `scripts/run_auto_signal.py`, `src/reporting.py`, `src/manual_orders.py`, and monitoring exporters that read `outputs/auto_run_status.json`.
+
+#### 2. Signatures
+
+- Command: `scripts/run_auto_signal.py [--allow-low-quality] [--force-official]`.
+- Status artifact: `outputs/auto_run_status.json`.
+- Report artifact: `outputs/auto_signal_report.json`.
+- Human confirmation artifact: `outputs/order_confirmations/order_confirmation_candidate_<DATE>.csv`.
+
+#### 3. Contracts
+
+- If `is_executable` is `false`, `block_reasons` must be non-empty unless the run crashed before signal generation.
+- `quality_warnings` records all failed quality checks.
+- When low-quality continuation leaves no harder block reason, copy the quality warnings into `block_reasons` for status, report, manual orders, and confirmation templates.
+- `--force-official` may produce official outputs with warnings only when there are no hard block reasons; the warnings must remain visible in `quality_warnings`.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Quality gates fail and `--allow-low-quality` is absent | Candidate outputs; `block_reasons` includes failed gates |
+| Quality gates fail, `--allow-low-quality` is present, and `--force-official` is absent | Candidate outputs; `block_reasons` mirrors `quality_warnings` |
+| Quality gates fail, `--allow-low-quality --force-official` are present, and no hard gate fails | Official outputs; `quality_warnings` records the failed gates |
+| Account/data/governance hard gate fails | Candidate outputs; hard reasons remain in `block_reasons` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: `status=blocked`, `is_executable=false`, and `block_reasons=["backtest:..."]`.
+- Base: `status=complete`, `is_executable=true`, `block_reasons=[]`, and optional `quality_warnings=[]`.
+- Bad: `status=blocked`, `is_executable=false`, and `block_reasons=[]` while `quality_warnings` is non-empty.
+
+#### 6. Tests Required
+
+- `tests/test_run_auto_signal.py` must assert low-quality candidate runs do not overwrite official outputs and still write non-empty `block_reasons`.
+- Monitoring tests should continue to count `block_reasons` from `outputs/auto_run_status.json`.
+
+#### 7. Wrong vs Correct
+
+##### Wrong
+
+```python
+status["is_executable"] = False
+status["block_reasons"] = []
+status["quality_warnings"] = ["backtest:backtest_annual_return_below_threshold:..."]
+```
+
+##### Correct
+
+```python
+status["is_executable"] = False
+status["block_reasons"] = ["backtest:backtest_annual_return_below_threshold:..."]
+status["quality_warnings"] = ["backtest:backtest_annual_return_below_threshold:..."]
+```
+
 ---
 
 ## What To Log

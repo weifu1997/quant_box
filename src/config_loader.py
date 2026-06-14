@@ -76,6 +76,44 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "summary_file": None,
         "require_is_acceptable": True,
     },
+    "annual_state_router": {
+        "enabled": False,
+        "factor_file": None,
+        "industry_factor_file": None,
+        "selector_file": "outputs/selector_weight_lb63_top5_posprop_top5_formal_20260611_selector.csv",
+        "source_factor_files": {
+            "beta": "",
+            "db_size": "",
+            "quality": "",
+            "selector": "",
+            "industry": "",
+            "roc60": "",
+            "db_total": "",
+            "beta20": "",
+            "rsqr20": "",
+        },
+        "include_expanded_sources": True,
+        "initial_source": "beta",
+        "missing_ret252_exposure": 0.65,
+        "flat_negative_exposure": 0.90,
+        "fallback_source": None,
+        "full_turnover_on_route_change": False,
+        "use_defensive_timing": False,
+        "disable_equity_overlay": False,
+        "moderate_positive_source": None,
+        "moderate_positive_ret252_min": 0.20,
+        "moderate_low_source": None,
+        "moderate_low_ret252_min": 0.18,
+        "moderate_low_ret252_max": 0.20,
+        "moderate_low_exposure": 1.0,
+        "strong_trailing_exposure": 1.0,
+        "turnover_mode": "default",
+        "turnover_boost_reasons": [],
+        "turnover_boost_max_turnover": 2,
+        "turnover_boost_rank_buffer": 10,
+        "evidence_metrics_file": None,
+        "evidence_years_file": None,
+    },
     "ml_strategy": {
         "enabled": False,
         "model_type": "ridge_numpy",
@@ -538,6 +576,14 @@ def _list_of_strings(value: Any) -> str | None:
     return None
 
 
+def _mapping_of_strings(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return "must be a mapping"
+    if any(not isinstance(key, str) or not isinstance(item, (str, Path)) for key, item in value.items()):
+        return "must map strings to strings"
+    return None
+
+
 _CONFIG_VALIDATORS: dict[str, _Validator] = {
     "tushare.http_url": _string_value,
     "tushare.token": _string_value,
@@ -572,6 +618,32 @@ _CONFIG_VALIDATORS: dict[str, _Validator] = {
     "validated_strategy.candidate": _string_value,
     "validated_strategy.summary_file": _optional(_string_value),
     "validated_strategy.require_is_acceptable": _bool_value,
+    "annual_state_router.enabled": _bool_value,
+    "annual_state_router.factor_file": _optional(_string_value),
+    "annual_state_router.industry_factor_file": _optional(_string_value),
+    "annual_state_router.selector_file": _string_value,
+    "annual_state_router.source_factor_files": _mapping_of_strings,
+    "annual_state_router.include_expanded_sources": _bool_value,
+    "annual_state_router.initial_source": _string_value,
+    "annual_state_router.missing_ret252_exposure": _number_between(0, 1),
+    "annual_state_router.flat_negative_exposure": _number_between(0, 1),
+    "annual_state_router.fallback_source": _optional(_string_value),
+    "annual_state_router.full_turnover_on_route_change": _bool_value,
+    "annual_state_router.use_defensive_timing": _bool_value,
+    "annual_state_router.disable_equity_overlay": _bool_value,
+    "annual_state_router.moderate_positive_source": _optional(_string_value),
+    "annual_state_router.moderate_positive_ret252_min": _number_at_least(0),
+    "annual_state_router.moderate_low_source": _optional(_string_value),
+    "annual_state_router.moderate_low_ret252_min": _number_at_least(0),
+    "annual_state_router.moderate_low_ret252_max": _number_at_least(0),
+    "annual_state_router.moderate_low_exposure": _number_between(0, 1),
+    "annual_state_router.strong_trailing_exposure": _number_between(0, 1),
+    "annual_state_router.turnover_mode": _string_value,
+    "annual_state_router.turnover_boost_reasons": _list_of_strings,
+    "annual_state_router.turnover_boost_max_turnover": _int_at_least(1),
+    "annual_state_router.turnover_boost_rank_buffer": _int_at_least(0),
+    "annual_state_router.evidence_metrics_file": _optional(_string_value),
+    "annual_state_router.evidence_years_file": _optional(_string_value),
     "ml_strategy.enabled": _bool_value,
     "ml_strategy.train_years": _int_at_least(1),
     "ml_strategy.label_horizon_sessions": _int_at_least(1),

@@ -88,6 +88,7 @@ def run_backtest(
     top_n = int(config.get("top_n", 7))
     max_turnover = int(config.get("max_turnover", 1))
     rank_buffer = int(config.get("rank_buffer", 0))
+    selection_schedule = _normalize_selection_schedule(config.get("selection_schedule"))
     industry_map = config.get("industry_map")
     max_industry_weight = config.get("max_industry_weight")
     max_weight = config.get("max_weight_per_stock")
@@ -265,6 +266,13 @@ def run_backtest(
         exposure_rebalance = exposure_rebalance or _equity_overlay_rebalance_needed(equity_rows, config)
         rebalance_signal_date = signal_date if signal_date is not None else last_signal_date if exposure_rebalance else None
         if rebalance_signal_date is not None and not risk_off:
+            effective_top_n, effective_max_turnover, effective_rank_buffer = _selection_config_for_signal(
+                selection_schedule,
+                rebalance_signal_date,
+                top_n,
+                max_turnover,
+                rank_buffer,
+            )
             daily_scores = score_panel.xs(rebalance_signal_date, level=0, drop_level=True)
             daily_scores.index = daily_scores.index.astype(str)
             daily_scores = daily_scores[daily_scores.index.isin(tradability["priced"])]
@@ -272,10 +280,10 @@ def run_backtest(
 
             target_holdings = select_stocks(
                 daily_scores,
-                top_n=top_n,
+                top_n=effective_top_n,
                 previous_holdings=holdings.keys(),
-                max_turnover=max_turnover,
-                rank_buffer=rank_buffer,
+                max_turnover=effective_max_turnover,
+                rank_buffer=effective_rank_buffer,
                 group_map=industry_map,
                 max_group_weight=max_industry_weight,
             )
@@ -548,6 +556,47 @@ def calculate_benchmark_metrics(equity_curve: pd.Series, benchmark_curve: pd.Ser
     alpha = (aligned["portfolio"].mean() - beta * aligned["benchmark"].mean()) * annual_days
     ir = active.mean() / active.std(ddof=1) * np.sqrt(annual_days) if active.std(ddof=1) else 0.0
     return {"alpha": float(alpha), "beta": float(beta), "information_ratio": float(ir)}
+
+
+def _normalize_selection_schedule(schedule: object) -> dict[pd.Timestamp, dict[str, int]]:
+    if schedule is None:
+        return {}
+    if not isinstance(schedule, Mapping):
+        raise ValueError("selection_schedule must be a mapping of date to selection settings.")
+
+    result: dict[pd.Timestamp, dict[str, int]] = {}
+    for raw_date, raw_settings in schedule.items():
+        if not isinstance(raw_settings, Mapping):
+            raise ValueError("selection_schedule values must be mappings.")
+        date = pd.Timestamp(raw_date).normalize()
+        settings: dict[str, int] = {}
+        for key in ("top_n", "max_turnover", "rank_buffer"):
+            if key not in raw_settings or raw_settings.get(key) is None:
+                continue
+            value = int(raw_settings[key])
+            if key in {"top_n", "max_turnover"} and value < 1:
+                raise ValueError(f"selection_schedule.{key} must be >= 1.")
+            if key == "rank_buffer" and value < 0:
+                raise ValueError("selection_schedule.rank_buffer must be >= 0.")
+            settings[key] = value
+        if settings:
+            result[date] = settings
+    return result
+
+
+def _selection_config_for_signal(
+    schedule: dict[pd.Timestamp, dict[str, int]],
+    signal_date: pd.Timestamp,
+    top_n: int,
+    max_turnover: int,
+    rank_buffer: int,
+) -> tuple[int, int, int]:
+    settings = schedule.get(pd.Timestamp(signal_date).normalize(), {})
+    return (
+        int(settings.get("top_n", top_n)),
+        int(settings.get("max_turnover", max_turnover)),
+        int(settings.get("rank_buffer", rank_buffer)),
+    )
 
 
 def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:

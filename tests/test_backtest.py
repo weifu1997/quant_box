@@ -116,6 +116,52 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(pd.Timestamp(buy["date"]), pd.Timestamp("2024-01-02"))
         self.assertAlmostEqual(float(buy["price"]), 10.0)
 
+    def test_run_backtest_applies_selection_schedule_by_signal_date(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        stocks = ["000001.SZ", "000002.SZ"]
+        scores = pd.Series(
+            [2.0, 1.0, 2.0, 3.0],
+            index=pd.MultiIndex.from_tuples(
+                [
+                    (pd.Timestamp("2024-01-02"), stocks[0]),
+                    (pd.Timestamp("2024-01-02"), stocks[1]),
+                    (pd.Timestamp("2024-01-03"), stocks[0]),
+                    (pd.Timestamp("2024-01-03"), stocks[1]),
+                ],
+                names=["datetime", "instrument"],
+            ),
+            name="score",
+        )
+        prices = pd.concat(
+            {
+                "close": pd.DataFrame({stock: [10.0, 10.0, 10.0] for stock in stocks}, index=dates),
+                "volume": pd.DataFrame({stock: [1000.0, 1000.0, 1000.0] for stock in stocks}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "rank_buffer": 0,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+                "selection_schedule": {
+                    "2024-01-03": {"top_n": 2, "max_turnover": 2, "rank_buffer": 0},
+                },
+            },
+        )
+
+        latest = result.holdings[result.holdings["date"] == pd.Timestamp("2024-01-04")]
+        self.assertEqual(set(latest["instrument"]), set(stocks))
+
     def test_normalized_price_frame_cache_reuses_same_source_panel(self) -> None:
         """函数说明：验证回测会复用同一价格面板的规范化结果。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03"])

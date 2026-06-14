@@ -68,6 +68,7 @@ def generate_signal(
     factor_file: str | Path | None = None,
     config: dict | None = None,
     factors: pd.DataFrame | None = None,
+    scores: pd.Series | None = None,
     price_df: pd.DataFrame | None = None,
     price_file: str | Path | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
@@ -82,14 +83,25 @@ def generate_signal(
         config=config,
     )
 
-    if factors is None:
+    if scores is None and factors is None:
         factors = load_or_compute_factors(
             start_date=data_cfg["start_date"],
             end_date=factor_end_date,
             cache_file=factor_file or config["factors"]["cache_file"],
         )
-    score_date = "latest" if use_latest_date else _effective_signal_date(factors, factor_end_date)
-    scores = build_latest_strategy_scores(factors, config, signal_date=score_date, price_df=price_df, price_file=price_file)
+    if scores is None:
+        score_date = "latest" if use_latest_date else _effective_signal_date(factors, factor_end_date)
+        scores = build_latest_strategy_scores(
+            factors,
+            config,
+            signal_date=score_date,
+            price_df=price_df,
+            price_file=price_file,
+        )
+    else:
+        score_date = "latest" if use_latest_date else _effective_score_panel_date(scores, factor_end_date)
+        if score_date != "latest":
+            scores = _slice_score_panel_date(scores, pd.Timestamp(score_date))
     latest_date, latest_scores = _latest_daily_scores(scores)
     if use_latest_date:
         signal_date = latest_date.strftime("%Y-%m-%d")
@@ -188,6 +200,37 @@ def _factor_dates(factors: pd.DataFrame) -> pd.DatetimeIndex:
         raise ValueError("factors must use MultiIndex: date/instrument.")
     date_level = factors.index.names[0] or 0
     return _normalize_datetime_index(factors.index.get_level_values(date_level), dropna=True, unique=True, sort=True)
+
+
+def _effective_score_panel_date(scores: pd.Series, requested_date: str) -> str:
+    requested_ts = pd.Timestamp(requested_date).normalize()
+    dates = _score_panel_dates(scores)
+    eligible = dates[dates <= requested_ts]
+    if eligible.empty:
+        raise ValueError(f"No score panel date is available on or before requested signal_date {requested_ts.date()}.")
+    effective = pd.Timestamp(eligible.max()).normalize()
+    if effective != requested_ts:
+        logger.warning(
+            "Falling back signal date from %s to %s because score panel has no rows for the requested date.",
+            requested_ts.date(),
+            effective.date(),
+        )
+    return str(effective.date())
+
+
+def _score_panel_dates(scores: pd.Series) -> pd.DatetimeIndex:
+    if scores.empty or not isinstance(scores.index, pd.MultiIndex):
+        raise ValueError("scores must use MultiIndex: datetime/instrument.")
+    date_level = scores.index.names[0] or 0
+    return _normalize_datetime_index(scores.index.get_level_values(date_level), dropna=True, unique=True, sort=True)
+
+
+def _slice_score_panel_date(scores: pd.Series, target_date: pd.Timestamp) -> pd.Series:
+    dates = _normalize_datetime_index(scores.index.get_level_values(0), normalize=False)
+    mask = dates.normalize() == pd.Timestamp(target_date).normalize()
+    sliced = scores.loc[mask].copy()
+    sliced.attrs = dict(getattr(scores, "attrs", {}))
+    return sliced
 
 
 def _normalize_score_index(scores: pd.Series) -> pd.Series:

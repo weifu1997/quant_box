@@ -296,6 +296,39 @@ class MarketRegimeTests(unittest.TestCase):
         self.assertAlmostEqual(float(bear["total_return"]), -0.10)
         self.assertAlmostEqual(float(bear["max_drawdown"]), -0.10)
 
+    def test_apply_defensive_timing_combines_existing_exposure_schedule(self) -> None:
+        """Existing route exposure and defensive timing are multiplied."""
+        dates = pd.bdate_range("2024-01-02", periods=6)
+        close = pd.DataFrame({"A": [10.0, 9.8, 9.5, 9.1, 8.9, 8.6]}, index=dates)
+        prices = pd.concat({"close": close}, axis=1)
+        config = {
+            "market_regime": {
+                "enabled": True,
+                "ma_window": 2,
+                "momentum_window": 1,
+                "volatility_window": 2,
+                "min_periods": 1,
+                "high_volatility_threshold": 10.0,
+                "lag_days": 0,
+            },
+            "defensive_timing": {"enabled": True, "bear_exposure": 0.4, "sideways_exposure": 0.8, "bull_exposure": 1.0},
+        }
+
+        bt_config = apply_defensive_timing_to_backtest_config(
+            {
+                "initial_capital": 1000,
+                "exposure_schedule": {dates[0].date().isoformat(): 0.5},
+            },
+            prices,
+            config,
+        )
+
+        self.assertAlmostEqual(float(bt_config["exposure_schedule"].iloc[-1]), 0.2)
+        self.assertAlmostEqual(
+            float(bt_config["exposure_schedule"].iloc[-1]),
+            0.5 * defensive_exposure_for_date(prices, config, dates[-1]),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

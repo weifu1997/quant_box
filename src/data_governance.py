@@ -10,7 +10,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.common import coverage_ratio as _coverage_ratio, is_stock_csv as _is_stock_csv
+from src.common import coverage_ratio as _coverage_ratio, is_adj_factor_stock_csv as _is_adj_factor_stock_csv
 from src.config_loader import load_config, resolve_path
 
 
@@ -617,7 +617,7 @@ def _sample_raw_adj_factor(raw_dir: Path, sample_raw_files: int) -> tuple[int, i
     """函数说明：处理 sample_raw_adj_factor 的内部辅助逻辑。"""
     if not raw_dir.exists():
         return 0, 0
-    files = sorted(path for path in raw_dir.glob("*.csv") if _is_stock_csv(path))[: max(sample_raw_files, 1)]
+    files = sorted(path for path in raw_dir.glob("*.csv") if _is_adj_factor_stock_csv(path))[: max(sample_raw_files, 1)]
     with_column = 0
     for path in files:
         try:
@@ -633,7 +633,7 @@ def _count_raw_stock_files(raw_dir: Path) -> int:
     """函数说明：处理 count_raw_stock_files 的内部辅助逻辑。"""
     if not raw_dir.exists():
         return 0
-    return sum(1 for path in raw_dir.glob("*.csv") if _is_stock_csv(path))
+    return sum(1 for path in raw_dir.glob("*.csv") if _is_adj_factor_stock_csv(path))
 
 
 def _build_repair_actions(

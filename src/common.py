@@ -88,6 +88,14 @@ def is_stock_csv(path: Path) -> bool:
     return len(name) == len("000001.SZ.CSV") and name[:6].isdigit() and name[6:] in {".SZ.CSV", ".SH.CSV"}
 
 
+def is_adj_factor_stock_csv(path: Path) -> bool:
+    """Return true for raw A-share stock files that should carry adj_factor."""
+    if not is_stock_csv(path):
+        return False
+    symbol = path.name[:-4].upper()
+    return not symbol.startswith(("000300.", "000905."))
+
+
 def parse_datetime_values(values: object) -> pd.Series:
     """函数说明：解析 parse_datetime_values 主要逻辑。"""
     parsed = pd.to_datetime(values, errors="coerce")

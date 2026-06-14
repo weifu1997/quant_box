@@ -35,8 +35,25 @@ def normalize_daily_frame(df: pd.DataFrame, default_ts_code: str | None = None) 
     renamed = renamed.dropna(subset=["ts_code", "trade_date", "close"])
     renamed = renamed[renamed["ts_code"] != ""].sort_values(["ts_code", "trade_date"])
     renamed = renamed.drop_duplicates(["ts_code", "trade_date"], keep="last")
+    _fill_zero_ohlc_suspended_rows(renamed)
     _validate_daily_ohlcv(renamed)
     return renamed.reset_index(drop=True)
+
+
+def _fill_zero_ohlc_suspended_rows(frame: pd.DataFrame) -> None:
+    """Normalize Tushare zero-OHLC suspended rows using the valid close price."""
+    if frame.empty:
+        return
+    zero_ohlc = frame[["open", "high", "low"]].eq(0).all(axis=1)
+    no_turnover = frame[["vol", "amount"]].eq(0).all(axis=1)
+    valid_close = frame["close"].gt(0)
+    suspended = zero_ohlc & no_turnover & valid_close
+    if not bool(suspended.any()):
+        return
+    close_values = frame.loc[suspended, "close"]
+    frame.loc[suspended, "open"] = close_values
+    frame.loc[suspended, "high"] = close_values
+    frame.loc[suspended, "low"] = close_values
 
 
 def _validate_daily_ohlcv(frame: pd.DataFrame) -> None:

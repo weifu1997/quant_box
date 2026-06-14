@@ -42,6 +42,42 @@ class DataGovernanceTests(unittest.TestCase):
             self.assertEqual(len(saved["digest"]), 64)
             self.assertEqual(saved["symbols"][0]["last_adj_factor"], 1.1)
 
+    def test_build_adj_factor_metadata_ignores_index_raw_files_without_adj_factor(self) -> None:
+        """函数说明：验证指数 raw 文件没有复权因子时不会污染股票复权元数据。"""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "trade_date": ["2024-01-03"],
+                    "close": [10.0],
+                    "adj_factor": [1.0],
+                }
+            ).to_csv(raw_dir / "000001.SZ.csv", index=False)
+            pd.DataFrame(
+                {
+                    "ts_code": ["000300.SH"],
+                    "trade_date": ["2024-01-03"],
+                    "close": [3500.0],
+                }
+            ).to_csv(raw_dir / "000300.SH.csv", index=False)
+            pd.DataFrame(
+                {
+                    "ts_code": ["000905.SH"],
+                    "trade_date": ["2024-01-03"],
+                    "close": [5500.0],
+                }
+            ).to_csv(raw_dir / "000905.SH.csv", index=False)
+
+            metadata = build_adj_factor_metadata({"data": {"raw_dir": str(raw_dir)}})
+
+            self.assertEqual(metadata.raw_file_count, 1)
+            self.assertEqual(metadata.files_with_adj_factor, 1)
+            self.assertEqual(metadata.symbol_count, 1)
+            self.assertEqual(metadata.issues, [])
+
     def test_build_data_governance_report_tracks_point_in_time_evidence(self) -> None:
         """函数说明：验证 test_build_data_governance_report_tracks_point_in_time_evidence 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:
