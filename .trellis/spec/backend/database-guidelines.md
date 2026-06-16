@@ -28,6 +28,8 @@ Because these files drive trading decisions, storage changes must be explicit, t
 | Mainboard universe | `data/raw/mainboard_a_stocks.csv` | CSV | `src/data_fetcher.py` |
 | ST calendar | `data/raw/st_calendar.csv` | CSV | `src/data_fetcher.py` |
 | HS300 constituents | `data/raw/hs300_constituents.csv` | CSV | `src/data_fetcher.py` |
+| Multi-index constituents | `data/raw/index_constituents.csv` | CSV | `scripts/run_build_universe.py` |
+| Historical stock universe | `data/raw/historical_universe.csv` | CSV | `src/universe_builder.py` |
 | Qlib provider | `data/qlib_data/` | Qlib text/bin/parquet | `src/data_converter.py` |
 | Price panels | `data/prices/*.parquet` | Parquet | `src/data_converter.py` |
 | Factor cache | `data/factors/alpha158.parquet` | Parquet | `src/factor_calculator.py` |
@@ -195,6 +197,86 @@ Tests assert this contract across `src/backtest.py`, `src/factor_ic.py`, `src/sc
 ### Config
 
 `DEFAULT_CONFIG` in `src/config_loader.py` is the schema baseline. `config/settings.yaml` and `config/settings.local.yaml` deep-merge onto it. New config keys should be added to `DEFAULT_CONFIG`, validated where risky, and tested in `tests/test_config_loader.py`.
+
+### Historical universe snapshots
+
+`data/raw/index_constituents.csv` stores normalized Tushare `index_weight` rows for every index needed by the configured universe builder:
+
+```text
+index_code, con_code, trade_date, weight
+```
+
+`data/raw/historical_universe.csv` stores point-in-time stock-pool snapshots generated from those rows:
+
+```text
+trade_date, instrument, sources, index_codes, source_count, weight,
+hs300_weight, csi500_weight, csi1000_weight, csi1000_rank
+```
+
+When `universe_builder.enabled` is true, backtest and signal score panels must be filtered with the latest snapshot whose `trade_date <= score_date`. Never select a later snapshot to fill an earlier score date.
+
+## Scenario: Historical Universe Builder
+
+### 1. Scope / Trigger
+
+- Trigger: the project now has a cross-layer stock-pool contract spanning Tushare `index_weight`, local CSV cache, score filtering, backtest, signal generation, README, and Windows batch entrypoints.
+
+### 2. Signatures
+
+- Command: `.\.venv\Scripts\python.exe scripts\run_build_universe.py [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD|auto] [--core-index-codes CSV] [--satellite-index-code CODE] [--satellite-top-n N] [--index-constituents-file PATH] [--out-file PATH] [--skip-fetch] [--max-index-windows N] [--index-window-days N]`.
+- Batch wrapper: `14_构建历史股票池.bat`.
+- API: `src.universe_builder.build_historical_universe(index_constituents, core_index_codes, satellite_index_code, satellite_top_n) -> pd.DataFrame`.
+- API: `src.universe_builder.filter_scores_by_historical_universe(scores, universe) -> pd.Series`.
+
+### 3. Contracts
+
+- Input constituent rows use normalized `index_code`, `con_code`, `trade_date`, and `weight` columns.
+- Default core indices are `000300.SH` and `000905.SH`, both kept in full.
+- Default satellite index is `000852.SH`, ranked by descending `weight`, with the top `300` rows kept per `trade_date`.
+- Output `instrument` values are uppercase Tushare symbols.
+- Output `sources` and `index_codes` are pipe-separated labels for symbols that appear in multiple selected indices.
+- Config keys live under `universe_builder` and must be present in `DEFAULT_CONFIG` plus `_CONFIG_VALIDATORS`.
+
+### 4. Validation & Error Matrix
+
+- Missing `index_constituents_file` when building from file -> `FileNotFoundError` telling the user to run `scripts/run_build_universe.py`.
+- Missing historical universe file while filtering and `require_file=true` -> `FileNotFoundError`.
+- Missing historical universe file while filtering and `require_file=false` -> warning and unchanged scores.
+- Historical universe input missing `trade_date` or `instrument`/`con_code`/`ts_code` -> `ValueError` naming missing columns.
+- Score input without a `datetime`/`instrument` MultiIndex -> `ValueError("scores must use MultiIndex: datetime/instrument.")`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `000300.SH + 000905.SH + top 300 of 000852.SH` produces one row per `(trade_date, instrument)` with source labels and satellite ranks.
+- Base: `--skip-fetch` rebuilds `historical_universe.csv` from an existing cached `index_constituents.csv` without network access.
+- Bad: a score date earlier than the first universe snapshot gets no allowed members rather than using a future snapshot.
+
+### 6. Tests Required
+
+- Unit test that core members are kept in full and satellite members are limited by per-date weight rank.
+- Unit test that score filtering uses the latest prior snapshot and does not leak future membership.
+- Config test that `DEFAULT_CONFIG["universe_builder"]` contains the default paths, index codes, and top-N.
+- Script/docs test that the batch entrypoint is UTF-8, CRLF, and documented in README.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+latest = universe["trade_date"].max()
+allowed = universe[universe["trade_date"] == latest]
+scores = scores[scores.index.get_level_values("instrument").isin(allowed["instrument"])]
+```
+
+This leaks the newest known membership into every historical score date.
+
+#### Correct
+
+```python
+scores = filter_scores_by_historical_universe(scores, universe)
+```
+
+The helper picks only the latest snapshot with `trade_date <= score_date`.
 
 ### Scenario: Backtest Selection Schedule
 

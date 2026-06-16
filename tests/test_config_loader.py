@@ -147,6 +147,17 @@ quality:
         self.assertEqual(DEFAULT_CONFIG["data"]["daily_basic_file"], "data/factors/daily_basic.parquet")
         self.assertEqual(DEFAULT_CONFIG["data"]["st_calendar_file"], "data/raw/st_calendar.csv")
 
+    def test_default_config_includes_historical_universe_builder(self) -> None:
+        """Verify the historical universe builder defaults are available."""
+        universe = DEFAULT_CONFIG["universe_builder"]
+
+        self.assertFalse(universe["enabled"])
+        self.assertEqual(universe["index_constituents_file"], "data/raw/index_constituents.csv")
+        self.assertEqual(universe["output_file"], "data/raw/historical_universe.csv")
+        self.assertEqual(universe["core_index_codes"], ["000300.SH", "000905.SH"])
+        self.assertEqual(universe["satellite_index_code"], "000852.SH")
+        self.assertEqual(universe["satellite_top_n"], 300)
+
     def test_default_scoring_excludes_low_liquidity_bucket_and_uses_stable_dynamic_ic(self) -> None:
         """函数说明：验证 test_default_scoring_excludes_low_liquidity_bucket_and_uses_stable_dynamic_ic 覆盖的行为场景。"""
         self.assertEqual(DEFAULT_CONFIG["liquidity_filter"]["side"], "low")

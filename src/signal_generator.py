@@ -18,6 +18,7 @@ from src.risk_policy import RiskPolicy
 from src.scoring import build_latest_strategy_scores
 from src.strategy import select_stocks
 from src.trading_calendar import resolve_target_date_value
+from src.universe_builder import apply_configured_historical_universe
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ def generate_signal(
             price_df=price_df,
             price_file=price_file,
         )
+        scores = apply_configured_historical_universe(scores, config)
     else:
         score_date = "latest" if use_latest_date else _effective_score_panel_date(scores, factor_end_date)
         if score_date != "latest":

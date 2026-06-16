@@ -114,6 +114,7 @@ setx TUSHARE_TOKEN "你的token"
 | `10_生成最新信号.bat` | 分步工具：基于最新因子生成候选手动交易信号；如需覆盖正式持仓，传入 `--official` |
 | `12_全量重刷股票数据.bat` | 维护工具：从配置起始日或上市日全量重刷 raw 股票数据，慢于 `04`，仅在历史数据疑似损坏时使用 |
 | `13_一键补齐历史数据_无人值守.bat` | 无人值守工具：分批补齐 2012 年以来 raw 日线，转换数据，补齐 daily_basic，并可重算 Alpha158 因子 |
+| `14_构建历史股票池.bat` | 分步工具：用 Tushare `index_weight` 构建沪深300 + 中证500 + 中证1000权重前300的历史股票池快照 |
 | `scripts/run_update_point_in_time_data.py` | 命令行工具：补齐 daily_basic、HS300 指数成分权重和 ST 历史日历，并重写点时数据治理报告 |
 | `scripts/run_update_fundamentals.py` | 命令行工具：补齐 fina_indicator 和 dividend 基本面缓存，用于质量、分红和负债筛选 |
 | `scripts/run_fundamental_screen.py` | 命令行工具：生成基本面筛选 CSV 和 Markdown 解释报告 |
@@ -125,6 +126,7 @@ setx TUSHARE_TOKEN "你的token"
 02_快速更新并生成信号.bat      日常更新并生成信号
 03_运行测试.bat                只跑自动化测试
 13_一键补齐历史数据_无人值守.bat  下班后无人值守补齐长周期历史数据
+14_构建历史股票池.bat          生成点时历史股票池快照
 run_all.bat                    自动全流程：刷新缺失和过期数据 + data health + 回测 + 候选信号
 04 -> 06 -> 07 -> 08 -> 09 -> 10  完整研究流程
 ```
@@ -180,6 +182,19 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_update_point_in_time_data.py --max-dates 20 --max-index-windows 1
+```
+
+构建点时历史股票池快照，默认使用沪深300、中证500 和中证1000成分权重，并保留中证1000权重前300：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_build_universe.py --max-index-windows 1
+```
+
+生成结果写入 `data/raw/historical_universe.csv`。需要让回测和候选信号按历史股票池过滤时，在本地配置里启用：
+
+```yaml
+universe_builder:
+  enabled: true
 ```
 
 补齐基础财务依赖，包括 `fina_indicator` 和 `dividend`：
@@ -412,6 +427,7 @@ exception tracebacks when a run fails.
 当前默认配置位于 `config/settings.yaml`：
 
 - 股票池：A 股主板 `mainboard_a`
+- 可选历史股票池：启用 `universe_builder.enabled` 后，回测和候选信号会按 `data/raw/historical_universe.csv` 的点时快照过滤，默认口径为沪深300 + 中证500 + 中证1000权重前300
 - 因子组：`dynamic_ic_selector`，默认每期使用 IC 排名前 3 个候选因子做权重混合
 - 调仓频率：monthly
 - 默认持仓数：15

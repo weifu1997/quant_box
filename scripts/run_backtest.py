@@ -25,6 +25,7 @@ from src.risk_policy import RiskPolicy
 from src.scoring import build_strategy_scores
 from src.strategy import resample_signals
 from src.trading_calendar import resolve_target_date_value
+from src.universe_builder import apply_configured_historical_universe
 from src.universe_coverage import summarize_universe_coverage
 from scripts._shared import requested_factor_columns, strip_direction_prefix, yearly_quality_gate, yearly_stats
 
@@ -98,6 +99,9 @@ def main() -> None:
         scores = build_strategy_scores(factors, config, price_df=prices)
         score_raw_summary = _score_summary(scores)
         logger.info("Score panel before resample: %s", json.dumps(score_raw_summary, ensure_ascii=False, default=str))
+        scores = apply_configured_historical_universe(scores, config)
+        score_universe_summary = _score_summary(scores)
+        logger.info("Score panel after historical universe filter: %s", json.dumps(score_universe_summary, ensure_ascii=False, default=str))
         scores = resample_signals(scores, config["strategy"].get("rebalance_freq", "daily"))
         score_summary = _score_summary(scores)
         logger.info("Score panel after resample: %s", json.dumps(score_summary, ensure_ascii=False, default=str))
@@ -152,6 +156,7 @@ def main() -> None:
                 "prices": price_summary,
                 "factors": factor_summary,
                 "scores_before_resample": score_raw_summary,
+                "scores_after_universe_filter": score_universe_summary,
                 "scores_after_resample": score_summary,
                 "alignment": _input_alignment_summary(prices, factors),
             },
