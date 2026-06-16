@@ -213,7 +213,7 @@ trade_date, instrument, sources, index_codes, source_count, weight,
 hs300_weight, csi500_weight, csi1000_weight, csi1000_rank
 ```
 
-When `universe_builder.enabled` is true, backtest and signal score panels must be filtered with the latest snapshot whose `trade_date <= score_date`. Never select a later snapshot to fill an earlier score date.
+When `universe_builder.enabled` is true, backtest and signal score panels must be filtered source by source: for each source label such as `hs300`, `csi500`, and `csi1000`, pick that source's latest snapshot whose `trade_date <= score_date`, then union the members. Never use a later snapshot to fill an earlier score date, and never use one source's newer snapshot date to discard another source's still-valid prior snapshot.
 
 ## Scenario: Historical Universe Builder
 
@@ -231,7 +231,7 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 ### 3. Contracts
 
 - Input constituent rows use normalized `index_code`, `con_code`, `trade_date`, and `weight` columns.
-- Default core indices are `000300.SH` and `000905.SH`, both kept in full.
+- Default core indices are `000300.SH` and `000905.SH`, both kept in full. Known equivalent fallback codes such as `399300.SZ` for `hs300` are accepted as the same source during build and filtering.
 - Default satellite index is `000852.SH`, ranked by descending `weight`, with the top `300` rows kept per `trade_date`.
 - Output `instrument` values are uppercase Tushare symbols.
 - Output `sources` and `index_codes` are pipe-separated labels for symbols that appear in multiple selected indices.
@@ -247,14 +247,17 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `000300.SH + 000905.SH + top 300 of 000852.SH` produces one row per `(trade_date, instrument)` with source labels and satellite ranks.
+- Good: `000300.SH` or fallback `399300.SZ` + `000905.SH` + top 300 of `000852.SH` produces one row per `(trade_date, instrument)` with source labels and satellite ranks.
 - Base: `--skip-fetch` rebuilds `historical_universe.csv` from an existing cached `index_constituents.csv` without network access.
 - Bad: a score date earlier than the first universe snapshot gets no allowed members rather than using a future snapshot.
+- Bad: when `csi1000` has a newer snapshot than `hs300`/`csi500`, filtering still carries forward the prior `hs300` and `csi500` snapshots instead of shrinking the pool to `csi1000` only.
 
 ### 6. Tests Required
 
 - Unit test that core members are kept in full and satellite members are limited by per-date weight rank.
-- Unit test that score filtering uses the latest prior snapshot and does not leak future membership.
+- Unit test that `399300.SZ` fallback rows are retained as `hs300`.
+- Unit test that score filtering uses the latest prior snapshot per source and does not leak future membership.
+- Unit test that asynchronous source snapshots are carried forward independently before unioning members.
 - Config test that `DEFAULT_CONFIG["universe_builder"]` contains the default paths, index codes, and top-N.
 - Script/docs test that the batch entrypoint is UTF-8, CRLF, and documented in README.
 
@@ -268,7 +271,7 @@ allowed = universe[universe["trade_date"] == latest]
 scores = scores[scores.index.get_level_values("instrument").isin(allowed["instrument"])]
 ```
 
-This leaks the newest known membership into every historical score date.
+This can both leak the newest known membership into every historical score date and discard sources whose latest valid snapshot is older than another source's latest date.
 
 #### Correct
 
@@ -276,7 +279,7 @@ This leaks the newest known membership into every historical score date.
 scores = filter_scores_by_historical_universe(scores, universe)
 ```
 
-The helper picks only the latest snapshot with `trade_date <= score_date`.
+The helper picks each source's latest snapshot with `trade_date <= score_date`, then unions those members.
 
 ### Scenario: Backtest Selection Schedule
 

@@ -184,13 +184,13 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 .\.venv\Scripts\python.exe scripts\run_update_point_in_time_data.py --max-dates 20 --max-index-windows 1
 ```
 
-构建点时历史股票池快照，默认使用沪深300、中证500 和中证1000成分权重，并保留中证1000权重前300：
+构建点时历史股票池快照，默认使用沪深300、中证500 和中证1000成分权重，并保留中证1000权重前300。首次只做接口烟测时，把输出写到 `outputs/`，避免一批试跑数据覆盖正式股票池：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_build_universe.py --max-index-windows 1
+.\.venv\Scripts\python.exe scripts\run_build_universe.py --max-index-windows 1 --index-constituents-file outputs\universe_smoke_index_constituents.csv --out-file outputs\historical_universe_smoke.csv
 ```
 
-生成结果写入 `data/raw/historical_universe.csv`。需要让回测和候选信号按历史股票池过滤时，在本地配置里启用：
+正式构建不要加 `--max-index-windows`，生成结果写入 `data/raw/historical_universe.csv`。需要让回测和候选信号按历史股票池过滤时，在本地配置里启用：
 
 ```yaml
 universe_builder:

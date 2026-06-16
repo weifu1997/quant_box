@@ -35,6 +35,22 @@ class UniverseBuilderTests(unittest.TestCase):
         self.assertEqual(int(universe.loc[universe["instrument"] == "000003.SZ", "csi1000_rank"].iloc[0]), 1)
         self.assertNotIn("000005.SZ", set(universe["instrument"]))
 
+    def test_build_historical_universe_keeps_hs300_fallback_index_code(self) -> None:
+        rows = pd.DataFrame(
+            [
+                {"index_code": "399300.SZ", "con_code": "600000.SH", "trade_date": "20150130", "weight": 2.0},
+                {"index_code": "000905.SH", "con_code": "000001.SZ", "trade_date": "20150130", "weight": 1.0},
+            ]
+        )
+
+        universe = build_historical_universe(rows)
+
+        self.assertEqual(set(universe["instrument"]), {"600000.SH", "000001.SZ"})
+        hs300 = universe[universe["instrument"] == "600000.SH"].iloc[0]
+        self.assertEqual(hs300["sources"], "hs300")
+        self.assertEqual(hs300["index_codes"], "399300.SZ")
+        self.assertAlmostEqual(float(hs300["hs300_weight"]), 2.0)
+
     def test_filter_scores_uses_latest_prior_snapshot_without_future_leakage(self) -> None:
         universe = pd.DataFrame(
             [
@@ -65,6 +81,34 @@ class UniverseBuilderTests(unittest.TestCase):
                 (pd.Timestamp("2024-02-01"), "000001.SZ"),
                 (pd.Timestamp("2024-03-01"), "000002.SZ"),
             ],
+        )
+
+    def test_filter_scores_carries_each_source_forward_independently(self) -> None:
+        rows = pd.DataFrame(
+            [
+                {"index_code": "000300.SH", "con_code": "600000.SH", "trade_date": "20240131", "weight": 3.0},
+                {"index_code": "000905.SH", "con_code": "000001.SZ", "trade_date": "20240131", "weight": 2.0},
+                {"index_code": "000852.SH", "con_code": "300001.SZ", "trade_date": "20240215", "weight": 1.0},
+            ]
+        )
+        universe = build_historical_universe(rows, satellite_top_n=300)
+        scores = pd.Series(
+            [1.0, 2.0, 3.0],
+            index=pd.MultiIndex.from_tuples(
+                [
+                    (pd.Timestamp("2024-02-16"), "600000.SH"),
+                    (pd.Timestamp("2024-02-16"), "000001.SZ"),
+                    (pd.Timestamp("2024-02-16"), "300001.SZ"),
+                ],
+                names=["datetime", "instrument"],
+            ),
+        )
+
+        filtered = filter_scores_by_historical_universe(scores, universe)
+
+        self.assertEqual(
+            filtered.index.get_level_values("instrument").tolist(),
+            ["600000.SH", "000001.SZ", "300001.SZ"],
         )
 
     def test_apply_configured_historical_universe_reads_configured_file(self) -> None:

@@ -34,6 +34,7 @@ DEFAULT_SOURCE_LABELS = {
     "399905.SZ": "csi500",
     "000852.SH": "csi1000",
 }
+_ALL_SOURCE = "__all__"
 
 
 def configured_universe_builder(config: dict | None = None) -> dict:
@@ -54,7 +55,7 @@ def build_historical_universe(
     if frame.empty:
         return pd.DataFrame(columns=HISTORICAL_UNIVERSE_COLUMNS)
 
-    core_codes = set(_normalize_codes(core_index_codes or ["000300.SH", "000905.SH"]))
+    core_codes = _expand_equivalent_core_codes(_normalize_codes(core_index_codes or ["000300.SH", "000905.SH"]))
     satellite_code = _normalize_codes([satellite_index_code])[0]
     top_n = max(0, int(satellite_top_n))
 
@@ -199,11 +200,7 @@ def filter_scores_by_historical_universe(scores: pd.Series, universe: pd.DataFra
     if snapshots.empty:
         return scores.iloc[0:0].copy()
 
-    snapshot_dates = pd.DatetimeIndex(snapshots["trade_date"]).dropna().unique().sort_values()
-    members = {
-        pd.Timestamp(date).normalize(): set(group["instrument"].astype(str))
-        for date, group in snapshots.groupby("trade_date", sort=True)
-    }
+    members_by_source = _source_snapshot_members(snapshots)
     score_dates = pd.to_datetime(scores.index.get_level_values(0), errors="coerce").normalize()
     instruments = _normalize_symbol_series(pd.Series(scores.index.get_level_values(1))).to_numpy()
     keep = [False] * len(scores)
@@ -212,10 +209,7 @@ def filter_scores_by_historical_universe(scores: pd.Series, universe: pd.DataFra
     for score_date, positions in position_by_date:
         if pd.isna(score_date):
             continue
-        pos = snapshot_dates.searchsorted(pd.Timestamp(score_date).normalize(), side="right") - 1
-        if pos < 0:
-            continue
-        allowed = members.get(pd.Timestamp(snapshot_dates[pos]).normalize(), set())
+        allowed = _allowed_members_for_score_date(members_by_source, pd.Timestamp(score_date).normalize())
         if not allowed:
             continue
         row_positions = positions.to_numpy(dtype=int)
@@ -233,6 +227,60 @@ def _normalize_codes(values: Iterable[object]) -> list[str]:
     if not codes:
         raise ValueError("At least one index code is required.")
     return codes
+
+
+def _expand_equivalent_core_codes(codes: list[str]) -> set[str]:
+    sources = {DEFAULT_SOURCE_LABELS.get(code, code) for code in codes}
+    expanded = set(codes)
+    expanded.update(code for code, source in DEFAULT_SOURCE_LABELS.items() if source in sources and source != "csi1000")
+    return expanded
+
+
+def _source_snapshot_members(snapshots: pd.DataFrame) -> dict[str, tuple[pd.DatetimeIndex, dict[pd.Timestamp, set[str]]]]:
+    expanded: list[dict[str, object]] = []
+    for row in snapshots.itertuples(index=False):
+        sources = _split_sources(getattr(row, "sources", ""))
+        for source in sources:
+            expanded.append(
+                {
+                    "source": source,
+                    "trade_date": pd.Timestamp(row.trade_date).normalize(),
+                    "instrument": str(row.instrument),
+                }
+            )
+    if not expanded:
+        return {}
+    frame = pd.DataFrame(expanded)
+    result: dict[str, tuple[pd.DatetimeIndex, dict[pd.Timestamp, set[str]]]] = {}
+    for source, source_frame in frame.groupby("source", sort=True):
+        dates = pd.DatetimeIndex(source_frame["trade_date"]).dropna().unique().sort_values()
+        members = {
+            pd.Timestamp(date).normalize(): set(group["instrument"].astype(str))
+            for date, group in source_frame.groupby("trade_date", sort=True)
+        }
+        result[str(source)] = (dates, members)
+    return result
+
+
+def _allowed_members_for_score_date(
+    members_by_source: dict[str, tuple[pd.DatetimeIndex, dict[pd.Timestamp, set[str]]]],
+    score_date: pd.Timestamp,
+) -> set[str]:
+    allowed: set[str] = set()
+    for dates, members in members_by_source.values():
+        pos = dates.searchsorted(score_date, side="right") - 1
+        if pos < 0:
+            continue
+        snapshot_date = pd.Timestamp(dates[pos]).normalize()
+        allowed.update(members.get(snapshot_date, set()))
+    return allowed
+
+
+def _split_sources(value: object) -> list[str]:
+    if pd.isna(value):
+        return [_ALL_SOURCE]
+    sources = [part.strip() for part in str(value).split("|") if part.strip()]
+    return sources or [_ALL_SOURCE]
 
 
 def _max_numeric(values: pd.Series) -> float | object:
