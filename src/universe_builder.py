@@ -180,7 +180,7 @@ def apply_configured_historical_universe(scores: pd.Series, config: dict | None 
         return scores
     path = resolve_path(universe_cfg.get("output_file", "data/raw/historical_universe.csv"))
     if not path.exists():
-        if bool(universe_cfg.get("require_file", False)):
+        if bool(universe_cfg.get("require_file", True)):
             raise FileNotFoundError(f"Historical universe file not found: {path}. Run scripts/run_build_universe.py first.")
         logger.warning("Historical universe filtering is enabled but file is missing: %s", path)
         return scores

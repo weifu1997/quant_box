@@ -91,6 +91,9 @@ def _render_report(report: dict[str, Any]) -> str:
             f"- Delisted rows observed: {data_governance.get('delisted_rows', 0)}",
             f"- Index constituents available: {data_governance.get('index_constituents_available', False)}",
             f"- Index snapshot month coverage: {data_governance.get('index_constituents_observed_months', 0)}/{data_governance.get('index_constituents_expected_months', 0)}",
+            f"- Historical universe enabled: {data_governance.get('historical_universe_enabled', False)}",
+            f"- Historical universe available: {data_governance.get('historical_universe_available', False)}",
+            f"- Historical universe source coverage: {_historical_universe_source_coverage_text(data_governance)}",
             f"- Daily basic date coverage: {data_governance.get('daily_basic_covered_dates', 0)}/{data_governance.get('daily_basic_expected_dates', 0)}",
             f"- Raw adj-factor sample: {data_governance.get('raw_adj_factor_files_with_column', 0)}/{data_governance.get('raw_adj_factor_sampled_files', 0)}",
             f"- Factor cache metadata: {data_governance.get('factor_cache_meta_available', False)}",
@@ -210,6 +213,20 @@ def _repair_action_lines(actions: Any, max_items: int = 5) -> list[str]:
         command_text = " | ".join(str(command) for command in commands) if isinstance(commands, list) else str(commands)
         lines.append(f"- Repair action: {component} ({reason}) -> {command_text}")
     return lines or ["- Repair actions: none"]
+
+
+def _historical_universe_source_coverage_text(data_governance: dict[str, Any]) -> str:
+    coverage = data_governance.get("historical_universe_source_coverage", {})
+    if not isinstance(coverage, dict) or not coverage:
+        return "none"
+    labels = []
+    for source, summary in coverage.items():
+        if not isinstance(summary, dict):
+            continue
+        observed = summary.get("observed_months", 0)
+        expected = summary.get("expected_months", 0)
+        labels.append(f"{source} {observed}/{expected}")
+    return ", ".join(labels) if labels else "none"
 
 
 def _symbol_preview(symbols: Any, max_items: int = 8) -> str:

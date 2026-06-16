@@ -135,6 +135,28 @@ class UniverseBuilderTests(unittest.TestCase):
 
         self.assertEqual(filtered.index.get_level_values("instrument").tolist(), ["000002.SZ"])
 
+    def test_apply_configured_historical_universe_requires_file_by_default_when_enabled(self) -> None:
+        scores = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples(
+                [(pd.Timestamp("2024-02-01"), "000001.SZ")],
+                names=["datetime", "instrument"],
+            ),
+        )
+        with TemporaryDirectory() as tmp:
+            missing_path = Path(tmp) / "missing_historical_universe.csv"
+
+            with self.assertRaisesRegex(FileNotFoundError, "Run scripts/run_build_universe.py first"):
+                apply_configured_historical_universe(
+                    scores,
+                    {
+                        "universe_builder": {
+                            "enabled": True,
+                            "output_file": str(missing_path),
+                        }
+                    },
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

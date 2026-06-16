@@ -44,6 +44,19 @@ class DataGovernanceReport:
     index_constituents_observed_months: int
     index_constituents_missing_months: int
     index_constituents_month_coverage: float
+    historical_universe_file: str
+    historical_universe_enabled: bool
+    historical_universe_available: bool
+    historical_universe_rows: int
+    historical_universe_has_trade_date: bool
+    historical_universe_has_instrument: bool
+    historical_universe_has_sources: bool
+    historical_universe_start_date: str
+    historical_universe_end_date: str
+    historical_universe_expected_months: int
+    historical_universe_sources: list[str]
+    historical_universe_source_coverage: dict[str, dict[str, Any]]
+    historical_universe_min_source_month_coverage: float
     daily_basic_file: str
     daily_basic_available: bool
     daily_basic_rows: int
@@ -97,6 +110,7 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
     cfg = config or load_config()
     data_cfg = cfg.get("data", {})
     gov_cfg = cfg.get("data_governance", {})
+    builder_cfg = cfg.get("universe_builder", {})
     issues: list[str] = []
     warnings: list[str] = []
     data_start = _config_start_date(data_cfg)
@@ -180,6 +194,73 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
         issues.append(
             "index_constituents_month_coverage_below_required:"
             f"{index_observed_months}/{index_expected_months}<{min_index_month_coverage:.2f}"
+        )
+
+    historical_path = resolve_path(builder_cfg.get("output_file", "data/raw/historical_universe.csv"))
+    historical_frame = _read_csv_if_exists(historical_path)
+    historical_enabled = bool(builder_cfg.get("enabled", False))
+    historical_available = not historical_frame.empty
+    historical_has_trade_date = "trade_date" in historical_frame.columns
+    historical_has_instrument = any(
+        column in historical_frame.columns for column in ["instrument", "con_code", "ts_code"]
+    )
+    historical_has_sources = "sources" in historical_frame.columns
+    historical_start, historical_end = _date_range_text(historical_frame.get("trade_date"))
+    historical_date_texts = _date_texts_from_series(historical_frame.get("trade_date"))
+    historical_months = _month_texts_from_dates(historical_date_texts)
+    historical_expected_months_set = expected_index_months
+    historical_expected_months = len(historical_expected_months_set)
+    historical_sources = _historical_universe_sources(historical_frame)
+    required_historical_sources = [
+        str(source)
+        for source in gov_cfg.get("required_historical_universe_sources", ["hs300", "csi500", "csi1000"])
+    ]
+    historical_source_coverage = _historical_universe_source_coverage(
+        historical_frame,
+        required_sources=required_historical_sources,
+        expected_months=historical_expected_months_set,
+    )
+    historical_min_source_coverage = min(
+        (float(summary.get("month_coverage", 0.0)) for summary in historical_source_coverage.values()),
+        default=0.0,
+    )
+    min_historical_source_coverage = _float_value(
+        gov_cfg.get("min_historical_universe_source_month_coverage", 1.0),
+        1.0,
+    )
+    if historical_enabled:
+        if not historical_available:
+            issues.append("historical_universe_file_missing")
+        else:
+            missing_historical_columns = [
+                column
+                for column, present in {
+                    "trade_date": historical_has_trade_date,
+                    "instrument": historical_has_instrument,
+                    "sources": historical_has_sources,
+                }.items()
+                if not present
+            ]
+            if missing_historical_columns:
+                issues.append("historical_universe_missing_columns:" + ",".join(missing_historical_columns))
+            elif historical_expected_months:
+                for source, summary in historical_source_coverage.items():
+                    coverage = float(summary.get("month_coverage", 0.0))
+                    observed = int(summary.get("observed_months", 0))
+                    expected = int(summary.get("expected_months", 0))
+                    if coverage < min_historical_source_coverage:
+                        issues.append(
+                            "historical_universe_source_month_coverage_below_required:"
+                            f"{source}:{observed}/{expected}<{min_historical_source_coverage:.2f}"
+                        )
+        if historical_available and historical_start and point_in_time_start and _month_after(historical_start, point_in_time_start):
+            issues.append(f"historical_universe_start_after_point_in_time_start:{historical_start}>{point_in_time_start}")
+        if historical_available and historical_end and factor_meta_end_date and _month_after(factor_meta_end_date, historical_end):
+            issues.append(f"historical_universe_end_before_factor_end:{historical_end}<{factor_meta_end_date}")
+    elif historical_available and historical_expected_months and historical_expected_months_set - historical_months:
+        warnings.append(
+            "historical_universe_month_coverage_incomplete:"
+            f"{len(historical_expected_months_set & historical_months)}/{historical_expected_months}"
         )
 
     research_exposure_cfg = cfg.get("research", {}).get("exposure", {})
@@ -276,6 +357,7 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
         factor_end=factor_meta_end_date,
         daily_basic_path=daily_basic_path,
         index_path=index_path,
+        historical_path=historical_path,
         adj_meta_path=adj_meta_path,
         raw_dir=raw_dir,
         data_cfg=data_cfg,
@@ -310,6 +392,19 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
         index_constituents_observed_months=index_observed_months,
         index_constituents_missing_months=index_missing_months,
         index_constituents_month_coverage=index_month_coverage,
+        historical_universe_file=str(historical_path),
+        historical_universe_enabled=historical_enabled,
+        historical_universe_available=historical_available,
+        historical_universe_rows=int(len(historical_frame)),
+        historical_universe_has_trade_date=historical_has_trade_date,
+        historical_universe_has_instrument=historical_has_instrument,
+        historical_universe_has_sources=historical_has_sources,
+        historical_universe_start_date=historical_start,
+        historical_universe_end_date=historical_end,
+        historical_universe_expected_months=historical_expected_months,
+        historical_universe_sources=historical_sources,
+        historical_universe_source_coverage=historical_source_coverage,
+        historical_universe_min_source_month_coverage=historical_min_source_coverage,
         daily_basic_file=str(daily_basic_path),
         daily_basic_available=daily_basic_available,
         daily_basic_rows=int(len(daily_basic)),
@@ -563,6 +658,55 @@ def _month_range_texts(start: str, end: str) -> set[str]:
     return {str(period) for period in periods}
 
 
+def _historical_universe_sources(frame: pd.DataFrame) -> list[str]:
+    """Return sorted source labels present in a historical universe CSV."""
+    if frame.empty or "sources" not in frame.columns:
+        return []
+    sources: set[str] = set()
+    for value in frame["sources"]:
+        sources.update(_split_pipe_values(value))
+    return sorted(sources)
+
+
+def _historical_universe_source_coverage(
+    frame: pd.DataFrame,
+    *,
+    required_sources: list[str],
+    expected_months: set[str],
+) -> dict[str, dict[str, Any]]:
+    """Summarize monthly snapshot coverage by historical-universe source."""
+    normalized_sources = [source.strip() for source in required_sources if source.strip()]
+    expected = set(expected_months)
+    months_by_source: dict[str, set[str]] = {source: set() for source in normalized_sources}
+    if not frame.empty and "trade_date" in frame.columns and "sources" in frame.columns:
+        dates = _coerce_dates(frame["trade_date"])
+        for date, source_value in zip(dates, frame["sources"]):
+            if pd.isna(date):
+                continue
+            month = pd.Timestamp(date).strftime("%Y-%m")
+            for source in _split_pipe_values(source_value):
+                months_by_source.setdefault(source, set()).add(month)
+
+    coverage: dict[str, dict[str, Any]] = {}
+    for source in normalized_sources:
+        observed_months = expected & months_by_source.get(source, set()) if expected else set()
+        missing_months = sorted(expected - observed_months)
+        coverage[source] = {
+            "expected_months": len(expected),
+            "observed_months": len(observed_months),
+            "missing_months": len(missing_months),
+            "month_coverage": _coverage_ratio(len(observed_months), len(expected)),
+            "missing_month_values": missing_months,
+        }
+    return coverage
+
+
+def _split_pipe_values(value: Any) -> list[str]:
+    if pd.isna(value):
+        return []
+    return [part.strip() for part in str(value).split("|") if part.strip()]
+
+
 def _coerce_dates(values: Any) -> pd.Series:
     """函数说明：处理 coerce_dates 的内部辅助逻辑。"""
     if isinstance(values, pd.Series):
@@ -643,6 +787,7 @@ def _build_repair_actions(
     factor_end: str,
     daily_basic_path: Path,
     index_path: Path,
+    historical_path: Path,
     adj_meta_path: Path,
     raw_dir: Path,
     data_cfg: dict[str, Any],
@@ -675,6 +820,20 @@ def _build_repair_actions(
                 "output": str(index_path),
                 "commands": [
                     f"{update_script} --start-date {data_start} --end-date {end_date} --skip-daily-basic --skip-st-calendar"
+                ],
+            }
+        )
+    if any(issue.startswith("historical_universe_") for issue in issues):
+        actions.append(
+            {
+                "component": "historical_universe",
+                "reason": "historical_universe_history_or_freshness_incomplete",
+                "start_date": data_start,
+                "end_date": end_date,
+                "output": str(historical_path),
+                "commands": [
+                    r".\.venv\Scripts\python.exe scripts\run_build_universe.py "
+                    f"--start-date {data_start} --end-date {end_date}"
                 ],
             }
         )

@@ -410,11 +410,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "required_index_columns": ["index_code", "con_code", "trade_date", "weight"],
         "min_daily_basic_date_coverage": 1.0,
         "min_index_constituents_month_coverage": 1.0,
+        "required_historical_universe_sources": ["hs300", "csi500", "csi1000"],
+        "min_historical_universe_source_month_coverage": 1.0,
         "adj_factor_meta_file": "data/factors/adj_factor_meta.json",
     },
     "universe_builder": {
         "enabled": False,
-        "require_file": False,
+        "require_file": True,
         "index_constituents_file": "data/raw/index_constituents.csv",
         "output_file": "data/raw/historical_universe.csv",
         "core_index_codes": ["000300.SH", "000905.SH"],
@@ -798,6 +800,8 @@ _CONFIG_VALIDATORS: dict[str, _Validator] = {
     "universe_builder.core_index_codes": _list_of_strings,
     "universe_builder.satellite_index_code": _string_value,
     "universe_builder.satellite_top_n": _int_at_least(1),
+    "data_governance.required_historical_universe_sources": _list_of_strings,
+    "data_governance.min_historical_universe_source_month_coverage": _number_between(0, 1),
     "outputs.dir": _string_value,
     "outputs.holdings_file": _string_value,
 }

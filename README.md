@@ -190,12 +190,15 @@ run_all.bat                    自动全流程：刷新缺失和过期数据 + d
 .\.venv\Scripts\python.exe scripts\run_build_universe.py --max-index-windows 1 --index-constituents-file outputs\universe_smoke_index_constituents.csv --out-file outputs\historical_universe_smoke.csv
 ```
 
-正式构建不要加 `--max-index-windows`，生成结果写入 `data/raw/historical_universe.csv`。需要让回测和候选信号按历史股票池过滤时，在本地配置里启用：
+正式构建不要加 `--max-index-windows`，生成结果写入 `data/raw/historical_universe.csv`。正式构建默认遇到指数成分接口窗口错误就失败；只有临时烟测或排障时才加 `--skip-index-errors` 允许部分窗口跳过。
+需要让回测和候选信号按历史股票池过滤时，在本地配置里启用：
 
 ```yaml
 universe_builder:
   enabled: true
 ```
+
+启用后默认要求 `data/raw/historical_universe.csv` 已存在；缺文件会直接报错，避免回测或因子信号在不知情的情况下退回全量股票池。
 
 补齐基础财务依赖，包括 `fina_indicator` 和 `dividend`：
 
@@ -309,7 +312,7 @@ instrument,shares
 每日流程现在同时输出：
 
 - 研究诊断：`auto_research_diagnostics.json`、基准净值、个股/行业归因、行业/市值暴露，用来判断策略到底赚亏在哪里
-- 数据治理：`data_governance_report.json`，检查上市/退市字段、ST 历史日历、指数成分日期/权重、复权因子和因子缓存元数据
+- 数据治理：`data_governance_report.json`，检查上市/退市字段、ST 历史日历、指数成分日期/权重、历史股票池来源月度覆盖、复权因子和因子缓存元数据
 - 可选基本面筛选：`fundamental_screen_YYYY-MM-DD.csv` 和 `fundamental_screen_report.md`，用质量、分红、负债、估值阈值解释候选公司
 - 人工确认：`outputs/order_confirmations/order_confirmation*_YYYY-MM-DD.csv`
 - 成交回填：`outputs/fill_feedback/fill_feedback*_YYYY-MM-DD.csv`
@@ -427,7 +430,7 @@ exception tracebacks when a run fails.
 当前默认配置位于 `config/settings.yaml`：
 
 - 股票池：A 股主板 `mainboard_a`
-- 可选历史股票池：启用 `universe_builder.enabled` 后，回测和候选信号会按 `data/raw/historical_universe.csv` 的点时快照过滤，默认口径为沪深300 + 中证500 + 中证1000权重前300
+- 可选历史股票池：启用 `universe_builder.enabled` 后，回测和候选信号会按 `data/raw/historical_universe.csv` 的点时快照过滤，默认口径为沪深300 + 中证500 + 中证1000权重前300；缺少该文件时默认阻断
 - 因子组：`dynamic_ic_selector`，默认每期使用 IC 排名前 3 个候选因子做权重混合
 - 调仓频率：monthly
 - 默认持仓数：15

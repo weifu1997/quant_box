@@ -49,7 +49,12 @@ def main() -> None:
     parser.add_argument("--sleep-seconds", type=float, default=0.0)
     parser.add_argument("--max-index-windows", type=int)
     parser.add_argument("--index-window-days", type=int, default=31)
-    parser.add_argument("--fail-on-index-error", action="store_true")
+    parser.add_argument(
+        "--skip-index-errors",
+        action="store_true",
+        help="Continue building the cache when an index_weight window fails. Official builds fail by default.",
+    )
+    parser.add_argument("--fail-on-index-error", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     end_date = resolve_target_date_value(args.end_date, config=config)
@@ -66,7 +71,7 @@ def main() -> None:
                 sleep_seconds=args.sleep_seconds,
                 max_windows=args.max_index_windows,
                 window_days=args.index_window_days,
-                skip_failed=not args.fail_on_index_error,
+                skip_failed=args.skip_index_errors and not args.fail_on_index_error,
                 fallback_index_codes=config.get("data_governance", {}).get("index_fallback_codes", [])
                 if index_code == "000300.SH"
                 else [],

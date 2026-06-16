@@ -223,7 +223,7 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 
 ### 2. Signatures
 
-- Command: `.\.venv\Scripts\python.exe scripts\run_build_universe.py [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD|auto] [--core-index-codes CSV] [--satellite-index-code CODE] [--satellite-top-n N] [--index-constituents-file PATH] [--out-file PATH] [--skip-fetch] [--max-index-windows N] [--index-window-days N]`.
+- Command: `.\.venv\Scripts\python.exe scripts\run_build_universe.py [--start-date YYYY-MM-DD] [--end-date YYYY-MM-DD|auto] [--core-index-codes CSV] [--satellite-index-code CODE] [--satellite-top-n N] [--index-constituents-file PATH] [--out-file PATH] [--skip-fetch] [--max-index-windows N] [--index-window-days N] [--skip-index-errors]`.
 - Batch wrapper: `14_构建历史股票池.bat`.
 - API: `src.universe_builder.build_historical_universe(index_constituents, core_index_codes, satellite_index_code, satellite_top_n) -> pd.DataFrame`.
 - API: `src.universe_builder.filter_scores_by_historical_universe(scores, universe) -> pd.Series`.
@@ -233,9 +233,11 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 - Input constituent rows use normalized `index_code`, `con_code`, `trade_date`, and `weight` columns.
 - Default core indices are `000300.SH` and `000905.SH`, both kept in full. Known equivalent fallback codes such as `399300.SZ` for `hs300` are accepted as the same source during build and filtering.
 - Default satellite index is `000852.SH`, ranked by descending `weight`, with the top `300` rows kept per `trade_date`.
+- Official historical-universe builds fail on Tushare/index-window errors by default. `--skip-index-errors` is only for smoke tests or partial diagnostics.
 - Output `instrument` values are uppercase Tushare symbols.
 - Output `sources` and `index_codes` are pipe-separated labels for symbols that appear in multiple selected indices.
-- Config keys live under `universe_builder` and must be present in `DEFAULT_CONFIG` plus `_CONFIG_VALIDATORS`.
+- Config keys live under `universe_builder` and must be present in `DEFAULT_CONFIG` plus `_CONFIG_VALIDATORS`; `require_file` defaults to `true` so enabled filtering does not silently fall back to the unfiltered score panel.
+- Data governance must check `historical_universe.csv` by source label when `universe_builder.enabled=true`. Required default sources are `hs300`, `csi500`, and `csi1000`; each source must have monthly snapshots across the point-in-time factor window unless `min_historical_universe_source_month_coverage` is explicitly relaxed.
 
 ### 4. Validation & Error Matrix
 
@@ -243,6 +245,9 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 - Missing historical universe file while filtering and `require_file=true` -> `FileNotFoundError`.
 - Missing historical universe file while filtering and `require_file=false` -> warning and unchanged scores.
 - Historical universe input missing `trade_date` or `instrument`/`con_code`/`ts_code` -> `ValueError` naming missing columns.
+- Enabled historical-universe governance with a missing file -> issue `historical_universe_file_missing` and a repair action pointing to `scripts/run_build_universe.py`.
+- Enabled historical-universe governance with missing `trade_date`, instrument alias, or `sources` column -> issue `historical_universe_missing_columns:<columns>`.
+- Enabled historical-universe governance with insufficient source-month coverage -> issue `historical_universe_source_month_coverage_below_required:<source>:<observed>/<expected><threshold>` where the final separator is the literal `<` comparison operator.
 - Score input without a `datetime`/`instrument` MultiIndex -> `ValueError("scores must use MultiIndex: datetime/instrument.")`.
 
 ### 5. Good/Base/Bad Cases
@@ -259,6 +264,7 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 - Unit test that score filtering uses the latest prior snapshot per source and does not leak future membership.
 - Unit test that asynchronous source snapshots are carried forward independently before unioning members.
 - Config test that `DEFAULT_CONFIG["universe_builder"]` contains the default paths, index codes, and top-N.
+- Governance test that enabled historical universe coverage is checked independently for `hs300`, `csi500`, and `csi1000` and creates a `historical_universe` repair action on gaps.
 - Script/docs test that the batch entrypoint is UTF-8, CRLF, and documented in README.
 
 ### 7. Wrong vs Correct

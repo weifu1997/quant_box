@@ -152,6 +152,7 @@ quality:
         universe = DEFAULT_CONFIG["universe_builder"]
 
         self.assertFalse(universe["enabled"])
+        self.assertTrue(universe["require_file"])
         self.assertEqual(universe["index_constituents_file"], "data/raw/index_constituents.csv")
         self.assertEqual(universe["output_file"], "data/raw/historical_universe.csv")
         self.assertEqual(universe["core_index_codes"], ["000300.SH", "000905.SH"])
@@ -217,6 +218,8 @@ quality:
         self.assertIn("trade_date", governance["required_index_columns"])
         self.assertEqual(governance["min_daily_basic_date_coverage"], 1.0)
         self.assertEqual(governance["min_index_constituents_month_coverage"], 1.0)
+        self.assertEqual(governance["required_historical_universe_sources"], ["hs300", "csi500", "csi1000"])
+        self.assertEqual(governance["min_historical_universe_source_month_coverage"], 1.0)
         self.assertEqual(governance["adj_factor_meta_file"], "data/factors/adj_factor_meta.json")
 
     def test_default_quality_includes_full_backtest_return_and_drawdown_gates(self) -> None:
