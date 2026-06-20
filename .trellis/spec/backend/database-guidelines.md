@@ -125,7 +125,7 @@ ts_code, trade_date, open, high, low, close, vol, amount, adj_factor
 
 #### 2. Signatures
 
-- Raw stock file: `data/raw/<TS_CODE>.csv`, for example `data/raw/600717.SH.csv`.
+- Raw stock file: `data/raw/<TS_CODE>.csv` for `.SH`, `.SZ`, and `.BJ` A-share symbols, for example `data/raw/600717.SH.csv`.
 - Raw index file: `data/raw/000300.SH.csv` or `data/raw/000905.SH.csv`.
 - Metadata builder: `build_adj_factor_metadata(raw_dir=..., output_path=...)`.
 
