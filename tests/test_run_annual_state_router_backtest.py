@@ -303,6 +303,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
             "defensive_timing": {"sideways_exposure": 1.0, "bear_exposure": 0.6},
         }
         args = Namespace(
+            max_industry_weight=0.35,
             equity_overlay_sideways_exposure=0.7,
             equity_overlay_bear_exposure=None,
             equity_overlay_drawdown_cut=0.2,
@@ -313,6 +314,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
         result = apply_research_config_overrides(config, args)
         payload = research_config_overrides_payload(args)
 
+        self.assertEqual(result["strategy"]["max_industry_weight"], 0.35)
         self.assertEqual(result["backtest"]["equity_overlay"]["sideways_exposure"], 0.7)
         self.assertEqual(result["backtest"]["equity_overlay"]["bear_exposure"], 0.5)
         self.assertEqual(result["backtest"]["equity_overlay"]["drawdown_cut"], 0.2)
@@ -322,6 +324,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
             payload,
             {
                 "equity_overlay_sideways_exposure": 0.7,
+                "max_industry_weight": 0.35,
                 "equity_overlay_drawdown_cut": 0.2,
                 "defensive_bear_exposure": 0.8,
             },

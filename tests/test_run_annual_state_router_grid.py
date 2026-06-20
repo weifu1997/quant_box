@@ -35,6 +35,13 @@ class RunAnnualStateRouterGridTests(unittest.TestCase):
         self.assertIsNone(combos[0]["moderate_low_source"])
         self.assertEqual(combos[0]["moderate_low_exposure"], 1.0)
 
+    def test_iter_grid_enumerates_max_industry_weight_overrides(self) -> None:
+        args = _grid_args(max_industry_weights="none,0.35")
+
+        combos = iter_grid(args)
+
+        self.assertEqual([combo["max_industry_weight"] for combo in combos], [None, 0.35])
+
 
 def _grid_args(**overrides: str) -> Namespace:
     values = {
@@ -53,6 +60,7 @@ def _grid_args(**overrides: str) -> Namespace:
         "equity_overlay_sideways_exposures": "none",
         "equity_overlay_bear_exposures": "none",
         "defensive_bear_exposures": "none",
+        "max_industry_weights": "none",
     }
     values.update(overrides)
     return Namespace(**values)

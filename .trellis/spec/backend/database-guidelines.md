@@ -411,7 +411,7 @@ route_year = trade_date.year
 - Single formal run:
   - `scripts/run_annual_state_router_backtest.py --include-expanded-sources --moderate-positive-source <source> --moderate-low-source <source> --moderate-low-exposure <float> --turnover-boost-reasons <comma-list>`
 - Resumable grid:
-  - `scripts/run_annual_state_router_grid.py --cache-dir outputs/router_score_cache --output outputs/<name>.csv --write-hit-prefix outputs/<prefix>`
+  - `scripts/run_annual_state_router_grid.py --cache-dir outputs/router_score_cache --output outputs/<name>.csv --write-hit-prefix outputs/<prefix> [--max-industry-weights none,0.35]`
 - Expanded source names currently include `roc60`, `db_total`, `beta20`, and `rsqr20`.
 
 #### 3. Contracts
@@ -420,6 +420,7 @@ route_year = trade_date.year
 - Grid output is append-only CSV keyed by the stable `combo_key`; reruns skip keys already present in the output CSV.
 - `turnover_boost_reason_sets` uses semicolon-separated reason sets; reasons inside one set use `+`, for example `low_vol_moderate_uptrend+moderate_positive_roc60`.
 - `moderate_low_exposure` multiplies route exposure only when `moderate_low_source` is selected for a `default_beta` route whose `ret252` is in `[moderate_low_ret252_min, moderate_low_ret252_max)`.
+- `max_industry_weights` enumerates research-only `strategy.max_industry_weight` overrides. `none` preserves the configured/default behavior; numeric values are passed through `RiskPolicy` and existing selection constraints.
 - A full-gate hit writes `_metrics.json`, `_years.csv`, `_year_routes.csv`, `_score_routes.csv`, `_holdings.csv`, `_trades.csv`, and `_equity.csv` beside the requested hit prefix.
 
 #### 4. Validation & Error Matrix
@@ -430,6 +431,7 @@ route_year = trade_date.year
 | Score cache is missing | Build the source from configured factor/selector inputs and write the parquet cache. |
 | `turnover_boost_reasons=none` | Do not boost route turnover; collapse boost max/rank combinations to a single grid row. |
 | `moderate_low_source=none` | Do not route the low ret252 band; collapse `moderate_low_exposure` to `1.0`. |
+| `max_industry_weights=none,0.35` | Run the same grid combo with and without a 35% industry cap overlay. |
 | Routed source is missing from score sources | Raise `ValueError("Routed source is not in score sources: ...")`. |
 | Hit satisfies annual return, drawdown, turnover, cost, and yearly gates | Write hit artifacts and stop the grid early. |
 
@@ -443,6 +445,7 @@ route_year = trade_date.year
 
 - `tests/test_run_annual_state_router_backtest.py` must assert expanded source definitions and route exposure scaling.
 - `tests/test_run_annual_state_router_grid.py` must assert reason-set parsing and `moderate_low_exposure` enumeration/collapse.
+- `tests/test_run_annual_state_router_grid.py` must assert `max_industry_weights` enumeration.
 - Backtest tests must continue to assert `selection_schedule` values affect realized holdings on matching signal dates.
 
 #### 7. Wrong vs Correct
@@ -714,6 +717,45 @@ Generate the missing factor evidence first, then re-run the five-layer gate.
 - Unit test risk flags for low position count, industry concentration, and small-cap concentration.
 - Unit test trading flags for high annual trade-cost ratios.
 - Writer test that JSON and Markdown review artifacts are persisted.
+
+### Scenario: Evidence-Backed Optimization Plan
+
+#### 1. Scope / Trigger
+
+- Trigger: diagnostics and optimization review are ready, and the next step is to optimize style routing, risk exposure, and trading constraints from trusted evidence.
+- Owners: `src.evidence_optimizer` builds the plan; `scripts/run_evidence_optimizer.py` writes it.
+
+#### 2. Signatures
+
+- Command: `.\.venv\Scripts\python.exe scripts\run_evidence_optimizer.py [--artifact-dir outputs] [--out-dir outputs] [--grid-glob *router_grid*.csv]`.
+- API: `build_evidence_optimization_plan(artifact_dir="outputs", grid_glob="*router_grid*.csv", max_industry_weight_target=0.35, annual_trade_cost_ratio_target=0.20) -> dict`.
+- API: `write_evidence_optimization_plan(report, out_dir="outputs") -> dict[str, str]`.
+- Outputs: `outputs/evidence_optimization_plan.json` and `outputs/evidence_optimization_plan.md`.
+
+#### 3. Contracts
+
+- The plan reads existing diagnostics, optimization review, selected auto params, and router-grid CSV evidence; it must not mutate `config/settings.yaml` or promote signals.
+- A style candidate is eligible only when the grid row has `full_goal=true` and `annual_trade_cost_ratio <= annual_trade_cost_ratio_target`.
+- Risk flags become research overlays: high industry concentration maps to `max_industry_weight_target`, low latest positions maps to a target minimum position count, and small-cap concentration maps to a small-cap reduction action.
+- Trading flags keep turnover from increasing and preserve the selected full-goal candidate's turnover mode/boost settings for follow-up grid commands.
+- The generated next command must include `--max-industry-weights` when an industry cap overlay is recommended.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Optimization review is not ready | `status=review` with a caveat |
+| No router-grid evidence has required columns | `status=review` with a caveat |
+| Full-goal candidates exist but exceed the cost target | `status=review`; do not fabricate a candidate |
+| High industry concentration is flagged | Add a `max_industry_weight` research overlay |
+| Candidate is selected | Emit JSON/Markdown and a resumable router-grid command |
+
+#### 5. Tests Required
+
+- Unit test full-goal/cost-eligible candidate selection.
+- Unit test risk flags become max-industry, min-position, and small-cap actions.
+- Unit test high-cost trading flags produce `do_not_increase_turnover`.
+- Writer test that JSON and Markdown plan artifacts are persisted.
 
 ### Scenario: Backtest Exposure Schedule Composition
 

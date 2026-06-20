@@ -57,6 +57,12 @@ class RoutedScoreRun:
 
 def apply_research_config_overrides(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     result = dict(config)
+    max_industry_weight = getattr(args, "max_industry_weight", None)
+    if max_industry_weight is not None:
+        strategy = dict(result.get("strategy", {}))
+        strategy["max_industry_weight"] = float(max_industry_weight)
+        result["strategy"] = strategy
+
     backtest = dict(result.get("backtest", {}))
     overlay = dict(backtest.get("equity_overlay", {}))
     if args.equity_overlay_sideways_exposure is not None:
@@ -82,6 +88,7 @@ def apply_research_config_overrides(config: dict[str, Any], args: argparse.Names
 
 def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, float]:
     values = {
+        "max_industry_weight": getattr(args, "max_industry_weight", None),
         "equity_overlay_sideways_exposure": args.equity_overlay_sideways_exposure,
         "equity_overlay_bear_exposure": args.equity_overlay_bear_exposure,
         "equity_overlay_drawdown_cut": args.equity_overlay_drawdown_cut,
@@ -124,6 +131,7 @@ def main() -> None:
     parser.add_argument("--equity-overlay-drawdown-cut", type=float, default=None)
     parser.add_argument("--defensive-sideways-exposure", type=float, default=None)
     parser.add_argument("--defensive-bear-exposure", type=float, default=None)
+    parser.add_argument("--max-industry-weight", type=float, default=None)
     parser.add_argument("--turnover-boost-reasons", default="")
     parser.add_argument("--turnover-boost-max-turnover", type=int, default=2)
     parser.add_argument("--turnover-boost-rank-buffer", type=int, default=10)

@@ -234,6 +234,7 @@ universe_builder:
 .\.venv\Scripts\python.exe scripts\run_backtest.py
 .\.venv\Scripts\python.exe scripts\run_quant_diagnostics.py
 .\.venv\Scripts\python.exe scripts\run_optimization_review.py
+.\.venv\Scripts\python.exe scripts\run_evidence_optimizer.py
 .\.venv\Scripts\python.exe scripts\run_daily_signal.py --date latest
 # 如需写入正式 signal_*.csv 和 latest_holdings.csv，加 --official
 ```
@@ -380,6 +381,8 @@ outputs/quant_diagnostic_report.json   Five-layer quant diagnostics summary
 outputs/quant_diagnostic_report.md     Five-layer quant diagnostics report
 outputs/optimization_review.json       Post-diagnostic style/risk/trading review
 outputs/optimization_review.md         Human-readable optimization review
+outputs/evidence_optimization_plan.json Evidence-backed style/risk/trading optimization plan
+outputs/evidence_optimization_plan.md   Human-readable evidence optimization plan
 outputs/logs/backtest_*.log            Backtest run logs
 outputs/optimization_results.csv       参数优化结果
 outputs/auto_run_status.json           自动流程阶段状态

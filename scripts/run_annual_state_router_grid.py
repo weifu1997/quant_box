@@ -62,6 +62,7 @@ def main() -> None:
     parser.add_argument("--equity-overlay-sideways-exposures", default="none,0.60,0.70")
     parser.add_argument("--equity-overlay-bear-exposures", default="none,0.60")
     parser.add_argument("--defensive-bear-exposures", default="none")
+    parser.add_argument("--max-industry-weights", default="none")
     parser.add_argument("--disable-equity-overlay", action="store_true")
     parser.add_argument("--write-hit-prefix", default="")
     args = parser.parse_args()
@@ -252,27 +253,29 @@ def iter_grid(args: argparse.Namespace) -> list[dict[str, Any]]:
                                                     for overlay_side in parse_optional_float_list(args.equity_overlay_sideways_exposures):
                                                         for overlay_bear in parse_optional_float_list(args.equity_overlay_bear_exposures):
                                                             for defensive_bear in parse_optional_float_list(args.defensive_bear_exposures):
-                                                                combos.append(
-                                                                    {
-                                                                        "missing_ret252_exposure": missing,
-                                                                        "strong_trailing_exposure": strong,
-                                                                        "moderate_positive_source": high_source,
-                                                                        "moderate_positive_ret252_min": high_min,
-                                                                        "moderate_low_source": low_source,
-                                                                        "moderate_low_ret252_min": low_min,
-                                                                        "moderate_low_ret252_max": low_max,
-                                                                        "moderate_low_exposure": low_exposure,
-                                                                        "turnover_mode": turnover_mode,
-                                                                        "turnover_boost_reasons": boost_reasons,
-                                                                        "turnover_boost_max_turnover": boost_turnover,
-                                                                        "turnover_boost_rank_buffer": boost_buffer,
-                                                                        "equity_overlay_sideways_exposure": overlay_side,
-                                                                        "equity_overlay_bear_exposure": overlay_bear,
-                                                                        "equity_overlay_drawdown_cut": None,
-                                                                        "defensive_sideways_exposure": None,
-                                                                        "defensive_bear_exposure": defensive_bear,
-                                                                    }
-                                                                )
+                                                                for max_industry_weight in parse_optional_float_list(args.max_industry_weights):
+                                                                    combos.append(
+                                                                        {
+                                                                            "missing_ret252_exposure": missing,
+                                                                            "strong_trailing_exposure": strong,
+                                                                            "moderate_positive_source": high_source,
+                                                                            "moderate_positive_ret252_min": high_min,
+                                                                            "moderate_low_source": low_source,
+                                                                            "moderate_low_ret252_min": low_min,
+                                                                            "moderate_low_ret252_max": low_max,
+                                                                            "moderate_low_exposure": low_exposure,
+                                                                            "turnover_mode": turnover_mode,
+                                                                            "turnover_boost_reasons": boost_reasons,
+                                                                            "turnover_boost_max_turnover": boost_turnover,
+                                                                            "turnover_boost_rank_buffer": boost_buffer,
+                                                                            "equity_overlay_sideways_exposure": overlay_side,
+                                                                            "equity_overlay_bear_exposure": overlay_bear,
+                                                                            "equity_overlay_drawdown_cut": None,
+                                                                            "defensive_sideways_exposure": None,
+                                                                            "defensive_bear_exposure": defensive_bear,
+                                                                            "max_industry_weight": max_industry_weight,
+                                                                        }
+                                                                    )
     return combos
 
 
@@ -310,6 +313,7 @@ def namespace_for_combo(combo: dict[str, Any]) -> argparse.Namespace:
         equity_overlay_drawdown_cut=combo["equity_overlay_drawdown_cut"],
         defensive_sideways_exposure=combo["defensive_sideways_exposure"],
         defensive_bear_exposure=combo["defensive_bear_exposure"],
+        max_industry_weight=combo["max_industry_weight"],
     )
 
 
