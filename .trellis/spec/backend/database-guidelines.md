@@ -238,6 +238,7 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 - Output `sources` and `index_codes` are pipe-separated labels for symbols that appear in multiple selected indices.
 - Config keys live under `universe_builder` and must be present in `DEFAULT_CONFIG` plus `_CONFIG_VALIDATORS`; `require_file` defaults to `true` so enabled filtering does not silently fall back to the unfiltered score panel.
 - Data governance must check `historical_universe.csv` by source label when `universe_builder.enabled=true`. Required default sources are `hs300`, `csi500`, and `csi1000`; each source must have monthly snapshots across the point-in-time factor window unless `min_historical_universe_source_month_coverage` is explicitly relaxed.
+- For the terminal partial month only, a source's previous-month snapshot may be carried forward when the previous month is present and the current source has not published a new snapshot yet. Missing middle months still fail coverage.
 - Raw daily conversion must discover market files through `src.common.is_stock_csv(path)`. Metadata CSVs such as `index_constituents.csv`, `historical_universe.csv`, `mainboard_a_stocks.csv`, `st_calendar.csv`, and `failed_fetches.csv` must never be passed to `normalize_daily_frame()`.
 
 ### 4. Validation & Error Matrix
@@ -264,6 +265,7 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 - Unit test that `399300.SZ` fallback rows are retained as `hs300`.
 - Unit test that score filtering uses the latest prior snapshot per source and does not leak future membership.
 - Unit test that asynchronous source snapshots are carried forward independently before unioning members.
+- Governance test that a terminal partial month can be covered by the previous source snapshot, while non-terminal gaps still fail.
 - Config test that `DEFAULT_CONFIG["universe_builder"]` contains the default paths, index codes, and top-N.
 - Governance test that enabled historical universe coverage is checked independently for `hs300`, `csi500`, and `csi1000` and creates a `historical_universe` repair action on gaps.
 - Script/docs test that the batch entrypoint is UTF-8, CRLF, and documented in README.
@@ -541,6 +543,177 @@ signal_df, holdings = generate_signal("latest", config=route_config, scores=rout
 ```
 
 The current backtest and current signal both consume the same routed score panel and route schedule.
+
+### Scenario: Quant Backtest Diagnostic Report
+
+#### 1. Scope / Trigger
+
+- Trigger: users need to diagnose unprofitable backtests before optimizing strategy parameters.
+- Owners: `src.quant_diagnostics` builds artifact-level checks; `scripts/run_quant_diagnostics.py` writes the report.
+
+#### 2. Signatures
+
+- Command: `.\.venv\Scripts\python.exe scripts\run_quant_diagnostics.py [--artifact-dir outputs] [--compare-dir outputs_rerun] [--out-dir outputs] [--tolerance 1e-6]`.
+- API: `build_quant_diagnostic_report(artifact_dir="outputs", compare_dir=None, tolerance=1e-6) -> dict`.
+- API: `write_quant_diagnostic_report(report, out_dir="outputs") -> dict[str, str]`.
+- Outputs: `outputs/quant_diagnostic_report.json` and `outputs/quant_diagnostic_report.md`.
+
+#### 3. Contracts
+
+- The report is an aggregator over existing artifacts; it must not rerun backtests, optimization, data downloads, or signal promotion.
+- Checks are grouped into `backtest_engine`, `data`, `factor`, `portfolio`, and `optimization` layers.
+- Every check has `layer`, `name`, `status`, `summary`, `evidence`, and `caveats`.
+- Valid check statuses are `pass`, `warn`, and `fail`.
+- Missing optional evidence is a `warn`; failed accounting/data-governance invariants are `fail`.
+- `optimization_ready` is true only when the backtest engine, data, factor, and portfolio layers all pass.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Required backtest artifacts are missing | `required_artifacts` fails and optimization is blocked |
+| `--compare-dir` is absent | Reproducibility check warns with a caveat |
+| Comparable artifacts differ | Reproducibility check fails |
+| Trade-cost metric differs from cost columns | Trade-cost invariant fails |
+| Holdings value exceeds equity | Cash/equity invariant fails |
+| Data health/governance reports contain blocking issues | Data layer fails |
+| IC or group-return artifacts are missing | Factor layer warns and optimization is blocked |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: two artifact directories match exactly, accounting invariants pass, data/governance reports are ready, and factor/portfolio evidence exists.
+- Base: one artifact directory is available; reproducibility warns, but accounting/data/factor/portfolio evidence is still reported.
+- Bad: optimizing parameters while data health or point-in-time governance still fails.
+
+#### 6. Tests Required
+
+- Unit test complete artifact directories that pass every layer.
+- Unit test missing artifacts and caveats.
+- Unit test trade-cost and holding roll-forward invariant failures.
+- Unit test reproducibility mismatch.
+- Unit test JSON and Markdown report writers.
+
+#### 7. Wrong vs Correct
+
+##### Wrong
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_optimize.py --full-grid
+```
+
+Starting optimization while data or accounting diagnostics are still unresolved can overfit around invalid evidence.
+
+##### Correct
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_quant_diagnostics.py --artifact-dir outputs --compare-dir outputs_rerun
+```
+
+Run the ordered diagnostic gate first, then optimize only after earlier layers pass.
+
+### Scenario: Factor Diagnostic Evidence Tables
+
+#### 1. Scope / Trigger
+
+- Trigger: the five-layer quant diagnostic report requires factor IC, yearly stability, and quantile spread evidence before optimization is considered.
+- Owners: `src.factor_diagnostics` builds tables; `scripts/run_factor_diagnostics.py` loads configured factor/price artifacts and writes outputs.
+
+#### 2. Signatures
+
+- Command: `.\.venv\Scripts\python.exe scripts\run_factor_diagnostics.py [--factor-groups momentum] [--out-dir outputs] [--horizon 1] [--method spearman] [--min-obs 20] [--quantiles 5]`.
+- API: `build_factor_diagnostics(factor_df, price_df, horizon=1, method="spearman", min_obs=20, quantiles=5) -> dict[str, DataFrame]`.
+- API: `write_factor_diagnostics(tables, out_dir="outputs") -> dict[str, str]`.
+- Outputs: `outputs/factor_daily_ic.csv`, `outputs/factor_ic_summary.csv`, `outputs/factor_ic_yearly.csv`, and `outputs/factor_group_returns.csv`.
+
+#### 3. Contracts
+
+- Default command scope follows the configured strategy factor group to avoid scanning every cached factor unless `--factor-groups all` is explicit.
+- Factor input must use the standard `datetime`/`instrument` MultiIndex contract.
+- Price input must use a supported close-price panel or OHLCV field/instrument panel.
+- `factor_ic_summary.csv` contains `mean_ic`, `std_ic`, `ic_ir`, `positive_ratio`, and `count`.
+- `factor_ic_yearly.csv` groups IC summary by calendar year and factor.
+- `factor_group_returns.csv` stores per-date factor quantile forward returns and `top_minus_bottom` spreads.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Factor frame lacks a MultiIndex | Raise `ValueError("factor_df must use MultiIndex: datetime/instrument.")` |
+| Price file is missing | `scripts/run_factor_diagnostics.py` raises `FileNotFoundError` telling the user to run conversion first |
+| A factor/date has too few observations | Skip that date/factor quantile row instead of fabricating evidence |
+| `--factor-groups all` is used | Load all cached factor columns intentionally |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: configured factor group produces non-empty IC, yearly IC, and group-return tables.
+- Base: a sparse factor skips some group-return rows but still writes the available evidence.
+- Bad: treating a missing group-return file as proof the factor has no spread.
+
+#### 6. Tests Required
+
+- Unit test that synthetic factor/price panels produce IC summary, yearly IC, and group-return spread columns.
+- Writer test that all four CSV outputs are persisted.
+- Quant-diagnostic test that factor layer passes when the three required evidence files exist.
+
+#### 7. Wrong vs Correct
+
+##### Wrong
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_quant_diagnostics.py
+```
+
+Running the final diagnostic before factor evidence exists leaves the factor layer in `warn`.
+
+##### Correct
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_factor_diagnostics.py --factor-groups momentum
+.\.venv\Scripts\python.exe scripts\run_quant_diagnostics.py
+```
+
+Generate the missing factor evidence first, then re-run the five-layer gate.
+
+### Scenario: Post-Diagnostic Optimization Review
+
+#### 1. Scope / Trigger
+
+- Trigger: the first four diagnostic layers passed and users need an evidence-backed optimization decision.
+- Owners: `src.optimization_review` reads existing auto-run diagnostics; `scripts/run_optimization_review.py` writes the review.
+
+#### 2. Signatures
+
+- Command: `.\.venv\Scripts\python.exe scripts\run_optimization_review.py [--artifact-dir outputs] [--out-dir outputs]`.
+- API: `build_optimization_review(artifact_dir="outputs") -> dict`.
+- API: `write_optimization_review(report, out_dir="outputs") -> dict[str, str]`.
+- Outputs: `outputs/optimization_review.json` and `outputs/optimization_review.md`.
+
+#### 3. Contracts
+
+- The review must not optimize parameters, rerun backtests, or promote signals.
+- `status` is `ready` only when `quant_diagnostic_report.json` has `optimization_ready=true` and the auto-signal/backtest quality artifacts are executable/acceptable.
+- Performance comparison reads baseline `backtest_metrics.json` and optimized `auto_backtest_metrics.json`.
+- Style recognition reads annual-state-router route CSVs and summarizes source/reason/exposure distribution.
+- Risk flags are warnings, not automatic blockers, for low position count, industry concentration, and market-cap bucket concentration.
+- Trading flags identify annual trade-cost or rebalance-trim cost pressure and should prevent further turnover loosening.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Quant diagnostic gate is not ready | `status=review`; recommendations must not imply optimization can proceed |
+| Auto signal is not executable or backtest quality is unacceptable | `status=review` |
+| Baseline/optimized metrics are missing | Performance deltas are `null` rather than fabricated |
+| Latest holdings are concentrated | Add risk flags, but keep the review artifact writable |
+| Annual trade-cost ratio exceeds target | Add a trading flag and recommend against more turnover |
+
+#### 5. Tests Required
+
+- Unit test baseline versus optimized performance deltas.
+- Unit test annual router source/reason summaries.
+- Unit test risk flags for low position count, industry concentration, and small-cap concentration.
+- Unit test trading flags for high annual trade-cost ratios.
+- Writer test that JSON and Markdown review artifacts are persisted.
 
 ### Scenario: Backtest Exposure Schedule Composition
 

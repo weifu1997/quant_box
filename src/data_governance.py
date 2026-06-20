@@ -690,16 +690,40 @@ def _historical_universe_source_coverage(
 
     coverage: dict[str, dict[str, Any]] = {}
     for source in normalized_sources:
-        observed_months = expected & months_by_source.get(source, set()) if expected else set()
-        missing_months = sorted(expected - observed_months)
+        source_months = months_by_source.get(source, set())
+        observed_months = expected & source_months if expected else set()
+        carried_forward_months = _carried_forward_terminal_months(expected, observed_months)
+        covered_months = observed_months | carried_forward_months
+        missing_months = sorted(expected - covered_months)
         coverage[source] = {
             "expected_months": len(expected),
-            "observed_months": len(observed_months),
+            "observed_months": len(covered_months),
             "missing_months": len(missing_months),
-            "month_coverage": _coverage_ratio(len(observed_months), len(expected)),
+            "month_coverage": _coverage_ratio(len(covered_months), len(expected)),
             "missing_month_values": missing_months,
+            "carried_forward_month_values": sorted(carried_forward_months),
         }
     return coverage
+
+
+def _carried_forward_terminal_months(expected_months: set[str], observed_months: set[str]) -> set[str]:
+    """Allow the previous monthly snapshot to cover only the terminal partial month."""
+    missing = expected_months - observed_months
+    if not missing:
+        return set()
+    try:
+        expected_periods = {pd.Period(value, freq="M") for value in expected_months}
+        observed_periods = {pd.Period(value, freq="M") for value in observed_months}
+        missing_periods = {pd.Period(value, freq="M") for value in missing}
+    except ValueError:
+        return set()
+    terminal = max(expected_periods)
+    if missing_periods != {terminal}:
+        return set()
+    previous = terminal - 1
+    if previous not in observed_periods:
+        return set()
+    return {str(terminal)}
 
 
 def _split_pipe_values(value: Any) -> list[str]:

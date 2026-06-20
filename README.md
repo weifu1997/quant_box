@@ -229,8 +229,11 @@ universe_builder:
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_convert_data.py
 .\.venv\Scripts\python.exe scripts\run_calc_factors.py
+.\.venv\Scripts\python.exe scripts\run_factor_diagnostics.py
 .\.venv\Scripts\python.exe scripts\run_optimize.py
 .\.venv\Scripts\python.exe scripts\run_backtest.py
+.\.venv\Scripts\python.exe scripts\run_quant_diagnostics.py
+.\.venv\Scripts\python.exe scripts\run_optimization_review.py
 .\.venv\Scripts\python.exe scripts\run_daily_signal.py --date latest
 # 如需写入正式 signal_*.csv 和 latest_holdings.csv，加 --official
 ```
@@ -364,12 +367,19 @@ data/factors/adj_factor_meta.json      复权因子版本元数据
 data/factors/rolling_ic_weights.parquet rolling IC 权重缓存
 data/fundamentals/fina_indicator.parquet 基础财务指标缓存
 data/fundamentals/dividend.parquet      分红缓存
+outputs/factor_ic_summary.csv           Factor IC summary
+outputs/factor_ic_yearly.csv            Yearly factor IC stability
+outputs/factor_group_returns.csv        Factor quantile forward-return spread
 outputs/backtest_equity.csv            回测净值
 outputs/backtest_holdings.csv          回测持仓
 outputs/backtest_trades.csv            回测成交
 outputs/backtest_metrics.json          回测指标
 outputs/backtest_yearly.csv            Backtest yearly return/drawdown summary
 outputs/backtest_run_summary.json      Backtest run inputs, trade, cost, drawdown, and coverage summary
+outputs/quant_diagnostic_report.json   Five-layer quant diagnostics summary
+outputs/quant_diagnostic_report.md     Five-layer quant diagnostics report
+outputs/optimization_review.json       Post-diagnostic style/risk/trading review
+outputs/optimization_review.md         Human-readable optimization review
 outputs/logs/backtest_*.log            Backtest run logs
 outputs/optimization_results.csv       参数优化结果
 outputs/auto_run_status.json           自动流程阶段状态
