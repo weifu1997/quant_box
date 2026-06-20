@@ -743,11 +743,9 @@ def _point_in_time_start_date(*dates: str) -> str:
 def _point_in_time_end_date(config_end: Any, factor_end: str) -> str:
     """Cap governance coverage at the configured run end date when one is set."""
     parsed_factor = pd.to_datetime(factor_end, errors="coerce")
-    parsed_config = pd.to_datetime(config_end, errors="coerce")
-    if pd.isna(parsed_factor) and pd.isna(parsed_config):
-        return ""
     if pd.isna(parsed_factor):
-        return str(pd.Timestamp(parsed_config).date())
+        return ""
+    parsed_config = pd.to_datetime(config_end, errors="coerce")
     if pd.isna(parsed_config):
         return str(pd.Timestamp(parsed_factor).date())
     return str(min(pd.Timestamp(parsed_factor), pd.Timestamp(parsed_config)).date())
