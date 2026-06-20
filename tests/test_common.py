@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
-from src.common import normalize_datetime_index, normalize_instrument_index, normalize_instruments, normalize_multiindex_date_instrument
+from src.common import (
+    is_adj_factor_stock_csv,
+    is_stock_csv,
+    normalize_datetime_index,
+    normalize_instrument_index,
+    normalize_instruments,
+    normalize_multiindex_date_instrument,
+)
 
 
 class CommonNormalizationTests(unittest.TestCase):
@@ -48,6 +56,19 @@ class CommonNormalizationTests(unittest.TestCase):
         normalized = normalize_multiindex_date_instrument(index)
 
         self.assertEqual(normalized.tolist(), [(pd.Timestamp("2024-01-02"), "A")])
+
+    def test_stock_csv_recognizes_supported_a_share_exchanges(self) -> None:
+        self.assertTrue(is_stock_csv(Path("000001.SZ.csv")))
+        self.assertTrue(is_stock_csv(Path("600000.SH.csv")))
+        self.assertTrue(is_stock_csv(Path("830001.BJ.csv")))
+        self.assertFalse(is_stock_csv(Path("index_constituents.csv")))
+        self.assertFalse(is_stock_csv(Path("000001.HK.csv")))
+
+    def test_adj_factor_stock_csv_includes_bj_and_excludes_index_benchmarks(self) -> None:
+        self.assertTrue(is_adj_factor_stock_csv(Path("830001.BJ.csv")))
+        self.assertTrue(is_adj_factor_stock_csv(Path("600000.SH.csv")))
+        self.assertFalse(is_adj_factor_stock_csv(Path("000300.SH.csv")))
+        self.assertFalse(is_adj_factor_stock_csv(Path("000905.SH.csv")))
 
 
 if __name__ == "__main__":

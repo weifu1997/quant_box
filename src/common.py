@@ -85,7 +85,7 @@ def looks_like_field_table(columns: pd.Index, price_fields: set[str] | frozenset
 def is_stock_csv(path: Path) -> bool:
     """函数说明：判断 is_stock_csv 是否成立。"""
     name = path.name.upper()
-    return len(name) == len("000001.SZ.CSV") and name[:6].isdigit() and name[6:] in {".SZ.CSV", ".SH.CSV"}
+    return len(name) == len("000001.SZ.CSV") and name[:6].isdigit() and name[6:] in {".SZ.CSV", ".SH.CSV", ".BJ.CSV"}
 
 
 def is_adj_factor_stock_csv(path: Path) -> bool:
