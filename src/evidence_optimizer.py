@@ -39,27 +39,51 @@ def build_evidence_optimization_plan(
         review.get("risk_exposure", {}),
         max_industry_weight_target=max_industry_weight_target,
     )
+    risk_constraints["overlay_validation"] = _risk_overlay_validation(
+        candidates,
+        max_industry_weight=risk_constraints.get("max_industry_weight"),
+        annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
+    )
+    risk_constraints["risk_exit_refill_validation"] = (
+        _boolean_overlay_validation(
+            candidates,
+            field="rebalance_after_risk_exit",
+            annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
+        )
+        if risk_constraints.get("target_min_positions")
+        else {"status": "not_required", "candidate": {}}
+    )
     trading_constraints = _trading_constraints(
         review.get("trading_constraints", {}),
         selected,
         annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
     )
     route_parameters = _route_parameters(selected_params, selected)
-    status = "ready" if review.get("status") == "ready" and selected else "review"
-    caveats = _caveats(review, candidates, selected)
+    candidate_evidence = _candidate_evidence(
+        candidates,
+        selected,
+        annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
+    )
+    decisions = _optimization_decisions(selected, risk_constraints, trading_constraints)
+    status = "ready" if review.get("status") == "ready" and selected and _risk_overlay_ready(risk_constraints) else "review"
+    caveats = _caveats(review, candidates, selected, risk_constraints)
     return {
         "artifact_dir": str(root),
         "status": status,
         "style_recognition": {
+            "status": "ready" if selected else "review",
             "strategy_mode": selected_params.get("strategy_mode") or review.get("strategy_mode", ""),
             "selected_route_parameters": route_parameters,
             "candidate": selected,
         },
+        "candidate_evidence": candidate_evidence,
         "risk_exposure": risk_constraints,
         "trading_constraints": trading_constraints,
+        "optimization_decisions": decisions,
         "next_commands": _next_commands(
             selected,
             max_industry_weight=risk_constraints.get("max_industry_weight"),
+            include_risk_exit_refill=bool(risk_constraints.get("target_min_positions")),
             artifact_dir=root,
         ),
         "caveats": caveats,
@@ -81,23 +105,36 @@ def render_evidence_optimization_markdown(report: dict[str, Any]) -> str:
     """Render a concise optimization plan."""
     style = report.get("style_recognition", {})
     candidate = style.get("candidate", {})
+    evidence = report.get("candidate_evidence", {})
     risk = report.get("risk_exposure", {})
     trading = report.get("trading_constraints", {})
     lines = [
         "# Evidence Optimization Plan",
         "",
         f"- Status: {report.get('status', '')}",
+        f"- Style status: {style.get('status', '')}",
+        f"- Risk status: {risk.get('status', '')}",
+        f"- Trading status: {trading.get('status', '')}",
         f"- Strategy mode: {style.get('strategy_mode', '')}",
         f"- Selected candidate: {candidate.get('source_file', '')}",
         f"- Candidate annual return: {_pct(candidate.get('annual_return'))}",
         f"- Candidate max drawdown: {_pct(candidate.get('max_drawdown'))}",
         f"- Candidate annual trade cost ratio: {_pct(candidate.get('annual_trade_cost_ratio'))}",
         "",
+        "## Candidate Evidence",
+        "",
+        f"- Evaluated grid rows: {evidence.get('evaluated_grid_rows', 0)}",
+        f"- Full-goal rows: {evidence.get('full_goal_rows', 0)}",
+        f"- Cost-eligible full-goal rows: {evidence.get('cost_eligible_full_goal_rows', 0)}",
+        f"- Best rejected candidate reason: {evidence.get('best_rejected_candidate', {}).get('reject_reason', '')}",
+        "",
         "## Risk Exposure",
         "",
         f"- Max industry weight: {_pct(risk.get('max_industry_weight'))}",
         f"- Target minimum positions: {risk.get('target_min_positions')}",
         f"- Small-cap concentration action: {risk.get('small_cap_action', '')}",
+        f"- Risk overlay validation: {risk.get('overlay_validation', {}).get('status', '')}",
+        f"- Risk-exit refill validation: {risk.get('risk_exit_refill_validation', {}).get('status', '')}",
         "",
         "## Trading Constraints",
         "",
@@ -106,9 +143,17 @@ def render_evidence_optimization_markdown(report: dict[str, Any]) -> str:
         f"- Candidate turnover mode: {trading.get('candidate_turnover_mode', '')}",
         f"- Candidate boost reasons: {trading.get('candidate_turnover_boost_reasons', '')}",
         "",
-        "## Next Commands",
+        "## Optimization Decisions",
         "",
     ]
+    lines.extend([f"- {decision}" for decision in report.get("optimization_decisions", [])])
+    lines.extend(
+        [
+            "",
+            "## Next Commands",
+            "",
+        ]
+    )
     lines.extend([f"- `{command}`" for command in report.get("next_commands", [])])
     caveats = report.get("caveats", [])
     if caveats:
@@ -155,17 +200,138 @@ def _select_candidate(candidates: list[dict[str, Any]], *, annual_trade_cost_rat
     )
 
 
+def _candidate_evidence(
+    candidates: list[dict[str, Any]],
+    selected: dict[str, Any],
+    *,
+    annual_trade_cost_ratio_target: float,
+) -> dict[str, Any]:
+    full_goal = [candidate for candidate in candidates if candidate.get("full_goal")]
+    cost_eligible = [
+        candidate
+        for candidate in full_goal
+        if _number_or_none(candidate.get("annual_trade_cost_ratio")) is not None
+        and float(candidate["annual_trade_cost_ratio"]) <= float(annual_trade_cost_ratio_target)
+    ]
+    rejected = [_rejected_candidate(candidate, annual_trade_cost_ratio_target) for candidate in candidates]
+    rejected = [candidate for candidate in rejected if candidate.get("reject_reason")]
+    return {
+        "evaluated_grid_rows": len(candidates),
+        "full_goal_rows": len(full_goal),
+        "cost_eligible_full_goal_rows": len(cost_eligible),
+        "selected_key": selected.get("key", ""),
+        "best_rejected_candidate": _best_rejected_candidate(rejected),
+    }
+
+
+def _rejected_candidate(candidate: dict[str, Any], annual_trade_cost_ratio_target: float) -> dict[str, Any]:
+    reason = ""
+    cost = _number_or_none(candidate.get("annual_trade_cost_ratio"))
+    if candidate.get("full_goal") and cost is not None and cost > float(annual_trade_cost_ratio_target):
+        reason = "trade_cost_above_target"
+    elif not candidate.get("full_goal"):
+        failed_years = str(candidate.get("failed_years") or "").strip()
+        reason = f"full_gate_failed:{failed_years}" if failed_years else "full_gate_failed"
+    if not reason:
+        return {}
+    result = _compact_candidate(candidate)
+    result["reject_reason"] = reason
+    return result
+
+
+def _best_rejected_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    if not candidates:
+        return {}
+    return max(
+        candidates,
+        key=lambda item: (
+            float(item.get("annual_return") or 0.0),
+            float(item.get("max_drawdown") or -1.0),
+            -float(item.get("annual_trade_cost_ratio") or 0.0),
+        ),
+    )
+
+
 def _risk_constraints(risk: dict[str, Any], *, max_industry_weight_target: float) -> dict[str, Any]:
     flags = [str(flag) for flag in risk.get("flags", [])] if isinstance(risk, dict) else []
     low_positions = any(flag.startswith("low_position_count:") for flag in flags)
     high_industry = any(flag.startswith("high_industry_concentration:") for flag in flags)
     small_cap = any(flag.startswith("small_cap_concentration:") for flag in flags)
-    return {
+    result = {
         "max_industry_weight": float(max_industry_weight_target) if high_industry else None,
         "target_min_positions": 5 if low_positions else None,
         "small_cap_action": "reduce_small_cap_concentration" if small_cap else "monitor",
         "source_flags": flags,
     }
+    result["status"] = "review" if low_positions or high_industry or small_cap else "ready"
+    return result
+
+
+def _risk_overlay_validation(
+    candidates: list[dict[str, Any]],
+    *,
+    max_industry_weight: Any,
+    annual_trade_cost_ratio_target: float,
+) -> dict[str, Any]:
+    target = _number_or_none(max_industry_weight)
+    if target is None:
+        return {"status": "not_required", "candidate": {}}
+    tested = [
+        candidate
+        for candidate in candidates
+        if _number_or_none(candidate.get("max_industry_weight")) is not None
+        and abs(float(candidate["max_industry_weight"]) - target) <= 1e-12
+    ]
+    if not tested:
+        return {"status": "not_tested", "candidate": {}}
+    best = max(
+        tested,
+        key=lambda item: (
+            bool(item.get("full_goal")),
+            float(item.get("annual_return") or 0.0),
+            float(item.get("max_drawdown") or -1.0),
+            -float(item.get("annual_trade_cost_ratio") or 0.0),
+        ),
+    )
+    passes = bool(best.get("full_goal")) and (
+        _number_or_none(best.get("annual_trade_cost_ratio")) is not None
+        and float(best["annual_trade_cost_ratio"]) <= float(annual_trade_cost_ratio_target)
+    )
+    return {"status": "pass" if passes else "fail", "candidate": _compact_candidate(best)}
+
+
+def _risk_overlay_ready(risk_constraints: dict[str, Any]) -> bool:
+    for key in ("overlay_validation", "risk_exit_refill_validation"):
+        validation = risk_constraints.get(key, {})
+        status = validation.get("status") if isinstance(validation, dict) else ""
+        if status == "fail":
+            return False
+    return True
+
+
+def _boolean_overlay_validation(
+    candidates: list[dict[str, Any]],
+    *,
+    field: str,
+    annual_trade_cost_ratio_target: float,
+) -> dict[str, Any]:
+    tested = [candidate for candidate in candidates if _boolish(candidate.get(field))]
+    if not tested:
+        return {"status": "not_tested", "candidate": {}}
+    best = max(
+        tested,
+        key=lambda item: (
+            bool(item.get("full_goal")),
+            float(item.get("annual_return") or 0.0),
+            float(item.get("max_drawdown") or -1.0),
+            -float(item.get("annual_trade_cost_ratio") or 0.0),
+        ),
+    )
+    passes = bool(best.get("full_goal")) and (
+        _number_or_none(best.get("annual_trade_cost_ratio")) is not None
+        and float(best["annual_trade_cost_ratio"]) <= float(annual_trade_cost_ratio_target)
+    )
+    return {"status": "pass" if passes else "fail", "candidate": _compact_candidate(best)}
 
 
 def _trading_constraints(
@@ -177,6 +343,7 @@ def _trading_constraints(
     flags = [str(flag) for flag in trading.get("flags", [])] if isinstance(trading, dict) else []
     high_cost = any(flag.startswith("annual_trade_cost_ratio_above_target:") for flag in flags)
     return {
+        "status": "ready" if selected else "review",
         "annual_trade_cost_ratio_target": float(annual_trade_cost_ratio_target),
         "turnover_action": "do_not_increase_turnover" if high_cost else "keep_current_turnover_gate",
         "candidate_turnover_mode": selected.get("turnover_mode", ""),
@@ -185,6 +352,33 @@ def _trading_constraints(
         "candidate_turnover_boost_rank_buffer": _int_or_none(selected.get("turnover_boost_rank_buffer")),
         "source_flags": flags,
     }
+
+
+def _optimization_decisions(
+    selected: dict[str, Any],
+    risk_constraints: dict[str, Any],
+    trading_constraints: dict[str, Any],
+) -> list[str]:
+    decisions: list[str] = []
+    if selected:
+        decisions.append(
+            "Adopt the selected annual-state-router style candidate for research follow-up; it passes the full yearly, drawdown, turnover, and cost gates."
+        )
+    overlay = risk_constraints.get("overlay_validation", {})
+    if isinstance(overlay, dict) and overlay.get("status") == "fail":
+        decisions.append("Reject the tested hard max-industry-weight overlay for now; it failed the full router gate.")
+    elif isinstance(overlay, dict) and overlay.get("status") == "pass":
+        decisions.append("Keep the tested max-industry-weight overlay as an eligible risk-control candidate.")
+    refill = risk_constraints.get("risk_exit_refill_validation", {})
+    if isinstance(refill, dict) and refill.get("status") == "fail":
+        decisions.append("Reject same-day refill after stop-loss/take-profit exits; it increased failures or costs in tested evidence.")
+    elif isinstance(refill, dict) and refill.get("status") == "pass":
+        decisions.append("Keep same-day risk-exit refill as an eligible risk-control candidate.")
+    if trading_constraints.get("turnover_action") == "do_not_increase_turnover":
+        decisions.append("Do not loosen turnover; preserve the selected candidate's rank10 turnover and boost limits.")
+    if risk_constraints.get("small_cap_action") == "reduce_small_cap_concentration":
+        decisions.append("Search for natural diversification through route source, threshold, and exposure changes before writing risk limits into config.")
+    return decisions
 
 
 def _route_parameters(selected_params: dict[str, Any], selected: dict[str, Any]) -> dict[str, Any]:
@@ -214,7 +408,13 @@ def _route_parameters(selected_params: dict[str, Any], selected: dict[str, Any])
     return result
 
 
-def _next_commands(selected: dict[str, Any], *, max_industry_weight: Any, artifact_dir: Path) -> list[str]:
+def _next_commands(
+    selected: dict[str, Any],
+    *,
+    max_industry_weight: Any,
+    include_risk_exit_refill: bool,
+    artifact_dir: Path,
+) -> list[str]:
     if not selected:
         return []
     command = [
@@ -249,11 +449,18 @@ def _next_commands(selected: dict[str, Any], *, max_industry_weight: Any, artifa
     command.extend(["--equity-overlay-bear-exposures", "none"])
     command.extend(["--defensive-bear-exposures", "none"])
     if max_industry_weight is not None:
-        command.extend(["--max-industry-weights", str(max_industry_weight)])
+        command.extend(["--max-industry-weights", f"none,{max_industry_weight}"])
+    if include_risk_exit_refill:
+        command.extend(["--rebalance-after-risk-exit-options", "false,true"])
     return [" ".join(command)]
 
 
-def _caveats(review: dict[str, Any], candidates: list[dict[str, Any]], selected: dict[str, Any]) -> list[str]:
+def _caveats(
+    review: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    selected: dict[str, Any],
+    risk_constraints: dict[str, Any],
+) -> list[str]:
     caveats: list[str] = []
     if review.get("status") != "ready":
         caveats.append("Optimization review is not ready; run diagnostics and optimization review first.")
@@ -261,6 +468,12 @@ def _caveats(review: dict[str, Any], candidates: list[dict[str, Any]], selected:
         caveats.append("No router grid rows with the required columns were found.")
     elif not selected:
         caveats.append("No full-goal router grid candidate stayed within the annual trade-cost target.")
+    validation = risk_constraints.get("overlay_validation", {})
+    if isinstance(validation, dict) and validation.get("status") == "fail":
+        caveats.append("The tested max-industry-weight overlay did not pass the full router gate; continue risk search before adopting it.")
+    refill_validation = risk_constraints.get("risk_exit_refill_validation", {})
+    if isinstance(refill_validation, dict) and refill_validation.get("status") == "fail":
+        caveats.append("The tested risk-exit refill overlay did not pass the full router gate; do not auto-refill after risk exits yet.")
     caveats.append("Risk constraints are generated as research overlays; they are not written into config/settings.yaml.")
     return caveats
 
@@ -278,6 +491,8 @@ def _read_csv(path: Path) -> pd.DataFrame:
         return pd.read_csv(path)
     except pd.errors.EmptyDataError:
         return pd.DataFrame()
+    except pd.errors.ParserError:
+        return pd.read_csv(path, engine="python", on_bad_lines="skip")
 
 
 def _boolish(value: Any) -> bool:
@@ -304,6 +519,26 @@ def _scalar(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     return value
+
+
+def _compact_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "key",
+        "source_file",
+        "annual_return",
+        "max_drawdown",
+        "annual_trade_cost_ratio",
+        "failed_years",
+        "full_goal",
+        "moderate_low_source",
+        "moderate_low_ret252_min",
+        "moderate_low_exposure",
+        "max_industry_weight",
+        "rebalance_after_risk_exit",
+        "turnover_mode",
+        "turnover_boost_reasons",
+    ]
+    return {key: candidate.get(key) for key in keys if key in candidate}
 
 
 def _pct(value: Any) -> str:

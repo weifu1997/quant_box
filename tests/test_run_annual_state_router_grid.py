@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
-from scripts.run_annual_state_router_grid import iter_grid, parse_reason_set, parse_reason_set_list
+import pandas as pd
+
+from scripts.run_annual_state_router_grid import append_row, iter_grid, parse_bool_list, parse_reason_set, parse_reason_set_list
 
 
 class RunAnnualStateRouterGridTests(unittest.TestCase):
@@ -42,6 +46,22 @@ class RunAnnualStateRouterGridTests(unittest.TestCase):
 
         self.assertEqual([combo["max_industry_weight"] for combo in combos], [None, 0.35])
 
+    def test_parse_bool_list_accepts_true_false_values(self) -> None:
+        self.assertEqual(parse_bool_list("false,true,1,0"), [False, True, True, False])
+
+    def test_append_row_rewrites_with_column_union(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "grid.csv"
+
+            append_row(path, {"key": "old", "annual_return": 0.2})
+            append_row(path, {"key": "new", "annual_return": 0.3, "rebalance_after_risk_exit": True})
+
+            frame = pd.read_csv(path)
+
+        self.assertEqual(frame["key"].tolist(), ["old", "new"])
+        self.assertIn("rebalance_after_risk_exit", frame.columns)
+        self.assertTrue(bool(frame.iloc[1]["rebalance_after_risk_exit"]))
+
 
 def _grid_args(**overrides: str) -> Namespace:
     values = {
@@ -61,6 +81,7 @@ def _grid_args(**overrides: str) -> Namespace:
         "equity_overlay_bear_exposures": "none",
         "defensive_bear_exposures": "none",
         "max_industry_weights": "none",
+        "rebalance_after_risk_exit_options": "false",
     }
     values.update(overrides)
     return Namespace(**values)

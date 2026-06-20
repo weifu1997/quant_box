@@ -63,6 +63,7 @@ def main() -> None:
     parser.add_argument("--equity-overlay-bear-exposures", default="none,0.60")
     parser.add_argument("--defensive-bear-exposures", default="none")
     parser.add_argument("--max-industry-weights", default="none")
+    parser.add_argument("--rebalance-after-risk-exit-options", default="false")
     parser.add_argument("--disable-equity-overlay", action="store_true")
     parser.add_argument("--write-hit-prefix", default="")
     args = parser.parse_args()
@@ -254,28 +255,30 @@ def iter_grid(args: argparse.Namespace) -> list[dict[str, Any]]:
                                                         for overlay_bear in parse_optional_float_list(args.equity_overlay_bear_exposures):
                                                             for defensive_bear in parse_optional_float_list(args.defensive_bear_exposures):
                                                                 for max_industry_weight in parse_optional_float_list(args.max_industry_weights):
-                                                                    combos.append(
-                                                                        {
-                                                                            "missing_ret252_exposure": missing,
-                                                                            "strong_trailing_exposure": strong,
-                                                                            "moderate_positive_source": high_source,
-                                                                            "moderate_positive_ret252_min": high_min,
-                                                                            "moderate_low_source": low_source,
-                                                                            "moderate_low_ret252_min": low_min,
-                                                                            "moderate_low_ret252_max": low_max,
-                                                                            "moderate_low_exposure": low_exposure,
-                                                                            "turnover_mode": turnover_mode,
-                                                                            "turnover_boost_reasons": boost_reasons,
-                                                                            "turnover_boost_max_turnover": boost_turnover,
-                                                                            "turnover_boost_rank_buffer": boost_buffer,
-                                                                            "equity_overlay_sideways_exposure": overlay_side,
-                                                                            "equity_overlay_bear_exposure": overlay_bear,
-                                                                            "equity_overlay_drawdown_cut": None,
-                                                                            "defensive_sideways_exposure": None,
-                                                                            "defensive_bear_exposure": defensive_bear,
-                                                                            "max_industry_weight": max_industry_weight,
-                                                                        }
-                                                                    )
+                                                                    for rebalance_after_risk_exit in parse_bool_list(args.rebalance_after_risk_exit_options):
+                                                                        combos.append(
+                                                                            {
+                                                                                "missing_ret252_exposure": missing,
+                                                                                "strong_trailing_exposure": strong,
+                                                                                "moderate_positive_source": high_source,
+                                                                                "moderate_positive_ret252_min": high_min,
+                                                                                "moderate_low_source": low_source,
+                                                                                "moderate_low_ret252_min": low_min,
+                                                                                "moderate_low_ret252_max": low_max,
+                                                                                "moderate_low_exposure": low_exposure,
+                                                                                "turnover_mode": turnover_mode,
+                                                                                "turnover_boost_reasons": boost_reasons,
+                                                                                "turnover_boost_max_turnover": boost_turnover,
+                                                                                "turnover_boost_rank_buffer": boost_buffer,
+                                                                                "equity_overlay_sideways_exposure": overlay_side,
+                                                                                "equity_overlay_bear_exposure": overlay_bear,
+                                                                                "equity_overlay_drawdown_cut": None,
+                                                                                "defensive_sideways_exposure": None,
+                                                                                "defensive_bear_exposure": defensive_bear,
+                                                                                "max_industry_weight": max_industry_weight,
+                                                                                "rebalance_after_risk_exit": rebalance_after_risk_exit,
+                                                                            }
+                                                                        )
     return combos
 
 
@@ -314,19 +317,33 @@ def namespace_for_combo(combo: dict[str, Any]) -> argparse.Namespace:
         defensive_sideways_exposure=combo["defensive_sideways_exposure"],
         defensive_bear_exposure=combo["defensive_bear_exposure"],
         max_industry_weight=combo["max_industry_weight"],
+        rebalance_after_risk_exit=combo["rebalance_after_risk_exit"],
     )
 
 
 def completed_keys(path: Path) -> set[str]:
     if not path.exists() or path.stat().st_size == 0:
         return set()
-    frame = pd.read_csv(path, usecols=["key"])
+    try:
+        frame = pd.read_csv(path, usecols=["key"])
+    except pd.errors.ParserError:
+        frame = pd.read_csv(path, usecols=["key"], engine="python", on_bad_lines="skip")
     return set(frame["key"].astype(str))
 
 
 def append_row(path: Path, row: dict[str, Any]) -> None:
     frame = pd.DataFrame([row])
-    frame.to_csv(path, mode="a", header=not path.exists(), index=False, encoding="utf-8-sig")
+    if not path.exists() or path.stat().st_size == 0:
+        frame.to_csv(path, index=False, encoding="utf-8-sig")
+        return
+    try:
+        existing = pd.read_csv(path)
+    except pd.errors.ParserError:
+        existing = pd.read_csv(path, engine="python", on_bad_lines="skip")
+    columns = list(dict.fromkeys([*existing.columns.tolist(), *frame.columns.tolist()]))
+    combined = existing.reindex(columns=columns).astype(object).copy()
+    combined.loc[len(combined), columns] = frame.reindex(columns=columns).iloc[0].tolist()
+    combined.to_csv(path, index=False, encoding="utf-8-sig")
 
 
 def combo_key(combo: dict[str, Any]) -> str:
@@ -354,6 +371,19 @@ def parse_optional_float_list(value: str) -> list[float | None]:
     for item in parse_str_list(value):
         result.append(None if item.lower() in {"none", "null"} else float(item))
     return result
+
+
+def parse_bool_list(value: str) -> list[bool]:
+    result: list[bool] = []
+    for item in parse_str_list(value):
+        normalized = item.strip().lower()
+        if normalized in {"1", "true", "yes", "y"}:
+            result.append(True)
+        elif normalized in {"0", "false", "no", "n"}:
+            result.append(False)
+        else:
+            raise ValueError(f"Unsupported boolean value: {item}")
+    return result or [False]
 
 
 def parse_reason_set_list(value: str) -> list[str]:

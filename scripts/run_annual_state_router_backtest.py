@@ -62,6 +62,10 @@ def apply_research_config_overrides(config: dict[str, Any], args: argparse.Names
         strategy = dict(result.get("strategy", {}))
         strategy["max_industry_weight"] = float(max_industry_weight)
         result["strategy"] = strategy
+    if getattr(args, "rebalance_after_risk_exit", False):
+        strategy = dict(result.get("strategy", {}))
+        strategy["rebalance_after_risk_exit"] = True
+        result["strategy"] = strategy
 
     backtest = dict(result.get("backtest", {}))
     overlay = dict(backtest.get("equity_overlay", {}))
@@ -86,16 +90,17 @@ def apply_research_config_overrides(config: dict[str, Any], args: argparse.Names
     return result
 
 
-def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, float]:
+def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, float | bool]:
     values = {
         "max_industry_weight": getattr(args, "max_industry_weight", None),
+        "rebalance_after_risk_exit": getattr(args, "rebalance_after_risk_exit", False),
         "equity_overlay_sideways_exposure": args.equity_overlay_sideways_exposure,
         "equity_overlay_bear_exposure": args.equity_overlay_bear_exposure,
         "equity_overlay_drawdown_cut": args.equity_overlay_drawdown_cut,
         "defensive_sideways_exposure": args.defensive_sideways_exposure,
         "defensive_bear_exposure": args.defensive_bear_exposure,
     }
-    return {key: float(value) for key, value in values.items() if value is not None}
+    return {key: value if isinstance(value, bool) else float(value) for key, value in values.items() if value is not None and value is not False}
 
 
 def parse_reason_list(value: str) -> set[str]:
@@ -132,6 +137,7 @@ def main() -> None:
     parser.add_argument("--defensive-sideways-exposure", type=float, default=None)
     parser.add_argument("--defensive-bear-exposure", type=float, default=None)
     parser.add_argument("--max-industry-weight", type=float, default=None)
+    parser.add_argument("--rebalance-after-risk-exit", action="store_true")
     parser.add_argument("--turnover-boost-reasons", default="")
     parser.add_argument("--turnover-boost-max-turnover", type=int, default=2)
     parser.add_argument("--turnover-boost-rank-buffer", type=int, default=10)

@@ -94,6 +94,7 @@ def run_backtest(
     max_weight = config.get("max_weight_per_stock")
     max_weight = float(max_weight) if max_weight is not None else None
     rebalance_drift_threshold = float(config.get("rebalance_drift_threshold", 0.0) or 0.0)
+    rebalance_after_risk_exit = bool(config.get("rebalance_after_risk_exit", False))
     risk_policy = RiskPolicy(config)
 
     holdings: dict[str, int] = {}
@@ -136,6 +137,7 @@ def run_backtest(
             prices,
             config,
         )
+        risk_exit_trade_start = len(trade_rows)
         capital = _execute_risk_exits(
             holdings,
             entry_prices,
@@ -153,6 +155,7 @@ def run_backtest(
             prices,
             config,
         )
+        risk_exit_symbols = _risk_exit_symbols_from_rows(trade_rows[risk_exit_trade_start:])
         total_before_signal = _portfolio_value(capital, holdings, close_values, last_prices)
         trade_year = pd.Timestamp(trade_date).year
         if previous_date is None or pd.Timestamp(previous_date).year != trade_year:
@@ -264,7 +267,8 @@ def run_backtest(
             last_signal_date = signal_date
         exposure_rebalance = _scheduled_exposure_rebalance_needed(exposure_schedule, trade_date, previous_date, config)
         exposure_rebalance = exposure_rebalance or _equity_overlay_rebalance_needed(equity_rows, config)
-        rebalance_signal_date = signal_date if signal_date is not None else last_signal_date if exposure_rebalance else None
+        risk_exit_rebalance = rebalance_after_risk_exit and bool(risk_exit_symbols)
+        rebalance_signal_date = signal_date if signal_date is not None else last_signal_date if exposure_rebalance or risk_exit_rebalance else None
         if rebalance_signal_date is not None and not risk_off:
             effective_top_n, effective_max_turnover, effective_rank_buffer = _selection_config_for_signal(
                 selection_schedule,
@@ -276,6 +280,8 @@ def run_backtest(
             daily_scores = score_panel.xs(rebalance_signal_date, level=0, drop_level=True)
             daily_scores.index = daily_scores.index.astype(str)
             daily_scores = daily_scores[daily_scores.index.isin(tradability["priced"])]
+            if risk_exit_rebalance and risk_exit_symbols:
+                daily_scores = daily_scores[~daily_scores.index.isin(risk_exit_symbols)]
             daily_scores = risk_policy.filter_selection_scores(daily_scores, prices, rebalance_signal_date)
 
             target_holdings = select_stocks(
@@ -296,7 +302,7 @@ def run_backtest(
                 price = _price_for(stock, trade_price_values, last_prices)
                 target_value = target_values.get(stock, 0.0)
                 desired_shares[stock] = _round_lot(target_value / price if price > 0 else 0, stock, config)
-            drift_threshold = 0.0 if exposure_rebalance else rebalance_drift_threshold
+            drift_threshold = 0.0 if exposure_rebalance or risk_exit_rebalance else rebalance_drift_threshold
             desired_shares = _apply_rebalance_drift_threshold(
                 desired_shares,
                 holdings,
@@ -1149,6 +1155,24 @@ def _execute_risk_exits(
             execution_price=execution_price,
         )
     return capital
+
+
+def _risk_exit_symbols_from_rows(rows: list[dict[str, object]]) -> set[str]:
+    """Return instruments that were successfully reduced by risk-exit trades."""
+    symbols: set[str] = set()
+    for row in rows:
+        if str(row.get("side", "")).upper() != "SELL":
+            continue
+        status = str(row.get("status", "")).strip().lower()
+        reason = str(row.get("reason", "")).strip().lower()
+        if status not in {"risk_exit", "partial"}:
+            continue
+        if not (reason.startswith("stop_loss") or reason.startswith("take_profit")):
+            continue
+        instrument = str(row.get("instrument", "")).strip()
+        if instrument:
+            symbols.add(instrument)
+    return symbols
 
 
 def _execute_stale_price_exits(

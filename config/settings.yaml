@@ -252,6 +252,7 @@ strategy:
   circuit_breaker_cooldown_days: 5
   circuit_breaker_target_exposure: 0.30
   max_industry_weight: null
+  rebalance_after_risk_exit: false
   rebalance_drift_threshold: 0.02
   min_cross_section_obs: 5
 

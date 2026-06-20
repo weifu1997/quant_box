@@ -411,7 +411,7 @@ route_year = trade_date.year
 - Single formal run:
   - `scripts/run_annual_state_router_backtest.py --include-expanded-sources --moderate-positive-source <source> --moderate-low-source <source> --moderate-low-exposure <float> --turnover-boost-reasons <comma-list>`
 - Resumable grid:
-  - `scripts/run_annual_state_router_grid.py --cache-dir outputs/router_score_cache --output outputs/<name>.csv --write-hit-prefix outputs/<prefix> [--max-industry-weights none,0.35]`
+  - `scripts/run_annual_state_router_grid.py --cache-dir outputs/router_score_cache --output outputs/<name>.csv --write-hit-prefix outputs/<prefix> [--max-industry-weights none,0.35] [--rebalance-after-risk-exit-options false,true]`
 - Expanded source names currently include `roc60`, `db_total`, `beta20`, and `rsqr20`.
 
 #### 3. Contracts
@@ -421,6 +421,7 @@ route_year = trade_date.year
 - `turnover_boost_reason_sets` uses semicolon-separated reason sets; reasons inside one set use `+`, for example `low_vol_moderate_uptrend+moderate_positive_roc60`.
 - `moderate_low_exposure` multiplies route exposure only when `moderate_low_source` is selected for a `default_beta` route whose `ret252` is in `[moderate_low_ret252_min, moderate_low_ret252_max)`.
 - `max_industry_weights` enumerates research-only `strategy.max_industry_weight` overrides. `none` preserves the configured/default behavior; numeric values are passed through `RiskPolicy` and existing selection constraints.
+- `rebalance_after_risk_exit_options` enumerates research-only backtest behavior after stop-loss/take-profit exits. When true, the backtest may refill from the latest signal after a risk exit, while excluding the just-exited instruments from that same-day refill.
 - A full-gate hit writes `_metrics.json`, `_years.csv`, `_year_routes.csv`, `_score_routes.csv`, `_holdings.csv`, `_trades.csv`, and `_equity.csv` beside the requested hit prefix.
 
 #### 4. Validation & Error Matrix
@@ -432,6 +433,7 @@ route_year = trade_date.year
 | `turnover_boost_reasons=none` | Do not boost route turnover; collapse boost max/rank combinations to a single grid row. |
 | `moderate_low_source=none` | Do not route the low ret252 band; collapse `moderate_low_exposure` to `1.0`. |
 | `max_industry_weights=none,0.35` | Run the same grid combo with and without a 35% industry cap overlay. |
+| `rebalance_after_risk_exit_options=false,true` | Compare normal monthly refill behavior with same-day refill after risk exits. |
 | Routed source is missing from score sources | Raise `ValueError("Routed source is not in score sources: ...")`. |
 | Hit satisfies annual return, drawdown, turnover, cost, and yearly gates | Write hit artifacts and stop the grid early. |
 
@@ -446,6 +448,8 @@ route_year = trade_date.year
 - `tests/test_run_annual_state_router_backtest.py` must assert expanded source definitions and route exposure scaling.
 - `tests/test_run_annual_state_router_grid.py` must assert reason-set parsing and `moderate_low_exposure` enumeration/collapse.
 - `tests/test_run_annual_state_router_grid.py` must assert `max_industry_weights` enumeration.
+- `tests/test_run_annual_state_router_grid.py` must assert `rebalance_after_risk_exit_options` parsing.
+- `tests/test_backtest.py` must assert risk-exit refill uses the latest signal without immediately rebuying the just-exited instrument.
 - Backtest tests must continue to assert `selection_schedule` values affect realized holdings on matching signal dates.
 
 #### 7. Wrong vs Correct
@@ -737,8 +741,9 @@ Generate the missing factor evidence first, then re-run the five-layer gate.
 - The plan reads existing diagnostics, optimization review, selected auto params, and router-grid CSV evidence; it must not mutate `config/settings.yaml` or promote signals.
 - A style candidate is eligible only when the grid row has `full_goal=true` and `annual_trade_cost_ratio <= annual_trade_cost_ratio_target`.
 - Risk flags become research overlays: high industry concentration maps to `max_industry_weight_target`, low latest positions maps to a target minimum position count, and small-cap concentration maps to a small-cap reduction action.
+- When low latest positions are caused by risk exits, tested `rebalance_after_risk_exit` grid rows must be recorded as pass/fail evidence before adoption.
 - Trading flags keep turnover from increasing and preserve the selected full-goal candidate's turnover mode/boost settings for follow-up grid commands.
-- The generated next command must include `--max-industry-weights` when an industry cap overlay is recommended.
+- The generated next command must include `--max-industry-weights` when an industry cap overlay is recommended and `--rebalance-after-risk-exit-options` when low position count is flagged.
 
 #### 4. Validation & Error Matrix
 
@@ -748,12 +753,14 @@ Generate the missing factor evidence first, then re-run the five-layer gate.
 | No router-grid evidence has required columns | `status=review` with a caveat |
 | Full-goal candidates exist but exceed the cost target | `status=review`; do not fabricate a candidate |
 | High industry concentration is flagged | Add a `max_industry_weight` research overlay |
+| Risk-exit refill was tested and failed the full gate | Keep `status=review`; warn not to adopt same-day refill |
 | Candidate is selected | Emit JSON/Markdown and a resumable router-grid command |
 
 #### 5. Tests Required
 
 - Unit test full-goal/cost-eligible candidate selection.
 - Unit test risk flags become max-industry, min-position, and small-cap actions.
+- Unit test failed risk overlays keep the plan in review.
 - Unit test high-cost trading flags produce `do_not_increase_turnover`.
 - Writer test that JSON and Markdown plan artifacts are persisted.
 

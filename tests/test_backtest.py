@@ -556,6 +556,46 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(risk_trades.empty)
         self.assertEqual(risk_trades.iloc[0]["reason"], "stop_loss")
 
+    def test_rebalance_after_risk_exit_refills_from_last_signal_without_rebuying_exit(self) -> None:
+        dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+        index = pd.MultiIndex.from_product([[dates[0]], ["A", "B"]], names=["datetime", "instrument"])
+        scores = pd.Series([10.0, 9.0], index=index, name="score")
+        prices = pd.concat(
+            {
+                "open": pd.DataFrame({"A": [10.0, 10.0, 12.0], "B": [10.0, 10.0, 10.0]}, index=dates),
+                "high": pd.DataFrame({"A": [10.0, 10.2, 12.2], "B": [10.0, 10.2, 10.2]}, index=dates),
+                "low": pd.DataFrame({"A": [10.0, 9.8, 11.8], "B": [10.0, 9.8, 9.8]}, index=dates),
+                "close": pd.DataFrame({"A": [10.0, 10.0, 12.0], "B": [10.0, 10.0, 10.0]}, index=dates),
+                "volume": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0], "B": [1000.0, 1000.0, 1000.0]}, index=dates),
+                "amount": pd.DataFrame({"A": [1000.0, 1000.0, 1000.0], "B": [1000.0, 1000.0, 1000.0]}, index=dates),
+            },
+            axis=1,
+        )
+
+        result = run_backtest(
+            scores,
+            prices,
+            "2024-01-02",
+            "2024-01-04",
+            {
+                "initial_capital": 100000,
+                "top_n": 1,
+                "max_turnover": 1,
+                "trade_price_field": "open",
+                "take_profit_pct": 0.10,
+                "rebalance_after_risk_exit": True,
+                "commission": 0.0,
+                "stamp_tax": 0.0,
+                "slippage": 0.0,
+            },
+        )
+
+        same_day = result.trades[result.trades["date"] == dates[-1]]
+        self.assertEqual(same_day[same_day["status"] == "risk_exit"].iloc[0]["instrument"], "A")
+        buys = same_day[same_day["side"] == "BUY"]
+        self.assertEqual(buys.iloc[0]["instrument"], "B")
+        self.assertNotIn("A", buys["instrument"].tolist())
+
     def test_stop_loss_exit_respects_capacity_limit_and_keeps_remaining_shares(self) -> None:
         """函数说明：验证 test_stop_loss_exit_respects_capacity_limit_and_keeps_remaining_shares 覆盖的行为场景。"""
         dates = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])

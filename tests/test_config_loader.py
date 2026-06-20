@@ -51,6 +51,7 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(strategy["stop_loss_pct"], 0.08)
         self.assertIsNone(strategy["take_profit_pct"])
         self.assertIsNone(strategy["max_industry_weight"])
+        self.assertFalse(strategy["rebalance_after_risk_exit"])
         self.assertEqual(strategy["rebalance_drift_threshold"], 0.0)
 
     def test_settings_yaml_loads_current_strategy_overrides(self) -> None:
@@ -66,6 +67,7 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertEqual(config["strategy"]["factor_group"], "momentum")
         self.assertIsNone(config["strategy"]["circuit_breaker_drawdown"])
         self.assertEqual(config["strategy"]["take_profit_pct"], 0.35)
+        self.assertFalse(config["strategy"]["rebalance_after_risk_exit"])
         self.assertEqual(config["defensive_timing"]["bear_exposure"], 0.60)
         self.assertEqual(config["liquidity_filter"]["quantile"], 0.65)
         self.assertFalse(config["regime_score_blend"]["enabled"])

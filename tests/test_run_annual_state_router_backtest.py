@@ -304,6 +304,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
         }
         args = Namespace(
             max_industry_weight=0.35,
+            rebalance_after_risk_exit=True,
             equity_overlay_sideways_exposure=0.7,
             equity_overlay_bear_exposure=None,
             equity_overlay_drawdown_cut=0.2,
@@ -315,6 +316,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
         payload = research_config_overrides_payload(args)
 
         self.assertEqual(result["strategy"]["max_industry_weight"], 0.35)
+        self.assertTrue(result["strategy"]["rebalance_after_risk_exit"])
         self.assertEqual(result["backtest"]["equity_overlay"]["sideways_exposure"], 0.7)
         self.assertEqual(result["backtest"]["equity_overlay"]["bear_exposure"], 0.5)
         self.assertEqual(result["backtest"]["equity_overlay"]["drawdown_cut"], 0.2)
@@ -325,6 +327,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
             {
                 "equity_overlay_sideways_exposure": 0.7,
                 "max_industry_weight": 0.35,
+                "rebalance_after_risk_exit": True,
                 "equity_overlay_drawdown_cut": 0.2,
                 "defensive_bear_exposure": 0.8,
             },
