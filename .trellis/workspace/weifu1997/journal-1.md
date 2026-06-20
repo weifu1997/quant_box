@@ -37,3 +37,41 @@ Made historical universe builds fail by default on index fetch errors, required 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Finish yearly return gate
+
+**Date**: 2026-06-20
+**Task**: Finish yearly return gate
+**Branch**: `main`
+
+### Summary
+
+Verified annual-state router backtest clears the yearly 20 percent gate, committed fixed-date governance safeguards, BJ raw stock CSV support, regression coverage, and archived the completed task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cb6138b` | (see git log) |
+| `63ae705` | (see git log) |
+| `eb44656` | (see git log) |
+| `1592b69` | (see git log) |
+| `f3aa46a` | (see git log) |
+| `5dab922` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
