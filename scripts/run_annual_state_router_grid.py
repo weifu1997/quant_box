@@ -22,18 +22,59 @@ from scripts.run_annual_state_router_backtest import (
     ScoreSourceDefinition,
     RoutedScoreRun,
     apply_research_config_overrides,
+    apply_source_top_n_overrides,
     build_score_sources,
     default_source_definitions,
     full_gate_summary,
     routed_backtest_config,
     run_annual_state_score_router,
+    source_top_n_overrides_payload,
 )
 from scripts.run_fundamental_quality_backtest import month_end_signal_dates
 from scripts.run_goal_audit import audit_yearly_goal, goal_thresholds
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.market_regime import _benchmark_close
+from src.research_diagnostics import build_exposure_diagnostics
 from src.trading_calendar import resolve_target_date_value
+
+
+COMBO_KEY_FIELDS = tuple(
+    sorted(
+        {
+            "beta20_top_n",
+            "beta_top_n",
+            "defensive_bear_exposure",
+            "defensive_sideways_exposure",
+            "equity_overlay_bear_exposure",
+            "equity_overlay_drawdown_cut",
+            "equity_overlay_sideways_exposure",
+            "max_industry_weight",
+            "missing_ret252_exposure",
+            "moderate_low_exposure",
+            "moderate_low_ret252_max",
+            "moderate_low_ret252_min",
+            "moderate_low_source",
+            "moderate_positive_ret252_min",
+            "moderate_positive_source",
+            "rebalance_after_risk_exit",
+            "risk_exit_min_positions",
+            "strong_trailing_exposure",
+            "turnover_boost_max_turnover",
+            "turnover_boost_rank_buffer",
+            "turnover_boost_reasons",
+            "turnover_mode",
+        }
+    )
+)
+INT_COMBO_KEY_FIELDS = {
+    "beta20_top_n",
+    "beta_top_n",
+    "risk_exit_min_positions",
+    "turnover_boost_max_turnover",
+    "turnover_boost_rank_buffer",
+}
+BOOL_COMBO_KEY_FIELDS = {"rebalance_after_risk_exit"}
 
 
 def main() -> None:
@@ -64,6 +105,10 @@ def main() -> None:
     parser.add_argument("--defensive-bear-exposures", default="none")
     parser.add_argument("--max-industry-weights", default="none")
     parser.add_argument("--rebalance-after-risk-exit-options", default="false")
+    parser.add_argument("--risk-exit-min-positions-options", default="none")
+    parser.add_argument("--beta-top-ns", default="none")
+    parser.add_argument("--beta20-top-ns", default="none")
+    parser.add_argument("--include-exposure-diagnostics", action="store_true")
     parser.add_argument("--disable-equity-overlay", action="store_true")
     parser.add_argument("--write-hit-prefix", default="")
     args = parser.parse_args()
@@ -106,7 +151,8 @@ def main() -> None:
         count += 1
         if args.max_combinations > 0 and count > args.max_combinations:
             break
-        definitions = definitions_for_turnover_mode(base_definitions, combo["turnover_mode"])
+        combo_definitions = apply_source_top_n_overrides(base_definitions, source_top_n_overrides_payload(namespace_for_combo(combo)))
+        definitions = definitions_for_turnover_mode(combo_definitions, combo["turnover_mode"])
         routed = run_annual_state_score_router(
             score_sources=score_sources,
             source_definitions=definitions,
@@ -169,6 +215,8 @@ def main() -> None:
                 sort_keys=True,
             ),
         }
+        if args.include_exposure_diagnostics:
+            row.update(grid_exposure_fields(result.holdings, combo_config))
         append_row(output, row)
         print(
             f"{count}: goal={row['full_goal']} years={row['year_return_pass_count']}/"
@@ -256,29 +304,35 @@ def iter_grid(args: argparse.Namespace) -> list[dict[str, Any]]:
                                                             for defensive_bear in parse_optional_float_list(args.defensive_bear_exposures):
                                                                 for max_industry_weight in parse_optional_float_list(args.max_industry_weights):
                                                                     for rebalance_after_risk_exit in parse_bool_list(args.rebalance_after_risk_exit_options):
-                                                                        combos.append(
-                                                                            {
-                                                                                "missing_ret252_exposure": missing,
-                                                                                "strong_trailing_exposure": strong,
-                                                                                "moderate_positive_source": high_source,
-                                                                                "moderate_positive_ret252_min": high_min,
-                                                                                "moderate_low_source": low_source,
-                                                                                "moderate_low_ret252_min": low_min,
-                                                                                "moderate_low_ret252_max": low_max,
-                                                                                "moderate_low_exposure": low_exposure,
-                                                                                "turnover_mode": turnover_mode,
-                                                                                "turnover_boost_reasons": boost_reasons,
-                                                                                "turnover_boost_max_turnover": boost_turnover,
-                                                                                "turnover_boost_rank_buffer": boost_buffer,
-                                                                                "equity_overlay_sideways_exposure": overlay_side,
-                                                                                "equity_overlay_bear_exposure": overlay_bear,
-                                                                                "equity_overlay_drawdown_cut": None,
-                                                                                "defensive_sideways_exposure": None,
-                                                                                "defensive_bear_exposure": defensive_bear,
-                                                                                "max_industry_weight": max_industry_weight,
-                                                                                "rebalance_after_risk_exit": rebalance_after_risk_exit,
-                                                                            }
-                                                                        )
+                                                                        for risk_exit_min_positions in parse_optional_int_list(args.risk_exit_min_positions_options):
+                                                                            for beta_top_n in parse_optional_int_list(args.beta_top_ns):
+                                                                                for beta20_top_n in parse_optional_int_list(args.beta20_top_ns):
+                                                                                    combos.append(
+                                                                                        {
+                                                                                            "missing_ret252_exposure": missing,
+                                                                                            "strong_trailing_exposure": strong,
+                                                                                            "moderate_positive_source": high_source,
+                                                                                            "moderate_positive_ret252_min": high_min,
+                                                                                            "moderate_low_source": low_source,
+                                                                                            "moderate_low_ret252_min": low_min,
+                                                                                            "moderate_low_ret252_max": low_max,
+                                                                                            "moderate_low_exposure": low_exposure,
+                                                                                            "turnover_mode": turnover_mode,
+                                                                                            "turnover_boost_reasons": boost_reasons,
+                                                                                            "turnover_boost_max_turnover": boost_turnover,
+                                                                                            "turnover_boost_rank_buffer": boost_buffer,
+                                                                                            "equity_overlay_sideways_exposure": overlay_side,
+                                                                                            "equity_overlay_bear_exposure": overlay_bear,
+                                                                                            "equity_overlay_drawdown_cut": None,
+                                                                                            "defensive_sideways_exposure": None,
+                                                                                            "defensive_bear_exposure": defensive_bear,
+                                                                                            "max_industry_weight": max_industry_weight,
+                                                                                            "rebalance_after_risk_exit": rebalance_after_risk_exit,
+                                                                                            "risk_exit_min_positions": risk_exit_min_positions,
+                                                                                            "beta_top_n": beta_top_n,
+                                                                                            "beta20_top_n": beta20_top_n,
+                                                                                        }
+                                                                                    )
     return combos
 
 
@@ -318,6 +372,9 @@ def namespace_for_combo(combo: dict[str, Any]) -> argparse.Namespace:
         defensive_bear_exposure=combo["defensive_bear_exposure"],
         max_industry_weight=combo["max_industry_weight"],
         rebalance_after_risk_exit=combo["rebalance_after_risk_exit"],
+        risk_exit_min_positions=combo["risk_exit_min_positions"],
+        beta_top_n=combo["beta_top_n"],
+        beta20_top_n=combo["beta20_top_n"],
     )
 
 
@@ -325,10 +382,15 @@ def completed_keys(path: Path) -> set[str]:
     if not path.exists() or path.stat().st_size == 0:
         return set()
     try:
-        frame = pd.read_csv(path, usecols=["key"])
+        frame = pd.read_csv(path)
     except pd.errors.ParserError:
-        frame = pd.read_csv(path, usecols=["key"], engine="python", on_bad_lines="skip")
-    return set(frame["key"].astype(str))
+        frame = pd.read_csv(path, engine="python", on_bad_lines="skip")
+    keys: set[str] = set()
+    if "key" in frame.columns:
+        keys.update(str(value) for value in frame["key"].dropna().tolist())
+    for _, row in frame.iterrows():
+        keys.add(combo_key({field: row.get(field, None) for field in COMBO_KEY_FIELDS}))
+    return keys
 
 
 def append_row(path: Path, row: dict[str, Any]) -> None:
@@ -347,7 +409,32 @@ def append_row(path: Path, row: dict[str, Any]) -> None:
 
 
 def combo_key(combo: dict[str, Any]) -> str:
-    return "|".join(f"{key}={combo[key]}" for key in sorted(combo))
+    return "|".join(f"{key}={_combo_key_value(key, combo.get(key))}" for key in COMBO_KEY_FIELDS)
+
+
+def _combo_key_value(key: str, value: Any) -> str:
+    if _is_missing(value):
+        return "None"
+    if key in BOOL_COMBO_KEY_FIELDS:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "y"}:
+                return "True"
+            if normalized in {"0", "false", "no", "n"}:
+                return "False"
+        return str(bool(value))
+    if key in INT_COMBO_KEY_FIELDS:
+        return str(int(float(value)))
+    return str(value)
+
+
+def _is_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def parse_str_list(value: str) -> list[str]:
@@ -370,6 +457,13 @@ def parse_optional_float_list(value: str) -> list[float | None]:
     result: list[float | None] = []
     for item in parse_str_list(value):
         result.append(None if item.lower() in {"none", "null"} else float(item))
+    return result
+
+
+def parse_optional_int_list(value: str) -> list[int | None]:
+    result: list[int | None] = []
+    for item in parse_str_list(value):
+        result.append(None if item.lower() in {"none", "null"} else int(item))
     return result
 
 
@@ -438,6 +532,25 @@ def write_hit_outputs(
         ),
         encoding="utf-8",
     )
+
+
+def grid_exposure_fields(holdings: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]:
+    summary, _ = build_exposure_diagnostics(holdings, config)
+    fields: dict[str, Any] = {
+        "latest_position_count": summary.get("latest_position_count"),
+        "latest_max_industry_weight": summary.get("latest_max_industry_weight"),
+        "latest_top_position_weight": summary.get("latest_top_position_weight"),
+        "market_cap_matched_weight": summary.get("market_cap_matched_weight"),
+        "market_cap_staleness_days": summary.get("market_cap_staleness_days"),
+    }
+    for row in summary.get("market_cap_buckets", []):
+        if not isinstance(row, dict):
+            continue
+        bucket = str(row.get("bucket") or "").strip().lower()
+        if bucket:
+            fields[f"market_cap_{bucket}_weight"] = row.get("weight")
+            fields[f"market_cap_{bucket}_position_count"] = row.get("position_count")
+    return {key: value for key, value in fields.items() if value is not None}
 
 
 if __name__ == "__main__":

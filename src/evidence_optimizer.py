@@ -33,10 +33,17 @@ def build_evidence_optimization_plan(
     root = resolve_path(artifact_dir)
     review = _read_json(root / "optimization_review.json")
     selected_params = _read_json(root / "auto_selected_params.json")
+    candidate_risk = _read_candidate_research_diagnostics(root)
     candidates = _load_grid_candidates(root, grid_glob)
-    selected = _select_candidate(candidates, annual_trade_cost_ratio_target=annual_trade_cost_ratio_target)
+    selected = _select_candidate(
+        candidates,
+        annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
+        max_industry_weight_target=max_industry_weight_target,
+    )
     risk_constraints = _risk_constraints(
         review.get("risk_exposure", {}),
+        candidate_risk=candidate_risk,
+        selected=selected,
         max_industry_weight_target=max_industry_weight_target,
     )
     risk_constraints["overlay_validation"] = _risk_overlay_validation(
@@ -53,6 +60,17 @@ def build_evidence_optimization_plan(
         if risk_constraints.get("target_min_positions")
         else {"status": "not_required", "candidate": {}}
     )
+    risk_constraints["source_top_n_validation"] = _source_top_n_validation(
+        candidates,
+        required=bool(risk_constraints.get("target_min_positions")),
+        annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
+    )
+    risk_constraints["risk_exit_min_positions_validation"] = _field_value_validation(
+        candidates,
+        field="risk_exit_min_positions",
+        required=bool(risk_constraints.get("target_min_positions")),
+        annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
+    )
     trading_constraints = _trading_constraints(
         review.get("trading_constraints", {}),
         selected,
@@ -63,6 +81,7 @@ def build_evidence_optimization_plan(
         candidates,
         selected,
         annual_trade_cost_ratio_target=annual_trade_cost_ratio_target,
+        max_industry_weight_target=max_industry_weight_target,
     )
     decisions = _optimization_decisions(selected, risk_constraints, trading_constraints)
     status = "ready" if review.get("status") == "ready" and selected and _risk_overlay_ready(risk_constraints) else "review"
@@ -83,7 +102,13 @@ def build_evidence_optimization_plan(
         "next_commands": _next_commands(
             selected,
             max_industry_weight=risk_constraints.get("max_industry_weight"),
-            include_risk_exit_refill=bool(risk_constraints.get("target_min_positions")),
+            include_risk_exit_refill=bool(risk_constraints.get("target_min_positions"))
+            and risk_constraints.get("risk_exit_refill_validation", {}).get("status") != "fail",
+            risk_exit_min_positions=(
+                risk_constraints.get("target_min_positions")
+                if risk_constraints.get("risk_exit_min_positions_validation", {}).get("status") not in {"fail", "pass"}
+                else None
+            ),
             artifact_dir=root,
         ),
         "caveats": caveats,
@@ -107,6 +132,7 @@ def render_evidence_optimization_markdown(report: dict[str, Any]) -> str:
     candidate = style.get("candidate", {})
     evidence = report.get("candidate_evidence", {})
     risk = report.get("risk_exposure", {})
+    selected_exposure = risk.get("selected_candidate_exposure", {})
     trading = report.get("trading_constraints", {})
     lines = [
         "# Evidence Optimization Plan",
@@ -133,8 +159,13 @@ def render_evidence_optimization_markdown(report: dict[str, Any]) -> str:
         f"- Max industry weight: {_pct(risk.get('max_industry_weight'))}",
         f"- Target minimum positions: {risk.get('target_min_positions')}",
         f"- Small-cap concentration action: {risk.get('small_cap_action', '')}",
+        f"- Selected candidate positions: {selected_exposure.get('latest_position_count')}",
+        f"- Selected candidate top industry weight: {_pct(selected_exposure.get('latest_max_industry_weight'))}",
+        f"- Selected candidate small-cap weight: {_pct(_bucket_weight(selected_exposure, 'small'))}",
         f"- Risk overlay validation: {risk.get('overlay_validation', {}).get('status', '')}",
         f"- Risk-exit refill validation: {risk.get('risk_exit_refill_validation', {}).get('status', '')}",
+        f"- Source top_n validation: {risk.get('source_top_n_validation', {}).get('status', '')}",
+        f"- Risk-exit min-position validation: {risk.get('risk_exit_min_positions_validation', {}).get('status', '')}",
         "",
         "## Trading Constraints",
         "",
@@ -180,7 +211,12 @@ def _load_grid_candidates(root: Path, grid_glob: str) -> list[dict[str, Any]]:
     return candidates
 
 
-def _select_candidate(candidates: list[dict[str, Any]], *, annual_trade_cost_ratio_target: float) -> dict[str, Any]:
+def _select_candidate(
+    candidates: list[dict[str, Any]],
+    *,
+    annual_trade_cost_ratio_target: float,
+    max_industry_weight_target: float,
+) -> dict[str, Any]:
     eligible = [
         candidate
         for candidate in candidates
@@ -190,6 +226,17 @@ def _select_candidate(candidates: list[dict[str, Any]], *, annual_trade_cost_rat
     ]
     if not eligible:
         return {}
+    with_exposure = [candidate for candidate in eligible if _candidate_exposure_from_grid_row(candidate)]
+    risk_ready = [
+        candidate
+        for candidate in with_exposure
+        if not _candidate_exposure_flags(
+            _candidate_exposure_from_grid_row(candidate),
+            max_industry_weight_target=max_industry_weight_target,
+        )
+    ]
+    if risk_ready:
+        eligible = risk_ready
     return max(
         eligible,
         key=lambda item: (
@@ -205,6 +252,7 @@ def _candidate_evidence(
     selected: dict[str, Any],
     *,
     annual_trade_cost_ratio_target: float,
+    max_industry_weight_target: float,
 ) -> dict[str, Any]:
     full_goal = [candidate for candidate in candidates if candidate.get("full_goal")]
     cost_eligible = [
@@ -213,12 +261,22 @@ def _candidate_evidence(
         if _number_or_none(candidate.get("annual_trade_cost_ratio")) is not None
         and float(candidate["annual_trade_cost_ratio"]) <= float(annual_trade_cost_ratio_target)
     ]
+    risk_ready = [
+        candidate
+        for candidate in cost_eligible
+        if _candidate_exposure_from_grid_row(candidate)
+        and not _candidate_exposure_flags(
+            _candidate_exposure_from_grid_row(candidate),
+            max_industry_weight_target=max_industry_weight_target,
+        )
+    ]
     rejected = [_rejected_candidate(candidate, annual_trade_cost_ratio_target) for candidate in candidates]
     rejected = [candidate for candidate in rejected if candidate.get("reject_reason")]
     return {
         "evaluated_grid_rows": len(candidates),
         "full_goal_rows": len(full_goal),
         "cost_eligible_full_goal_rows": len(cost_eligible),
+        "risk_ready_cost_eligible_full_goal_rows": len(risk_ready),
         "selected_key": selected.get("key", ""),
         "best_rejected_candidate": _best_rejected_candidate(rejected),
     }
@@ -252,8 +310,30 @@ def _best_rejected_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]
     )
 
 
-def _risk_constraints(risk: dict[str, Any], *, max_industry_weight_target: float) -> dict[str, Any]:
-    flags = [str(flag) for flag in risk.get("flags", [])] if isinstance(risk, dict) else []
+def _risk_constraints(
+    risk: dict[str, Any],
+    *,
+    candidate_risk: dict[str, Any],
+    selected: dict[str, Any],
+    max_industry_weight_target: float,
+) -> dict[str, Any]:
+    review_flags = [str(flag) for flag in risk.get("flags", [])] if isinstance(risk, dict) else []
+    selected_row_exposure = _candidate_exposure_from_grid_row(selected)
+    if selected_row_exposure:
+        candidate_flags = _candidate_exposure_flags(
+            selected_row_exposure,
+            max_industry_weight_target=max_industry_weight_target,
+        )
+        selected_candidate_exposure = selected_row_exposure
+    else:
+        candidate_flags = _candidate_risk_flags(
+            candidate_risk,
+            max_industry_weight_target=max_industry_weight_target,
+        )
+        selected_candidate_exposure = (
+            _compact_candidate_exposure(candidate_risk.get("exposure", {})) if candidate_risk else {}
+        )
+    flags = candidate_flags if (selected_row_exposure or candidate_risk) else review_flags
     low_positions = any(flag.startswith("low_position_count:") for flag in flags)
     high_industry = any(flag.startswith("high_industry_concentration:") for flag in flags)
     small_cap = any(flag.startswith("small_cap_concentration:") for flag in flags)
@@ -262,6 +342,9 @@ def _risk_constraints(risk: dict[str, Any], *, max_industry_weight_target: float
         "target_min_positions": 5 if low_positions else None,
         "small_cap_action": "reduce_small_cap_concentration" if small_cap else "monitor",
         "source_flags": flags,
+        "review_source_flags": review_flags,
+        "selected_candidate_exposure": selected_candidate_exposure,
+        "selected_candidate_risk_flags": candidate_flags,
     }
     result["status"] = "review" if low_positions or high_industry or small_cap else "ready"
     return result
@@ -301,10 +384,18 @@ def _risk_overlay_validation(
 
 
 def _risk_overlay_ready(risk_constraints: dict[str, Any]) -> bool:
-    for key in ("overlay_validation", "risk_exit_refill_validation"):
-        validation = risk_constraints.get(key, {})
-        status = validation.get("status") if isinstance(validation, dict) else ""
-        if status == "fail":
+    overlay = risk_constraints.get("overlay_validation", {})
+    overlay_status = overlay.get("status") if isinstance(overlay, dict) else ""
+    if overlay_status == "fail" or (risk_constraints.get("max_industry_weight") is not None and overlay_status != "pass"):
+        return False
+    if risk_constraints.get("target_min_positions") is not None:
+        refill = risk_constraints.get("risk_exit_refill_validation", {})
+        source_top_n = risk_constraints.get("source_top_n_validation", {})
+        min_positions = risk_constraints.get("risk_exit_min_positions_validation", {})
+        refill_status = refill.get("status") if isinstance(refill, dict) else ""
+        source_top_n_status = source_top_n.get("status") if isinstance(source_top_n, dict) else ""
+        min_positions_status = min_positions.get("status") if isinstance(min_positions, dict) else ""
+        if "pass" not in {refill_status, source_top_n_status, min_positions_status}:
             return False
     return True
 
@@ -316,6 +407,66 @@ def _boolean_overlay_validation(
     annual_trade_cost_ratio_target: float,
 ) -> dict[str, Any]:
     tested = [candidate for candidate in candidates if _boolish(candidate.get(field))]
+    if not tested:
+        return {"status": "not_tested", "candidate": {}}
+    best = max(
+        tested,
+        key=lambda item: (
+            bool(item.get("full_goal")),
+            float(item.get("annual_return") or 0.0),
+            float(item.get("max_drawdown") or -1.0),
+            -float(item.get("annual_trade_cost_ratio") or 0.0),
+        ),
+    )
+    passes = bool(best.get("full_goal")) and (
+        _number_or_none(best.get("annual_trade_cost_ratio")) is not None
+        and float(best["annual_trade_cost_ratio"]) <= float(annual_trade_cost_ratio_target)
+    )
+    return {"status": "pass" if passes else "fail", "candidate": _compact_candidate(best)}
+
+
+def _source_top_n_validation(
+    candidates: list[dict[str, Any]],
+    *,
+    required: bool,
+    annual_trade_cost_ratio_target: float,
+) -> dict[str, Any]:
+    if not required:
+        return {"status": "not_required", "candidate": {}}
+    tested = [
+        candidate
+        for candidate in candidates
+        if _number_or_none(candidate.get("beta_top_n")) is not None
+        or _number_or_none(candidate.get("beta20_top_n")) is not None
+    ]
+    if not tested:
+        return {"status": "not_tested", "candidate": {}}
+    best = max(
+        tested,
+        key=lambda item: (
+            bool(item.get("full_goal")),
+            float(item.get("annual_return") or 0.0),
+            float(item.get("max_drawdown") or -1.0),
+            -float(item.get("annual_trade_cost_ratio") or 0.0),
+        ),
+    )
+    passes = bool(best.get("full_goal")) and (
+        _number_or_none(best.get("annual_trade_cost_ratio")) is not None
+        and float(best["annual_trade_cost_ratio"]) <= float(annual_trade_cost_ratio_target)
+    )
+    return {"status": "pass" if passes else "fail", "candidate": _compact_candidate(best)}
+
+
+def _field_value_validation(
+    candidates: list[dict[str, Any]],
+    *,
+    field: str,
+    required: bool,
+    annual_trade_cost_ratio_target: float,
+) -> dict[str, Any]:
+    if not required:
+        return {"status": "not_required", "candidate": {}}
+    tested = [candidate for candidate in candidates if _number_or_none(candidate.get(field)) is not None]
     if not tested:
         return {"status": "not_tested", "candidate": {}}
     best = max(
@@ -369,15 +520,29 @@ def _optimization_decisions(
         decisions.append("Reject the tested hard max-industry-weight overlay for now; it failed the full router gate.")
     elif isinstance(overlay, dict) and overlay.get("status") == "pass":
         decisions.append("Keep the tested max-industry-weight overlay as an eligible risk-control candidate.")
+    elif risk_constraints.get("max_industry_weight") is None and risk_constraints.get("selected_candidate_exposure"):
+        decisions.append("Do not add a hard industry cap for the selected candidate; its own exposure evidence is already below the industry threshold.")
     refill = risk_constraints.get("risk_exit_refill_validation", {})
     if isinstance(refill, dict) and refill.get("status") == "fail":
         decisions.append("Reject same-day refill after stop-loss/take-profit exits; it increased failures or costs in tested evidence.")
     elif isinstance(refill, dict) and refill.get("status") == "pass":
         decisions.append("Keep same-day risk-exit refill as an eligible risk-control candidate.")
+    source_top_n = risk_constraints.get("source_top_n_validation", {})
+    if isinstance(source_top_n, dict) and source_top_n.get("status") == "fail":
+        decisions.append("Reject the tested source top_n expansion for now; it did not pass the full router gate.")
+    elif isinstance(source_top_n, dict) and source_top_n.get("status") == "pass":
+        decisions.append("Keep the tested source top_n expansion as an eligible diversification candidate.")
+    min_positions = risk_constraints.get("risk_exit_min_positions_validation", {})
+    if isinstance(min_positions, dict) and min_positions.get("status") == "fail":
+        decisions.append("Reject the tested risk-exit min-position guard for now; it did not pass the full router gate.")
+    elif isinstance(min_positions, dict) and min_positions.get("status") == "pass":
+        decisions.append("Keep the tested risk-exit min-position guard as an eligible low-position risk-control candidate.")
     if trading_constraints.get("turnover_action") == "do_not_increase_turnover":
         decisions.append("Do not loosen turnover; preserve the selected candidate's rank10 turnover and boost limits.")
     if risk_constraints.get("small_cap_action") == "reduce_small_cap_concentration":
         decisions.append("Search for natural diversification through route source, threshold, and exposure changes before writing risk limits into config.")
+    elif risk_constraints.get("selected_candidate_exposure"):
+        decisions.append("Do not add a small-cap reduction overlay for the selected candidate; its own market-cap bucket evidence is below the small-cap threshold.")
     return decisions
 
 
@@ -413,6 +578,7 @@ def _next_commands(
     *,
     max_industry_weight: Any,
     include_risk_exit_refill: bool,
+    risk_exit_min_positions: Any,
     artifact_dir: Path,
 ) -> list[str]:
     if not selected:
@@ -452,6 +618,8 @@ def _next_commands(
         command.extend(["--max-industry-weights", f"none,{max_industry_weight}"])
     if include_risk_exit_refill:
         command.extend(["--rebalance-after-risk-exit-options", "false,true"])
+    if risk_exit_min_positions is not None:
+        command.extend(["--risk-exit-min-positions-options", f"none,{risk_exit_min_positions}"])
     return [" ".join(command)]
 
 
@@ -474,6 +642,12 @@ def _caveats(
     refill_validation = risk_constraints.get("risk_exit_refill_validation", {})
     if isinstance(refill_validation, dict) and refill_validation.get("status") == "fail":
         caveats.append("The tested risk-exit refill overlay did not pass the full router gate; do not auto-refill after risk exits yet.")
+    top_n_validation = risk_constraints.get("source_top_n_validation", {})
+    if isinstance(top_n_validation, dict) and top_n_validation.get("status") == "fail":
+        caveats.append("The tested source top_n expansion did not pass the full router gate; do not use it as the position-count fix yet.")
+    min_position_validation = risk_constraints.get("risk_exit_min_positions_validation", {})
+    if isinstance(min_position_validation, dict) and min_position_validation.get("status") == "fail":
+        caveats.append("The tested risk-exit min-position guard did not pass the full router gate; do not use it as the position-count fix yet.")
     caveats.append("Risk constraints are generated as research overlays; they are not written into config/settings.yaml.")
     return caveats
 
@@ -482,6 +656,95 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_candidate_research_diagnostics(root: Path) -> dict[str, Any]:
+    return _read_json(root / "evidence_optimized_router_hit_research_diagnostics.json")
+
+
+def _candidate_risk_flags(
+    diagnostics: dict[str, Any],
+    *,
+    max_industry_weight_target: float,
+) -> list[str]:
+    if not diagnostics:
+        return []
+    exposure = diagnostics.get("exposure", {}) if isinstance(diagnostics, dict) else {}
+    if not isinstance(exposure, dict):
+        return []
+    return _candidate_exposure_flags(exposure, max_industry_weight_target=max_industry_weight_target)
+
+
+def _candidate_exposure_flags(
+    exposure: dict[str, Any],
+    *,
+    max_industry_weight_target: float,
+) -> list[str]:
+    flags: list[str] = []
+    position_count = _int_or_none(exposure.get("latest_position_count"))
+    top_industry = _number_or_none(exposure.get("latest_max_industry_weight"))
+    buckets = exposure.get("market_cap_buckets", [])
+    bucket_weights = {
+        str(row.get("bucket")): _number_or_none(row.get("weight"))
+        for row in buckets
+        if isinstance(row, dict) and row.get("bucket") is not None
+    }
+    if position_count is not None and position_count < 5:
+        flags.append(f"low_position_count:{position_count}<5")
+    if top_industry is not None and top_industry > float(max_industry_weight_target):
+        flags.append(f"high_industry_concentration:{top_industry:.4f}>{float(max_industry_weight_target):.2f}")
+    small_weight = bucket_weights.get("small")
+    if small_weight is not None and float(small_weight) > 0.80:
+        flags.append(f"small_cap_concentration:{float(small_weight):.4f}>0.80")
+    return flags
+
+
+def _candidate_exposure_from_grid_row(candidate: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return {}
+    position_count = _int_or_none(candidate.get("latest_position_count"))
+    top_industry = _number_or_none(candidate.get("latest_max_industry_weight"))
+    top_position = _number_or_none(candidate.get("latest_top_position_weight"))
+    bucket_rows = []
+    for bucket in ("small", "mid", "large", "unknown"):
+        weight = _number_or_none(candidate.get(f"market_cap_{bucket}_weight"))
+        count = _int_or_none(candidate.get(f"market_cap_{bucket}_position_count"))
+        if weight is not None or count is not None:
+            bucket_rows.append({"bucket": bucket, "weight": weight, "position_count": count})
+    if position_count is None and top_industry is None and top_position is None and not bucket_rows:
+        return {}
+    result: dict[str, Any] = {
+        "latest_position_count": position_count,
+        "latest_max_industry_weight": top_industry,
+        "latest_top_position_weight": top_position,
+        "market_cap_buckets": bucket_rows,
+        "market_cap_matched_weight": _number_or_none(candidate.get("market_cap_matched_weight")),
+        "market_cap_staleness_days": _int_or_none(candidate.get("market_cap_staleness_days")),
+    }
+    return {key: value for key, value in result.items() if value is not None and value != []}
+
+
+def _compact_candidate_exposure(exposure: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(exposure, dict):
+        return {}
+    return {
+        "latest_date": exposure.get("latest_date"),
+        "latest_position_count": _int_or_none(exposure.get("latest_position_count")),
+        "latest_max_industry_weight": _number_or_none(exposure.get("latest_max_industry_weight")),
+        "latest_top_position_weight": _number_or_none(exposure.get("latest_top_position_weight")),
+        "market_cap_buckets": [
+            {
+                "bucket": row.get("bucket"),
+                "weight": _number_or_none(row.get("weight")),
+                "position_count": _int_or_none(row.get("position_count")),
+            }
+            for row in exposure.get("market_cap_buckets", [])
+            if isinstance(row, dict)
+        ],
+        "market_cap_asof_date": exposure.get("market_cap_asof_date"),
+        "market_cap_staleness_days": _int_or_none(exposure.get("market_cap_staleness_days")),
+        "market_cap_matched_weight": _number_or_none(exposure.get("market_cap_matched_weight")),
+    }
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
@@ -535,6 +798,16 @@ def _compact_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "moderate_low_exposure",
         "max_industry_weight",
         "rebalance_after_risk_exit",
+        "risk_exit_min_positions",
+        "beta_top_n",
+        "beta20_top_n",
+        "latest_position_count",
+        "latest_max_industry_weight",
+        "latest_top_position_weight",
+        "market_cap_small_weight",
+        "market_cap_mid_weight",
+        "market_cap_large_weight",
+        "market_cap_unknown_weight",
         "turnover_mode",
         "turnover_boost_reasons",
     ]
@@ -544,6 +817,13 @@ def _compact_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 def _pct(value: Any) -> str:
     number = _number_or_none(value)
     return "" if number is None else f"{number:.2%}"
+
+
+def _bucket_weight(exposure: dict[str, Any], bucket: str) -> float | None:
+    for row in exposure.get("market_cap_buckets", []) if isinstance(exposure, dict) else []:
+        if isinstance(row, dict) and str(row.get("bucket")) == bucket:
+            return _number_or_none(row.get("weight"))
+    return None
 
 
 def _json_safe(value: Any) -> Any:

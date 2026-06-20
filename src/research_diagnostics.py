@@ -79,6 +79,14 @@ def build_research_diagnostics(
     return diagnostics, tables
 
 
+def build_exposure_diagnostics(
+    holdings: pd.DataFrame,
+    config: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
+    """Build only the current holdings exposure diagnostics."""
+    return _exposure_diagnostics(holdings, config)
+
+
 def write_research_diagnostics(
     diagnostics: dict[str, Any],
     tables: dict[str, pd.DataFrame],

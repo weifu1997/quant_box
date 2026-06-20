@@ -11,6 +11,7 @@ from scripts.run_annual_state_router_backtest import (
     ScoreSourceDefinition,
     adjust_route_decision,
     apply_research_config_overrides,
+    apply_source_top_n_overrides,
     default_source_definitions,
     exposure_schedule_from_year_routes,
     full_gate_summary,
@@ -41,6 +42,27 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
         self.assertEqual(rsqr20.top_n, 7)
         self.assertEqual(rsqr20.rank_buffer, 10)
         self.assertEqual(rsqr20.liquidity_quantile, 0.80)
+
+    def test_apply_source_top_n_overrides_updates_research_route_definitions(self) -> None:
+        definitions = {
+            "beta": ScoreSourceDefinition(name="beta", kind="factor", top_n=5, max_turnover=1, rank_buffer=10),
+            "beta20": ScoreSourceDefinition(name="beta20", kind="factor", top_n=5, max_turnover=1, rank_buffer=10),
+        }
+
+        result = apply_source_top_n_overrides(definitions, {"beta": 7})
+
+        self.assertEqual(result["beta"].top_n, 7)
+        self.assertEqual(result["beta"].max_turnover, 1)
+        self.assertEqual(result["beta20"].top_n, 5)
+        self.assertEqual(definitions["beta"].top_n, 5)
+
+    def test_apply_source_top_n_overrides_rejects_invalid_source(self) -> None:
+        definitions = {
+            "beta": ScoreSourceDefinition(name="beta", kind="factor", top_n=5, max_turnover=1, rank_buffer=10),
+        }
+
+        with self.assertRaisesRegex(ValueError, "unknown source"):
+            apply_source_top_n_overrides(definitions, {"missing": 6})
 
     def test_score_router_locks_route_for_year_and_uses_source_scores(self) -> None:
         date_2024 = pd.Timestamp("2024-01-31")
@@ -305,6 +327,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
         args = Namespace(
             max_industry_weight=0.35,
             rebalance_after_risk_exit=True,
+            risk_exit_min_positions=5,
             equity_overlay_sideways_exposure=0.7,
             equity_overlay_bear_exposure=None,
             equity_overlay_drawdown_cut=0.2,
@@ -317,6 +340,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
 
         self.assertEqual(result["strategy"]["max_industry_weight"], 0.35)
         self.assertTrue(result["strategy"]["rebalance_after_risk_exit"])
+        self.assertEqual(result["strategy"]["risk_exit_min_positions"], 5)
         self.assertEqual(result["backtest"]["equity_overlay"]["sideways_exposure"], 0.7)
         self.assertEqual(result["backtest"]["equity_overlay"]["bear_exposure"], 0.5)
         self.assertEqual(result["backtest"]["equity_overlay"]["drawdown_cut"], 0.2)
@@ -328,6 +352,7 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
                 "equity_overlay_sideways_exposure": 0.7,
                 "max_industry_weight": 0.35,
                 "rebalance_after_risk_exit": True,
+                "risk_exit_min_positions": 5.0,
                 "equity_overlay_drawdown_cut": 0.2,
                 "defensive_bear_exposure": 0.8,
             },

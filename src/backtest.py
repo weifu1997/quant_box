@@ -1110,6 +1110,7 @@ def _execute_risk_exits(
     take_profit = config.get("take_profit_pct")
     if stop_loss is None and take_profit is None:
         return capital
+    risk_exit_min_positions = int(config.get("risk_exit_min_positions", 0) or 0)
 
     open_prices = _row_price_dict(_field_on_date(prices, "open", trade_date))
     high_prices = _row_price_dict(_field_on_date(prices, "high", trade_date))
@@ -1131,6 +1132,9 @@ def _execute_risk_exits(
             config,
         )
         if reason is None:
+            continue
+        if risk_exit_min_positions > 0 and _active_position_count(holdings) <= risk_exit_min_positions:
+            trade_rows.append(_blocked_trade(pd.NaT, trade_date, stock, "SELL", shares, f"{reason}_min_positions"))
             continue
         if stock not in tradability["sellable"]:
             trade_rows.append(_blocked_trade(pd.NaT, trade_date, stock, "SELL", shares, f"{reason}_not_sellable"))
@@ -1155,6 +1159,10 @@ def _execute_risk_exits(
             execution_price=execution_price,
         )
     return capital
+
+
+def _active_position_count(holdings: Mapping[str, int]) -> int:
+    return sum(1 for shares in holdings.values() if int(shares) > 0)
 
 
 def _risk_exit_symbols_from_rows(rows: list[dict[str, object]]) -> set[str]:

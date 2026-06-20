@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 import sys
@@ -66,6 +66,11 @@ def apply_research_config_overrides(config: dict[str, Any], args: argparse.Names
         strategy = dict(result.get("strategy", {}))
         strategy["rebalance_after_risk_exit"] = True
         result["strategy"] = strategy
+    risk_exit_min_positions = getattr(args, "risk_exit_min_positions", None)
+    if risk_exit_min_positions is not None:
+        strategy = dict(result.get("strategy", {}))
+        strategy["risk_exit_min_positions"] = int(risk_exit_min_positions)
+        result["strategy"] = strategy
 
     backtest = dict(result.get("backtest", {}))
     overlay = dict(backtest.get("equity_overlay", {}))
@@ -94,6 +99,7 @@ def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, flo
     values = {
         "max_industry_weight": getattr(args, "max_industry_weight", None),
         "rebalance_after_risk_exit": getattr(args, "rebalance_after_risk_exit", False),
+        "risk_exit_min_positions": getattr(args, "risk_exit_min_positions", None),
         "equity_overlay_sideways_exposure": args.equity_overlay_sideways_exposure,
         "equity_overlay_bear_exposure": args.equity_overlay_bear_exposure,
         "equity_overlay_drawdown_cut": args.equity_overlay_drawdown_cut,
@@ -101,6 +107,34 @@ def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, flo
         "defensive_bear_exposure": args.defensive_bear_exposure,
     }
     return {key: value if isinstance(value, bool) else float(value) for key, value in values.items() if value is not None and value is not False}
+
+
+def source_top_n_overrides_payload(args: argparse.Namespace) -> dict[str, int]:
+    values = {
+        "beta": getattr(args, "beta_top_n", None),
+        "beta20": getattr(args, "beta20_top_n", None),
+    }
+    return {source: int(value) for source, value in values.items() if value is not None}
+
+
+def apply_source_top_n_overrides(
+    definitions: dict[str, ScoreSourceDefinition],
+    overrides: dict[str, int],
+) -> dict[str, ScoreSourceDefinition]:
+    result = dict(definitions)
+    for source, raw_top_n in overrides.items():
+        if source not in result:
+            raise ValueError(f"source_top_n override references unknown source: {source}")
+        top_n = int(raw_top_n)
+        if top_n < 1:
+            raise ValueError("source_top_n overrides must be >= 1.")
+        definition = result[source]
+        result[source] = replace(
+            definition,
+            top_n=top_n,
+            max_turnover=min(top_n, int(definition.max_turnover)),
+        )
+    return result
 
 
 def parse_reason_list(value: str) -> set[str]:
@@ -138,6 +172,9 @@ def main() -> None:
     parser.add_argument("--defensive-bear-exposure", type=float, default=None)
     parser.add_argument("--max-industry-weight", type=float, default=None)
     parser.add_argument("--rebalance-after-risk-exit", action="store_true")
+    parser.add_argument("--risk-exit-min-positions", type=int, default=None)
+    parser.add_argument("--beta-top-n", type=int, default=None)
+    parser.add_argument("--beta20-top-n", type=int, default=None)
     parser.add_argument("--turnover-boost-reasons", default="")
     parser.add_argument("--turnover-boost-max-turnover", type=int, default=2)
     parser.add_argument("--turnover-boost-rank-buffer", type=int, default=10)
@@ -158,6 +195,7 @@ def main() -> None:
         selector_file=args.selector_file,
         include_expanded_sources=bool(args.include_expanded_sources),
     )
+    source_definitions = apply_source_top_n_overrides(source_definitions, source_top_n_overrides_payload(args))
     score_sources = build_score_sources(
         config=config,
         prices=prices,
@@ -243,6 +281,7 @@ def main() -> None:
         "strong_trailing_exposure": args.strong_trailing_exposure,
         "disable_equity_overlay": bool(args.disable_equity_overlay),
         "research_config_overrides": research_config_overrides_payload(args),
+        "source_top_n_overrides": source_top_n_overrides_payload(args),
         "turnover_boost_reasons": sorted(parse_reason_list(args.turnover_boost_reasons)),
         "turnover_boost_max_turnover": args.turnover_boost_max_turnover,
         "turnover_boost_rank_buffer": args.turnover_boost_rank_buffer,

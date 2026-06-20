@@ -9,7 +9,16 @@ import unittest
 
 import pandas as pd
 
-from scripts.run_annual_state_router_grid import append_row, iter_grid, parse_bool_list, parse_reason_set, parse_reason_set_list
+from scripts.run_annual_state_router_grid import (
+    append_row,
+    combo_key,
+    completed_keys,
+    grid_exposure_fields,
+    iter_grid,
+    parse_bool_list,
+    parse_reason_set,
+    parse_reason_set_list,
+)
 
 
 class RunAnnualStateRouterGridTests(unittest.TestCase):
@@ -46,6 +55,21 @@ class RunAnnualStateRouterGridTests(unittest.TestCase):
 
         self.assertEqual([combo["max_industry_weight"] for combo in combos], [None, 0.35])
 
+    def test_iter_grid_enumerates_source_top_n_overrides(self) -> None:
+        args = _grid_args(beta_top_ns="none,6,7")
+
+        combos = iter_grid(args)
+
+        self.assertEqual([combo["beta_top_n"] for combo in combos], [None, 6, 7])
+        self.assertEqual({combo["beta20_top_n"] for combo in combos}, {None})
+
+    def test_iter_grid_enumerates_risk_exit_min_position_options(self) -> None:
+        args = _grid_args(risk_exit_min_positions_options="none,5")
+
+        combos = iter_grid(args)
+
+        self.assertEqual([combo["risk_exit_min_positions"] for combo in combos], [None, 5])
+
     def test_parse_bool_list_accepts_true_false_values(self) -> None:
         self.assertEqual(parse_bool_list("false,true,1,0"), [False, True, True, False])
 
@@ -61,6 +85,34 @@ class RunAnnualStateRouterGridTests(unittest.TestCase):
         self.assertEqual(frame["key"].tolist(), ["old", "new"])
         self.assertIn("rebalance_after_risk_exit", frame.columns)
         self.assertTrue(bool(frame.iloc[1]["rebalance_after_risk_exit"]))
+
+    def test_completed_keys_rebuilds_current_key_when_optional_columns_were_added(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "grid.csv"
+            combo = iter_grid(_grid_args(beta_top_ns="6"))[0]
+            legacy_combo = dict(combo)
+            legacy_combo.pop("risk_exit_min_positions")
+            legacy_key = "|".join(f"{key}={legacy_combo[key]}" for key in sorted(legacy_combo))
+
+            append_row(path, {**legacy_combo, "key": legacy_key, "annual_return": 0.2})
+
+            keys = completed_keys(path)
+
+        self.assertIn(combo_key(combo), keys)
+
+    def test_grid_exposure_fields_reports_latest_position_count(self) -> None:
+        holdings = pd.DataFrame(
+            [
+                {"date": "2024-01-02", "instrument": "A", "value": 100.0},
+                {"date": "2024-01-03", "instrument": "A", "value": 100.0},
+                {"date": "2024-01-03", "instrument": "B", "value": 50.0},
+            ]
+        )
+
+        fields = grid_exposure_fields(holdings, {"research": {"exposure": {"daily_basic_file": "missing.parquet"}}})
+
+        self.assertEqual(fields["latest_position_count"], 2)
+        self.assertAlmostEqual(fields["latest_top_position_weight"], 2 / 3)
 
 
 def _grid_args(**overrides: str) -> Namespace:
@@ -82,6 +134,9 @@ def _grid_args(**overrides: str) -> Namespace:
         "defensive_bear_exposures": "none",
         "max_industry_weights": "none",
         "rebalance_after_risk_exit_options": "false",
+        "risk_exit_min_positions_options": "none",
+        "beta_top_ns": "none",
+        "beta20_top_ns": "none",
     }
     values.update(overrides)
     return Namespace(**values)

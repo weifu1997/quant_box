@@ -742,8 +742,10 @@ Generate the missing factor evidence first, then re-run the five-layer gate.
 - A style candidate is eligible only when the grid row has `full_goal=true` and `annual_trade_cost_ratio <= annual_trade_cost_ratio_target`.
 - Risk flags become research overlays: high industry concentration maps to `max_industry_weight_target`, low latest positions maps to a target minimum position count, and small-cap concentration maps to a small-cap reduction action.
 - When low latest positions are caused by risk exits, tested `rebalance_after_risk_exit` grid rows must be recorded as pass/fail evidence before adoption.
+- Router-grid resumability is keyed by a canonical combo key over every grid dimension, including optional research columns such as `beta_top_n`, `beta20_top_n`, `risk_exit_min_positions`, `max_industry_weight`, and `rebalance_after_risk_exit`.
+- Adding a new optional grid column with the default `None` value must not make `--max-combinations` rerun completed rows from an older CSV. `completed_keys()` must rebuild current canonical keys from row columns, treating missing optional columns as `None`.
 - Trading flags keep turnover from increasing and preserve the selected full-goal candidate's turnover mode/boost settings for follow-up grid commands.
-- The generated next command must include `--max-industry-weights` when an industry cap overlay is recommended and `--rebalance-after-risk-exit-options` when low position count is flagged.
+- The generated next command must include `--max-industry-weights` when an industry cap overlay is recommended, `--rebalance-after-risk-exit-options` when same-day refill needs evidence, and `--risk-exit-min-positions-options` when a minimum-position guard needs evidence.
 
 #### 4. Validation & Error Matrix
 
@@ -754,6 +756,8 @@ Generate the missing factor evidence first, then re-run the five-layer gate.
 | Full-goal candidates exist but exceed the cost target | `status=review`; do not fabricate a candidate |
 | High industry concentration is flagged | Add a `max_industry_weight` research overlay |
 | Risk-exit refill was tested and failed the full gate | Keep `status=review`; warn not to adopt same-day refill |
+| Risk-exit minimum-position guard was tested and passed the full gate/cost gate | It can satisfy low-position risk validation |
+| Router-grid CSV lacks a newly added optional column | Treat that column as `None` when reconstructing completed keys |
 | Candidate is selected | Emit JSON/Markdown and a resumable router-grid command |
 
 #### 5. Tests Required
@@ -761,8 +765,34 @@ Generate the missing factor evidence first, then re-run the five-layer gate.
 - Unit test full-goal/cost-eligible candidate selection.
 - Unit test risk flags become max-industry, min-position, and small-cap actions.
 - Unit test failed risk overlays keep the plan in review.
+- Unit test source `top_n` and `risk_exit_min_positions` validations are recorded as pass/fail evidence before adoption.
+- Unit test `completed_keys()` recognizes legacy router-grid rows that predate a newly added optional `None` column.
 - Unit test high-cost trading flags produce `do_not_increase_turnover`.
 - Writer test that JSON and Markdown plan artifacts are persisted.
+
+#### 6. Wrong vs Correct
+
+##### Wrong
+
+```python
+def combo_key(combo):
+    return "|".join(f"{key}={combo[key]}" for key in sorted(combo))
+
+def completed_keys(path):
+    return set(pd.read_csv(path, usecols=["key"])["key"].astype(str))
+```
+
+This makes a later optional field such as `risk_exit_min_positions=None` change the key and rerun already completed rows.
+
+##### Correct
+
+```python
+def completed_keys(path):
+    frame = pd.read_csv(path)
+    return {combo_key({field: row.get(field, None) for field in COMBO_KEY_FIELDS}) for _, row in frame.iterrows()}
+```
+
+The canonical key is reconstructed from current known fields, and missing optional fields are treated as `None`.
 
 ### Scenario: Backtest Exposure Schedule Composition
 
