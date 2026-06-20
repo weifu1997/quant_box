@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.common import is_stock_csv
 from src.config_loader import load_config, resolve_path
 from src.data_fetcher import normalize_daily_frame
 
@@ -37,24 +38,7 @@ def convert_to_qlib_format(
     instrument_dir.mkdir(parents=True, exist_ok=True)
     prices_dir.mkdir(parents=True, exist_ok=True)
 
-    universe_file = Path(data_cfg.get("constituents_file", "")).name
-    hs300_universe_file = Path(data_cfg.get("hs300_constituents_file", "")).name
-    st_calendar_file = Path(data_cfg.get("st_calendar_file", "")).name
-    csv_files = sorted(source_dir.glob("*.csv"))
-    metadata_files = {
-        name
-        for name in [
-            universe_file,
-            hs300_universe_file,
-            st_calendar_file,
-            "hs300_constituents.csv",
-            "mainboard_a_stocks.csv",
-            "st_calendar.csv",
-            "failed_fetches.csv",
-        ]
-        if name
-    }
-    csv_files = [path for path in csv_files if path.name not in metadata_files]
+    csv_files = sorted(path for path in source_dir.glob("*.csv") if is_stock_csv(path))
     if not csv_files:
         _remove_price_outputs(prices_dir)
         raise FileNotFoundError(f"No raw stock csv files found in {source_dir}")

@@ -491,6 +491,103 @@ class DataGovernanceTests(unittest.TestCase):
             repair_components = {action["component"] for action in report.repair_actions}
             self.assertIn("historical_universe", repair_components)
 
+    def test_build_data_governance_report_caps_coverage_at_configured_end_date(self) -> None:
+        """Verify fixed-date runs are not blocked by later factor-cache metadata."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            factor_dir = root / "factors"
+            factor_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            st_calendar = raw_dir / "st_calendar.csv"
+            index_file = raw_dir / "index_constituents.csv"
+            historical_universe = raw_dir / "historical_universe.csv"
+            daily_basic_file = factor_dir / "daily_basic.parquet"
+            factor_cache = factor_dir / "alpha158.parquet"
+            price_file = root / "prices.parquet"
+
+            price_dates = pd.to_datetime(["2024-01-02", "2024-02-01", "2024-03-01"])
+            pd.DataFrame({"close": range(len(price_dates))}, index=price_dates).to_parquet(price_file)
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "name": ["A"],
+                    "industry": ["Bank"],
+                    "list_status": ["L"],
+                    "list_date": ["20200101"],
+                    "delist_date": [""],
+                }
+            ).to_csv(universe_file, index=False)
+            pd.DataFrame({"ts_code": ["000001.SZ"], "st_start_date": ["20230101"], "st_end_date": ["20240215"]}).to_csv(
+                st_calendar,
+                index=False,
+            )
+            pd.DataFrame(
+                {
+                    "index_code": ["000300.SH", "000300.SH"],
+                    "con_code": ["000001.SZ", "000001.SZ"],
+                    "trade_date": ["2024-01-02", "2024-02-01"],
+                    "weight": [1.0, 1.0],
+                }
+            ).to_csv(index_file, index=False)
+            pd.DataFrame(
+                [
+                    {"trade_date": "2024-01-02", "instrument": "000001.SZ", "sources": "hs300|csi500|csi1000"},
+                    {"trade_date": "2024-02-01", "instrument": "000001.SZ", "sources": "hs300|csi500|csi1000"},
+                ]
+            ).to_csv(historical_universe, index=False)
+            pd.DataFrame(
+                {
+                    "trade_date": ["2024-01-02", "2024-02-01"],
+                    "ts_code": ["000001.SZ", "000001.SZ"],
+                    "circ_mv": [100.0, 101.0],
+                }
+            ).to_parquet(daily_basic_file)
+            pd.DataFrame({"ts_code": ["000001.SZ"], "trade_date": ["2024-02-01"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                raw_dir / "000001.SZ.csv",
+                index=False,
+            )
+            (Path(str(factor_cache) + ".meta.json")).write_text(
+                json.dumps({"start_date": "2024-01-02", "end_date": "2024-03-01", "symbols": ["000001.SZ"]}),
+                encoding="utf-8",
+            )
+            adj_meta = factor_dir / "adj_factor_meta.json"
+            adj_metadata = build_adj_factor_metadata({"data": {"raw_dir": str(raw_dir)}})
+            write_adj_factor_metadata(adj_metadata, path=adj_meta)
+
+            report = build_data_governance_report(
+                {
+                    "data": {
+                        "start_date": "2024-01-02",
+                        "end_date": "2024-02-15",
+                        "raw_dir": str(raw_dir),
+                        "constituents_file": str(universe_file),
+                        "st_calendar_file": str(st_calendar),
+                        "exclude_st": True,
+                    },
+                    "factors": {"cache_file": str(factor_cache)},
+                    "ic": {"price_file": str(price_file)},
+                    "data_governance": {
+                        "index_constituents_file": str(index_file),
+                        "adj_factor_meta_file": str(adj_meta),
+                    },
+                    "universe_builder": {
+                        "enabled": True,
+                        "output_file": str(historical_universe),
+                    },
+                    "research": {"exposure": {"daily_basic_file": str(daily_basic_file), "market_cap_field": "circ_mv"}},
+                },
+                sample_raw_files=1,
+            )
+
+            self.assertTrue(report.is_point_in_time_ready)
+            self.assertEqual(report.index_constituents_expected_months, 2)
+            self.assertEqual(report.historical_universe_expected_months, 2)
+            self.assertEqual(report.daily_basic_expected_dates, 2)
+            self.assertEqual(report.factor_cache_meta_end_date, "2024-03-01")
+            self.assertEqual(report.issues, [])
+
     def test_build_data_governance_report_flags_partial_st_calendar_history(self) -> None:
         """函数说明：验证 test_build_data_governance_report_flags_partial_st_calendar_history 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:

@@ -54,6 +54,14 @@ class DataConverterTests(unittest.TestCase):
                 raw_dir / "st_calendar.csv",
                 index=False,
             )
+            pd.DataFrame([{"index_code": "000300.SH", "con_code": "000001.SZ", "trade_date": "2024-01-02"}]).to_csv(
+                raw_dir / "index_constituents.csv",
+                index=False,
+            )
+            pd.DataFrame([{"trade_date": "2024-01-02", "instrument": "000001.SZ", "sources": "hs300"}]).to_csv(
+                raw_dir / "historical_universe.csv",
+                index=False,
+            )
 
             def fake_resolve_path(value: str | Path) -> Path:
                 """函数说明：处理 fake_resolve_path 主要逻辑。"""

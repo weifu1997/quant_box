@@ -238,6 +238,7 @@ When `universe_builder.enabled` is true, backtest and signal score panels must b
 - Output `sources` and `index_codes` are pipe-separated labels for symbols that appear in multiple selected indices.
 - Config keys live under `universe_builder` and must be present in `DEFAULT_CONFIG` plus `_CONFIG_VALIDATORS`; `require_file` defaults to `true` so enabled filtering does not silently fall back to the unfiltered score panel.
 - Data governance must check `historical_universe.csv` by source label when `universe_builder.enabled=true`. Required default sources are `hs300`, `csi500`, and `csi1000`; each source must have monthly snapshots across the point-in-time factor window unless `min_historical_universe_source_month_coverage` is explicitly relaxed.
+- Raw daily conversion must discover market files through `src.common.is_stock_csv(path)`. Metadata CSVs such as `index_constituents.csv`, `historical_universe.csv`, `mainboard_a_stocks.csv`, `st_calendar.csv`, and `failed_fetches.csv` must never be passed to `normalize_daily_frame()`.
 
 ### 4. Validation & Error Matrix
 
@@ -286,6 +287,57 @@ scores = filter_scores_by_historical_universe(scores, universe)
 ```
 
 The helper picks each source's latest snapshot with `trade_date <= score_date`, then unions those members.
+
+## Scenario: Configured End Date Governance Window
+
+### 1. Scope / Trigger
+
+- Trigger: fixed-date research or auto-signal runs may use factor caches whose metadata extends beyond the requested `data.end_date`.
+- Owner: `src.data_governance.build_data_governance_report`.
+
+### 2. Signatures
+
+- Config input: `data.end_date`, already resolved by `scripts/run_auto_signal.py` before governance runs.
+- Metadata input: `<factor_cache>.meta.json` with `start_date` and `end_date`.
+
+### 3. Contracts
+
+- Governance coverage checks use `min(data.end_date, factor_cache_meta.end_date)` as the required point-in-time end when `data.end_date` is a concrete date.
+- If `data.end_date` is absent or cannot be parsed, governance falls back to `factor_cache_meta.end_date`.
+- The report still records the raw `factor_cache_meta_end_date`; only required coverage windows, freshness warnings, and repair-action end dates are capped.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| `data.end_date="2026-05-27"` and factor metadata ends `2026-06-12` | Require daily-basic/index/historical-universe coverage only through `2026-05-27`. |
+| `data.end_date="auto"` and factor metadata ends `2026-06-12` | Use factor metadata end after the caller resolves `auto`, or fall back to metadata if unresolved. |
+| Factor metadata is missing | Keep existing `factor_cache_meta_missing` warning and avoid inventing an end date. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: A fixed May backtest with June factor-cache metadata passes governance when all May evidence is present.
+- Base: A normal latest run still requires coverage through the resolved latest target date.
+- Bad: Blocking a fixed May run because csi500/csi1000 June index snapshots have not been published yet.
+
+### 6. Tests Required
+
+- `tests/test_data_governance.py` must assert configured `data.end_date` caps expected daily-basic dates and historical-universe source months while preserving the raw factor metadata end date in the report.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+expected_index_months = _month_range_texts(point_in_time_start, factor_meta_end_date)
+```
+
+#### Correct
+
+```python
+point_in_time_end = _point_in_time_end_date(data_cfg.get("end_date"), factor_meta_end_date)
+expected_index_months = _month_range_texts(point_in_time_start, point_in_time_end)
+```
 
 ### Scenario: Backtest Selection Schedule
 

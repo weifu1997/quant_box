@@ -119,10 +119,11 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
     factor_symbols = factor_meta.get("symbols", []) if isinstance(factor_meta, dict) else []
     factor_meta_start_date = str(factor_meta.get("start_date", "")) if isinstance(factor_meta, dict) else ""
     factor_meta_end_date = str(factor_meta.get("end_date", "")) if isinstance(factor_meta, dict) else ""
+    point_in_time_end = _point_in_time_end_date(data_cfg.get("end_date"), factor_meta_end_date)
     price_panel_dates = _price_panel_trade_dates(cfg)
     price_panel_start_date = _date_index_start_date(price_panel_dates)
     point_in_time_start = _point_in_time_start_date(data_start, factor_meta_start_date, price_panel_start_date)
-    expected_price_dates = _filter_date_texts(price_panel_dates, point_in_time_start, factor_meta_end_date)
+    expected_price_dates = _filter_date_texts(price_panel_dates, point_in_time_start, point_in_time_end)
     expected_price_start = min(expected_price_dates) if expected_price_dates else point_in_time_start
     if not factor_meta:
         warnings.append("factor_cache_meta_missing")
@@ -176,7 +177,7 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
     index_start, index_end = _date_range_text(index_frame.get("trade_date"))
     index_date_texts = _date_texts_from_series(index_frame.get("trade_date"))
     index_months = _month_texts_from_dates(index_date_texts)
-    expected_index_months = _month_range_texts(point_in_time_start, factor_meta_end_date)
+    expected_index_months = _month_range_texts(point_in_time_start, point_in_time_end)
     index_expected_months = len(expected_index_months)
     index_observed_months = len(expected_index_months & index_months) if expected_index_months else 0
     index_missing_months = max(index_expected_months - index_observed_months, 0)
@@ -255,8 +256,8 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
                         )
         if historical_available and historical_start and point_in_time_start and _month_after(historical_start, point_in_time_start):
             issues.append(f"historical_universe_start_after_point_in_time_start:{historical_start}>{point_in_time_start}")
-        if historical_available and historical_end and factor_meta_end_date and _month_after(factor_meta_end_date, historical_end):
-            issues.append(f"historical_universe_end_before_factor_end:{historical_end}<{factor_meta_end_date}")
+        if historical_available and historical_end and point_in_time_end and _month_after(point_in_time_end, historical_end):
+            issues.append(f"historical_universe_end_before_factor_end:{historical_end}<{point_in_time_end}")
     elif historical_available and historical_expected_months and historical_expected_months_set - historical_months:
         warnings.append(
             "historical_universe_month_coverage_incomplete:"
@@ -311,12 +312,12 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
     elif with_adj_factor < sampled:
         issues.append(f"raw_adj_factor_missing_in_sample:{with_adj_factor}/{sampled}")
 
-    if st_calendar_available and st_calendar_end_date and factor_meta_end_date and _date_after(factor_meta_end_date, st_calendar_end_date):
-        warnings.append(f"st_calendar_end_before_factor_end:{st_calendar_end_date}<{factor_meta_end_date}")
-    if daily_basic_end and factor_meta_end_date and _date_after(factor_meta_end_date, daily_basic_end):
-        warnings.append(f"daily_basic_end_before_factor_end:{daily_basic_end}<{factor_meta_end_date}")
-    if index_available and index_end and factor_meta_end_date and _month_after(factor_meta_end_date, index_end):
-        issues.append(f"index_constituents_end_before_factor_end:{index_end}<{factor_meta_end_date}")
+    if st_calendar_available and st_calendar_end_date and point_in_time_end and _date_after(point_in_time_end, st_calendar_end_date):
+        warnings.append(f"st_calendar_end_before_factor_end:{st_calendar_end_date}<{point_in_time_end}")
+    if daily_basic_end and point_in_time_end and _date_after(point_in_time_end, daily_basic_end):
+        warnings.append(f"daily_basic_end_before_factor_end:{daily_basic_end}<{point_in_time_end}")
+    if index_available and index_end and point_in_time_end and _month_after(point_in_time_end, index_end):
+        issues.append(f"index_constituents_end_before_factor_end:{index_end}<{point_in_time_end}")
 
     adj_meta_path = resolve_path(gov_cfg.get("adj_factor_meta_file", "data/factors/adj_factor_meta.json"))
     adj_factor_meta = _read_json_if_exists(adj_meta_path)
@@ -354,7 +355,7 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
         issues=issues,
         warnings=warnings,
         data_start=point_in_time_start,
-        factor_end=factor_meta_end_date,
+        factor_end=point_in_time_end,
         daily_basic_path=daily_basic_path,
         index_path=index_path,
         historical_path=historical_path,
@@ -737,6 +738,19 @@ def _point_in_time_start_date(*dates: str) -> str:
     if not parsed:
         return ""
     return str(max(parsed).date())
+
+
+def _point_in_time_end_date(config_end: Any, factor_end: str) -> str:
+    """Cap governance coverage at the configured run end date when one is set."""
+    parsed_factor = pd.to_datetime(factor_end, errors="coerce")
+    parsed_config = pd.to_datetime(config_end, errors="coerce")
+    if pd.isna(parsed_factor) and pd.isna(parsed_config):
+        return ""
+    if pd.isna(parsed_factor):
+        return str(pd.Timestamp(parsed_config).date())
+    if pd.isna(parsed_config):
+        return str(pd.Timestamp(parsed_factor).date())
+    return str(min(pd.Timestamp(parsed_factor), pd.Timestamp(parsed_config)).date())
 
 
 def _date_after(left: str, right: str) -> bool:
