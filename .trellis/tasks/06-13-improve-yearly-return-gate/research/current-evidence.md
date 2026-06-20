@@ -459,3 +459,31 @@ Official outputs written by the passing run:
 * `outputs/auto_signal_report.json`
 
 Important debugging note: an intermediate integration failed because it mixed the formal evidence with different runtime behavior. Using `alpha158.parquet` for the beta/roc/beta20 sources changed the score universe and failed drawdown/yearly gates. Filtering routed source dates to price-panel month-ends also removed the formal `2026-06-09` score date. The passing main flow must preserve the formal score source files and the grid hit's `rank10`/full-route-turnover/defensive-timing settings while still rebuilding the current backtest and signal inside `run_auto_signal.py`.
+
+## 2026-06-20 Current Worktree Verification
+
+I reran the main automated signal workflow on the current worktree without a Tushare update, preserving conversion, factor loading, data health, adj-factor metadata, point-in-time governance, annual-router backtest, diagnostics, and signal generation:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_auto_signal.py --skip-update --end-date 2026-05-27 --no-archive
+```
+
+The workflow completed successfully for fixed target date `2026-05-27`:
+
+* `outputs/auto_run_status.json`: `status=complete`, `is_executable=true`, `strategy_mode=annual_state_router`.
+* Data health completed as healthy.
+* Adj-factor metadata coverage was `3073/3073`.
+* Point-in-time governance completed as `point_in_time_ready`.
+* Annual-router parameter quality was acceptable with `annual_return_min=20.17%` and worst validation drawdown `-17.68%`.
+* Rebuilt backtest quality was acceptable with annual return `26.56%`, max drawdown `-17.68%`, minimum yearly annual return `20.72%`, and no years below the return or drawdown gates.
+* Official outputs were written for `2026-05-27`: `outputs/signal_2026-05-27.csv`, `outputs/manual_orders_2026-05-27.csv`, and `outputs/auto_signal_report.json`.
+
+Regression checks after this rerun:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_data_converter.py tests/test_data_governance.py tests/test_config_loader.py -q
+.\.venv\Scripts\python.exe -m pytest tests/test_run_auto_signal.py tests/test_run_annual_state_router_backtest.py tests/test_run_annual_state_router_grid.py tests/test_signal_generator.py tests/test_backtest.py tests/test_market_regime.py -q
+git diff --check
+```
+
+Results: `37 passed`, `111 passed`, and `git diff --check` passed with only Git's expected LF-to-CRLF warning for the Trellis spec file.

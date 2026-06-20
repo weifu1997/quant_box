@@ -32,11 +32,11 @@ Improve the local A-share strategy research pipeline so the historical full-flow
 
 ## Acceptance Criteria
 
-* [ ] A full-flow or equivalent authoritative backtest report shows every yearly annual return is at least `0.20`.
-* [ ] Overall backtest annual return is at least `0.20`.
-* [ ] Max drawdown gates remain enforced and are not weakened.
-* [ ] No official signal is produced unless quality gates pass.
-* [ ] Tests pass for changed strategy/optimizer/reporting code.
+* [x] A full-flow or equivalent authoritative backtest report shows every yearly annual return is at least `0.20`.
+* [x] Overall backtest annual return is at least `0.20`.
+* [x] Max drawdown gates remain enforced and are not weakened.
+* [x] No official signal is produced unless quality gates pass.
+* [x] Tests pass for changed strategy/optimizer/reporting code.
 * [ ] If the target remains unmet, the remaining blockers are backed by generated experiment artifacts and current status/report files.
 
 ## Definition Of Done
