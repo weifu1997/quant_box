@@ -75,3 +75,36 @@ Verified annual-state router backtest clears the yearly 20 percent gate, committ
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Route-specific annual router research controls
+
+**Date**: 2026-06-21
+**Task**: Route-specific annual router research controls
+**Branch**: `main`
+
+### Summary
+
+Added route-specific annual router research controls, validated 2018 selector turnover boost and 2022 roc60 route evidence, updated config/spec contracts and tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cfaf7c0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
