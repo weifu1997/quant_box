@@ -99,13 +99,20 @@ class RunAutoSignalTests(unittest.TestCase):
                             "strong_trailing_exposure": 0.8,
                             "moderate_positive_source": "roc60",
                             "moderate_positive_ret252_min": 0.2,
+                            "moderate_positive_exposure": 1.0,
                             "moderate_low_source": "beta20",
                             "moderate_low_ret252_min": 0.18,
                             "moderate_low_ret252_max": 0.2,
                             "moderate_low_exposure": 0.4,
+                            "moderate_lower_source": None,
+                            "moderate_lower_ret252_min": 0.16,
+                            "moderate_lower_ret252_max": 0.18,
+                            "moderate_lower_exposure": 1.0,
                             "turnover_boost_reasons": "low_vol_moderate_uptrend+moderate_positive_roc60",
                             "turnover_boost_max_turnover": 2,
                             "turnover_boost_rank_buffer": 10,
+                            "risk_exit_min_positions": 5,
+                            "risk_exit_min_positions_reasons": "default_beta",
                         },
                     }
                 ),
@@ -118,13 +125,20 @@ class RunAutoSignalTests(unittest.TestCase):
                     "strong_trailing_exposure": 0.8,
                     "moderate_positive_source": "roc60",
                     "moderate_positive_ret252_min": 0.2,
+                    "moderate_positive_exposure": 1.0,
                     "moderate_low_source": "beta20",
                     "moderate_low_ret252_min": 0.18,
                     "moderate_low_ret252_max": 0.2,
                     "moderate_low_exposure": 0.4,
+                    "moderate_lower_source": None,
+                    "moderate_lower_ret252_min": 0.16,
+                    "moderate_lower_ret252_max": 0.18,
+                    "moderate_lower_exposure": 1.0,
                     "turnover_boost_reasons": ["low_vol_moderate_uptrend", "moderate_positive_roc60"],
                     "turnover_boost_max_turnover": 2,
                     "turnover_boost_rank_buffer": 10,
+                    "risk_exit_min_positions": 5,
+                    "risk_exit_min_positions_reasons": ["default_beta"],
                     "evidence_metrics_file": str(metrics_path),
                     "evidence_years_file": str(years_path),
                 }
@@ -143,6 +157,15 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertTrue(report.is_acceptable)
             self.assertEqual(report.windows, 3)
             self.assertAlmostEqual(report.annual_return_min, 0.21)
+
+            config["annual_state_router"]["risk_exit_min_positions_reasons"] = ["moderate_low_beta20"]
+            mismatched = module._annual_state_router_quality(config, quality)
+
+            self.assertFalse(mismatched.is_acceptable)
+            self.assertIn(
+                "annual_state_router_evidence_combo_mismatch:risk_exit_min_positions_reasons",
+                mismatched.issues,
+            )
 
     def test_backtest_stage_uses_annual_state_router_scores_when_enabled(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")

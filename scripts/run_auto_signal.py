@@ -226,13 +226,19 @@ def _annual_state_router_selected_params(config: dict[str, Any]) -> dict[str, An
         "flat_negative_exposure",
         "moderate_positive_source",
         "moderate_positive_ret252_min",
+        "moderate_positive_exposure",
         "moderate_low_source",
         "moderate_low_ret252_min",
         "moderate_low_ret252_max",
         "moderate_low_exposure",
+        "moderate_lower_source",
+        "moderate_lower_ret252_min",
+        "moderate_lower_ret252_max",
+        "moderate_lower_exposure",
         "strong_trailing_exposure",
         "turnover_boost_max_turnover",
         "turnover_boost_rank_buffer",
+        "risk_exit_min_positions",
         "turnover_mode",
         "full_turnover_on_route_change",
         "use_defensive_timing",
@@ -242,6 +248,7 @@ def _annual_state_router_selected_params(config: dict[str, Any]) -> dict[str, An
     selected["strategy_mode"] = "annual_state_router"
     selected["include_expanded_sources"] = bool(router_cfg.get("include_expanded_sources", True))
     selected["turnover_boost_reasons"] = sorted(_router_reason_set(router_cfg.get("turnover_boost_reasons")))
+    selected["risk_exit_min_positions_reasons"] = sorted(_router_reason_set(router_cfg.get("risk_exit_min_positions_reasons")))
     return selected
 
 
@@ -302,10 +309,15 @@ def _build_annual_state_router_runtime(
         fallback_source=_optional_router_text(router_cfg.get("fallback_source")),
         moderate_positive_source=_optional_router_text(router_cfg.get("moderate_positive_source")),
         moderate_positive_ret252_min=float(router_cfg.get("moderate_positive_ret252_min", 0.20)),
+        moderate_positive_exposure=float(router_cfg.get("moderate_positive_exposure", 1.0)),
         moderate_low_source=_optional_router_text(router_cfg.get("moderate_low_source")),
         moderate_low_ret252_min=float(router_cfg.get("moderate_low_ret252_min", 0.18)),
         moderate_low_ret252_max=float(router_cfg.get("moderate_low_ret252_max", 0.20)),
         moderate_low_exposure=float(router_cfg.get("moderate_low_exposure", 1.0)),
+        moderate_lower_source=_optional_router_text(router_cfg.get("moderate_lower_source")),
+        moderate_lower_ret252_min=float(router_cfg.get("moderate_lower_ret252_min", 0.16)),
+        moderate_lower_ret252_max=float(router_cfg.get("moderate_lower_ret252_max", 0.18)),
+        moderate_lower_exposure=float(router_cfg.get("moderate_lower_exposure", 1.0)),
         strong_trailing_exposure=float(router_cfg.get("strong_trailing_exposure", 1.0)),
         turnover_boost_reasons=_router_reason_set(router_cfg.get("turnover_boost_reasons")),
         turnover_boost_max_turnover=int(router_cfg.get("turnover_boost_max_turnover", 2)),
@@ -495,11 +507,16 @@ def _annual_state_router_combo_issues(router_cfg: dict[str, Any], combo: Any) ->
         "missing_ret252_exposure",
         "strong_trailing_exposure",
         "moderate_positive_ret252_min",
+        "moderate_positive_exposure",
         "moderate_low_ret252_min",
         "moderate_low_ret252_max",
         "moderate_low_exposure",
+        "moderate_lower_ret252_min",
+        "moderate_lower_ret252_max",
+        "moderate_lower_exposure",
         "turnover_boost_max_turnover",
         "turnover_boost_rank_buffer",
+        "risk_exit_min_positions",
     ]
     for key in numeric_keys:
         if key in router_cfg and key in combo:
@@ -507,13 +524,17 @@ def _annual_state_router_combo_issues(router_cfg: dict[str, Any], combo: Any) ->
             observed = _quality_number(combo.get(key), float("nan"))
             if pd.notna(expected) and pd.notna(observed) and abs(expected - observed) > 1e-9:
                 issues.append(f"annual_state_router_evidence_combo_mismatch:{key}")
-    for key in ["moderate_positive_source", "moderate_low_source", "turnover_mode"]:
+    for key in ["moderate_positive_source", "moderate_low_source", "moderate_lower_source", "turnover_mode"]:
         if key in router_cfg and key in combo and str(router_cfg.get(key) or "") != str(combo.get(key) or ""):
             issues.append(f"annual_state_router_evidence_combo_mismatch:{key}")
     expected_reasons = _router_reason_set(router_cfg.get("turnover_boost_reasons"))
     observed_reasons = _router_reason_set(combo.get("turnover_boost_reasons"))
     if expected_reasons != observed_reasons:
         issues.append("annual_state_router_evidence_combo_mismatch:turnover_boost_reasons")
+    expected_min_position_reasons = _router_reason_set(router_cfg.get("risk_exit_min_positions_reasons"))
+    observed_min_position_reasons = _router_reason_set(combo.get("risk_exit_min_positions_reasons"))
+    if expected_min_position_reasons != observed_min_position_reasons:
+        issues.append("annual_state_router_evidence_combo_mismatch:risk_exit_min_positions_reasons")
     return issues
 
 

@@ -79,8 +79,17 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertTrue(config["validated_strategy"]["require_is_acceptable"])
         self.assertTrue(config["annual_state_router"]["enabled"])
         self.assertEqual(config["annual_state_router"]["missing_ret252_exposure"], 0.70)
+        self.assertEqual(config["annual_state_router"]["moderate_positive_exposure"], 1.0)
         self.assertEqual(config["annual_state_router"]["moderate_low_source"], "beta20")
+        self.assertIsNone(config["annual_state_router"]["moderate_lower_source"])
+        self.assertEqual(config["annual_state_router"]["moderate_lower_ret252_min"], 0.16)
         self.assertEqual(config["annual_state_router"]["turnover_mode"], "rank10")
+        self.assertIsNone(config["annual_state_router"]["risk_exit_min_positions"])
+        self.assertEqual(config["annual_state_router"]["risk_exit_min_positions_reasons"], [])
+        self.assertEqual(
+            config["annual_state_router"]["evidence_metrics_file"],
+            "outputs/codex_router_grid_20260614_beta20_exposure_hit_metrics.json",
+        )
         self.assertTrue(config["annual_state_router"]["full_turnover_on_route_change"])
         self.assertTrue(config["annual_state_router"]["use_defensive_timing"])
         self.assertIn("selector", config["annual_state_router"]["source_factor_files"])

@@ -553,22 +553,28 @@ def _route_parameters(selected_params: dict[str, Any], selected: dict[str, Any])
         "flat_negative_exposure",
         "moderate_positive_source",
         "moderate_positive_ret252_min",
+        "moderate_positive_exposure",
         "moderate_low_source",
         "moderate_low_ret252_min",
         "moderate_low_ret252_max",
         "moderate_low_exposure",
+        "moderate_lower_source",
+        "moderate_lower_ret252_min",
+        "moderate_lower_ret252_max",
+        "moderate_lower_exposure",
         "strong_trailing_exposure",
         "turnover_mode",
         "turnover_boost_reasons",
         "turnover_boost_max_turnover",
         "turnover_boost_rank_buffer",
+        "risk_exit_min_positions_reasons",
         "full_turnover_on_route_change",
         "use_defensive_timing",
         "include_expanded_sources",
     ]
     result = {key: selected_params.get(key) for key in keys if key in selected_params}
     for key in keys:
-        if key in selected and selected.get(key) not in {None, ""}:
+        if key in selected and _has_value(selected.get(key)):
             result[key] = selected[key]
     return result
 
@@ -598,18 +604,25 @@ def _next_commands(
         "strong_trailing_exposure": "--strong-trailing-exposures",
         "moderate_positive_source": "--moderate-positive-sources",
         "moderate_positive_ret252_min": "--moderate-positive-ret252-mins",
+        "moderate_positive_exposure": "--moderate-positive-exposures",
         "moderate_low_source": "--moderate-low-sources",
         "moderate_low_ret252_min": "--moderate-low-ret252-mins",
         "moderate_low_ret252_max": "--moderate-low-ret252-maxs",
         "moderate_low_exposure": "--moderate-low-exposures",
+        "moderate_lower_source": "--moderate-lower-sources",
+        "moderate_lower_ret252_min": "--moderate-lower-ret252-mins",
+        "moderate_lower_ret252_max": "--moderate-lower-ret252-maxs",
+        "moderate_lower_exposure": "--moderate-lower-exposures",
         "turnover_mode": "--turnover-modes",
         "turnover_boost_reasons": "--turnover-boost-reason-sets",
         "turnover_boost_max_turnover": "--turnover-boost-max-turnovers",
         "turnover_boost_rank_buffer": "--turnover-boost-rank-buffers",
+        "risk_exit_min_positions": "--risk-exit-min-positions-options",
+        "risk_exit_min_positions_reasons": "--risk-exit-min-positions-reason-sets",
     }
     for key, flag in mapping.items():
         value = selected.get(key)
-        if value not in {None, ""}:
+        if _has_value(value):
             command.extend([flag, str(value)])
     command.extend(["--equity-overlay-sideways-exposures", "none"])
     command.extend(["--equity-overlay-bear-exposures", "none"])
@@ -621,6 +634,17 @@ def _next_commands(
     if risk_exit_min_positions is not None:
         command.extend(["--risk-exit-min-positions-options", f"none,{risk_exit_min_positions}"])
     return [" ".join(command)]
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip()) and value.strip().lower() not in {"nan", "none", "null"}
+    try:
+        return not bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return True
 
 
 def _caveats(
@@ -793,12 +817,19 @@ def _compact_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "annual_trade_cost_ratio",
         "failed_years",
         "full_goal",
+        "moderate_positive_source",
+        "moderate_positive_ret252_min",
+        "moderate_positive_exposure",
         "moderate_low_source",
         "moderate_low_ret252_min",
         "moderate_low_exposure",
+        "moderate_lower_source",
+        "moderate_lower_ret252_min",
+        "moderate_lower_exposure",
         "max_industry_weight",
         "rebalance_after_risk_exit",
         "risk_exit_min_positions",
+        "risk_exit_min_positions_reasons",
         "beta_top_n",
         "beta20_top_n",
         "latest_position_count",

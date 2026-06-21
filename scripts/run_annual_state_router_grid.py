@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from itertools import product
 import json
 from pathlib import Path
 import sys
@@ -55,10 +56,16 @@ COMBO_KEY_FIELDS = tuple(
             "moderate_low_ret252_max",
             "moderate_low_ret252_min",
             "moderate_low_source",
+            "moderate_lower_exposure",
+            "moderate_lower_ret252_max",
+            "moderate_lower_ret252_min",
+            "moderate_lower_source",
+            "moderate_positive_exposure",
             "moderate_positive_ret252_min",
             "moderate_positive_source",
             "rebalance_after_risk_exit",
             "risk_exit_min_positions",
+            "risk_exit_min_positions_reasons",
             "strong_trailing_exposure",
             "turnover_boost_max_turnover",
             "turnover_boost_rank_buffer",
@@ -75,6 +82,14 @@ INT_COMBO_KEY_FIELDS = {
     "turnover_boost_rank_buffer",
 }
 BOOL_COMBO_KEY_FIELDS = {"rebalance_after_risk_exit"}
+COMBO_KEY_LEGACY_DEFAULTS = {
+    "moderate_lower_exposure": 1.0,
+    "moderate_lower_ret252_max": 0.18,
+    "moderate_lower_ret252_min": 0.16,
+    "moderate_lower_source": None,
+    "moderate_positive_exposure": 1.0,
+    "risk_exit_min_positions_reasons": None,
+}
 
 
 def main() -> None:
@@ -92,10 +107,15 @@ def main() -> None:
     parser.add_argument("--strong-trailing-exposures", default="0.80,0.85")
     parser.add_argument("--moderate-positive-sources", default="roc60,db_total,beta20,rsqr20")
     parser.add_argument("--moderate-positive-ret252-mins", default="0.20,0.22")
+    parser.add_argument("--moderate-positive-exposures", default="1.0")
     parser.add_argument("--moderate-low-sources", default="none,db_total,beta20,rsqr20")
     parser.add_argument("--moderate-low-ret252-mins", default="0.18")
     parser.add_argument("--moderate-low-ret252-maxs", default="0.20")
     parser.add_argument("--moderate-low-exposures", default="1.0")
+    parser.add_argument("--moderate-lower-sources", default="none")
+    parser.add_argument("--moderate-lower-ret252-mins", default="0.16")
+    parser.add_argument("--moderate-lower-ret252-maxs", default="0.18")
+    parser.add_argument("--moderate-lower-exposures", default="1.0")
     parser.add_argument("--turnover-modes", default="default,turnover2,rank10")
     parser.add_argument("--turnover-boost-reason-sets", default="none")
     parser.add_argument("--turnover-boost-max-turnovers", default="2")
@@ -106,6 +126,7 @@ def main() -> None:
     parser.add_argument("--max-industry-weights", default="none")
     parser.add_argument("--rebalance-after-risk-exit-options", default="false")
     parser.add_argument("--risk-exit-min-positions-options", default="none")
+    parser.add_argument("--risk-exit-min-positions-reason-sets", default="none")
     parser.add_argument("--beta-top-ns", default="none")
     parser.add_argument("--beta20-top-ns", default="none")
     parser.add_argument("--include-exposure-diagnostics", action="store_true")
@@ -163,10 +184,15 @@ def main() -> None:
             flat_negative_exposure=0.90,
             moderate_positive_source=combo["moderate_positive_source"],
             moderate_positive_ret252_min=combo["moderate_positive_ret252_min"],
+            moderate_positive_exposure=combo["moderate_positive_exposure"],
             moderate_low_source=combo["moderate_low_source"],
             moderate_low_ret252_min=combo["moderate_low_ret252_min"],
             moderate_low_ret252_max=combo["moderate_low_ret252_max"],
             moderate_low_exposure=combo["moderate_low_exposure"],
+            moderate_lower_source=combo["moderate_lower_source"],
+            moderate_lower_ret252_min=combo["moderate_lower_ret252_min"],
+            moderate_lower_ret252_max=combo["moderate_lower_ret252_max"],
+            moderate_lower_exposure=combo["moderate_lower_exposure"],
             strong_trailing_exposure=combo["strong_trailing_exposure"],
             turnover_boost_reasons=parse_reason_set(combo["turnover_boost_reasons"]),
             turnover_boost_max_turnover=combo["turnover_boost_max_turnover"],
@@ -279,60 +305,99 @@ def load_or_build_score_sources(
 
 def iter_grid(args: argparse.Namespace) -> list[dict[str, Any]]:
     combos: list[dict[str, Any]] = []
-    for missing in parse_float_list(args.missing_ret252_exposures):
-        for strong in parse_float_list(args.strong_trailing_exposures):
-            for high_source in parse_source_list(args.moderate_positive_sources):
-                for high_min in parse_float_list(args.moderate_positive_ret252_mins):
-                    for low_source in parse_source_list(args.moderate_low_sources):
-                        for low_min in parse_float_list(args.moderate_low_ret252_mins):
-                            for low_max in parse_float_list(args.moderate_low_ret252_maxs):
-                                low_exposures = parse_float_list(args.moderate_low_exposures)
-                                if low_source is None:
-                                    low_exposures = [1.0]
-                                for low_exposure in low_exposures:
-                                    for turnover_mode in parse_str_list(args.turnover_modes):
-                                        for boost_reasons in parse_reason_set_list(args.turnover_boost_reason_sets):
-                                            boost_turnovers = parse_int_list(args.turnover_boost_max_turnovers)
-                                            boost_buffers = parse_int_list(args.turnover_boost_rank_buffers)
-                                            if boost_reasons == "none":
-                                                boost_turnovers = [0]
-                                                boost_buffers = [0]
-                                            for boost_turnover in boost_turnovers:
-                                                for boost_buffer in boost_buffers:
-                                                    for overlay_side in parse_optional_float_list(args.equity_overlay_sideways_exposures):
-                                                        for overlay_bear in parse_optional_float_list(args.equity_overlay_bear_exposures):
-                                                            for defensive_bear in parse_optional_float_list(args.defensive_bear_exposures):
-                                                                for max_industry_weight in parse_optional_float_list(args.max_industry_weights):
-                                                                    for rebalance_after_risk_exit in parse_bool_list(args.rebalance_after_risk_exit_options):
-                                                                        for risk_exit_min_positions in parse_optional_int_list(args.risk_exit_min_positions_options):
-                                                                            for beta_top_n in parse_optional_int_list(args.beta_top_ns):
-                                                                                for beta20_top_n in parse_optional_int_list(args.beta20_top_ns):
-                                                                                    combos.append(
-                                                                                        {
-                                                                                            "missing_ret252_exposure": missing,
-                                                                                            "strong_trailing_exposure": strong,
-                                                                                            "moderate_positive_source": high_source,
-                                                                                            "moderate_positive_ret252_min": high_min,
-                                                                                            "moderate_low_source": low_source,
-                                                                                            "moderate_low_ret252_min": low_min,
-                                                                                            "moderate_low_ret252_max": low_max,
-                                                                                            "moderate_low_exposure": low_exposure,
-                                                                                            "turnover_mode": turnover_mode,
-                                                                                            "turnover_boost_reasons": boost_reasons,
-                                                                                            "turnover_boost_max_turnover": boost_turnover,
-                                                                                            "turnover_boost_rank_buffer": boost_buffer,
-                                                                                            "equity_overlay_sideways_exposure": overlay_side,
-                                                                                            "equity_overlay_bear_exposure": overlay_bear,
-                                                                                            "equity_overlay_drawdown_cut": None,
-                                                                                            "defensive_sideways_exposure": None,
-                                                                                            "defensive_bear_exposure": defensive_bear,
-                                                                                            "max_industry_weight": max_industry_weight,
-                                                                                            "rebalance_after_risk_exit": rebalance_after_risk_exit,
-                                                                                            "risk_exit_min_positions": risk_exit_min_positions,
-                                                                                            "beta_top_n": beta_top_n,
-                                                                                            "beta20_top_n": beta20_top_n,
-                                                                                        }
-                                                                                    )
+    common_iter = product(
+        parse_float_list(args.missing_ret252_exposures),
+        parse_float_list(args.strong_trailing_exposures),
+        parse_source_list(args.moderate_positive_sources),
+        parse_float_list(args.moderate_positive_ret252_mins),
+        parse_float_list(args.moderate_positive_exposures),
+        parse_source_list(args.moderate_low_sources),
+        parse_float_list(args.moderate_low_ret252_mins),
+        parse_float_list(args.moderate_low_ret252_maxs),
+        parse_source_list(args.moderate_lower_sources),
+        parse_float_list(args.moderate_lower_ret252_mins),
+        parse_float_list(args.moderate_lower_ret252_maxs),
+        parse_str_list(args.turnover_modes),
+        parse_reason_set_list(args.turnover_boost_reason_sets),
+        parse_optional_float_list(args.equity_overlay_sideways_exposures),
+        parse_optional_float_list(args.equity_overlay_bear_exposures),
+        parse_optional_float_list(args.defensive_bear_exposures),
+        parse_optional_float_list(args.max_industry_weights),
+        parse_bool_list(args.rebalance_after_risk_exit_options),
+        parse_optional_int_list(args.risk_exit_min_positions_options),
+        parse_reason_set_list(args.risk_exit_min_positions_reason_sets),
+        parse_optional_int_list(args.beta_top_ns),
+        parse_optional_int_list(args.beta20_top_ns),
+    )
+    for (
+        missing,
+        strong,
+        high_source,
+        high_min,
+        high_exposure,
+        low_source,
+        low_min,
+        low_max,
+        lower_source,
+        lower_min,
+        lower_max,
+        turnover_mode,
+        boost_reasons,
+        overlay_side,
+        overlay_bear,
+        defensive_bear,
+        max_industry_weight,
+        rebalance_after_risk_exit,
+        risk_exit_min_positions,
+        risk_exit_min_positions_reasons,
+        beta_top_n,
+        beta20_top_n,
+    ) in common_iter:
+        low_exposures = [1.0] if low_source is None else parse_float_list(args.moderate_low_exposures)
+        lower_exposures = [1.0] if lower_source is None else parse_float_list(args.moderate_lower_exposures)
+        boost_turnovers = parse_int_list(args.turnover_boost_max_turnovers)
+        boost_buffers = parse_int_list(args.turnover_boost_rank_buffers)
+        if boost_reasons == "none":
+            boost_turnovers = [0]
+            boost_buffers = [0]
+        for low_exposure, lower_exposure, boost_turnover, boost_buffer in product(
+            low_exposures,
+            lower_exposures,
+            boost_turnovers,
+            boost_buffers,
+        ):
+            combos.append(
+                {
+                    "missing_ret252_exposure": missing,
+                    "strong_trailing_exposure": strong,
+                    "moderate_positive_source": high_source,
+                    "moderate_positive_ret252_min": high_min,
+                    "moderate_positive_exposure": high_exposure,
+                    "moderate_low_source": low_source,
+                    "moderate_low_ret252_min": low_min,
+                    "moderate_low_ret252_max": low_max,
+                    "moderate_low_exposure": low_exposure,
+                    "moderate_lower_source": lower_source,
+                    "moderate_lower_ret252_min": lower_min,
+                    "moderate_lower_ret252_max": lower_max,
+                    "moderate_lower_exposure": lower_exposure,
+                    "turnover_mode": turnover_mode,
+                    "turnover_boost_reasons": boost_reasons,
+                    "turnover_boost_max_turnover": boost_turnover,
+                    "turnover_boost_rank_buffer": boost_buffer,
+                    "equity_overlay_sideways_exposure": overlay_side,
+                    "equity_overlay_bear_exposure": overlay_bear,
+                    "equity_overlay_drawdown_cut": None,
+                    "defensive_sideways_exposure": None,
+                    "defensive_bear_exposure": defensive_bear,
+                    "max_industry_weight": max_industry_weight,
+                    "rebalance_after_risk_exit": rebalance_after_risk_exit,
+                    "risk_exit_min_positions": risk_exit_min_positions,
+                    "risk_exit_min_positions_reasons": None if risk_exit_min_positions_reasons == "none" else risk_exit_min_positions_reasons,
+                    "beta_top_n": beta_top_n,
+                    "beta20_top_n": beta20_top_n,
+                }
+            )
     return combos
 
 
@@ -373,6 +438,7 @@ def namespace_for_combo(combo: dict[str, Any]) -> argparse.Namespace:
         max_industry_weight=combo["max_industry_weight"],
         rebalance_after_risk_exit=combo["rebalance_after_risk_exit"],
         risk_exit_min_positions=combo["risk_exit_min_positions"],
+        risk_exit_min_positions_reasons=combo["risk_exit_min_positions_reasons"] or "",
         beta_top_n=combo["beta_top_n"],
         beta20_top_n=combo["beta20_top_n"],
     )
@@ -389,7 +455,7 @@ def completed_keys(path: Path) -> set[str]:
     if "key" in frame.columns:
         keys.update(str(value) for value in frame["key"].dropna().tolist())
     for _, row in frame.iterrows():
-        keys.add(combo_key({field: row.get(field, None) for field in COMBO_KEY_FIELDS}))
+        keys.add(combo_key({field: row.get(field, COMBO_KEY_LEGACY_DEFAULTS.get(field)) for field in COMBO_KEY_FIELDS}))
     return keys
 
 

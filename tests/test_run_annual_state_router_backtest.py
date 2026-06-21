@@ -9,6 +9,7 @@ import pandas as pd
 
 from scripts.run_annual_state_router_backtest import (
     ScoreSourceDefinition,
+    RoutedScoreRun,
     adjust_route_decision,
     apply_research_config_overrides,
     apply_source_top_n_overrides,
@@ -16,6 +17,8 @@ from scripts.run_annual_state_router_backtest import (
     exposure_schedule_from_year_routes,
     full_gate_summary,
     research_config_overrides_payload,
+    risk_exit_min_positions_schedule_from_routes,
+    routed_backtest_config,
     run_annual_state_score_router,
     selection_schedule_from_routes,
     signal_trade_date_map,
@@ -220,6 +223,52 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
 
         self.assertEqual(exposure_schedule_from_year_routes(year_routes), {"2024-01-02": 1.0, "2025-01-02": 0.65})
 
+    def test_risk_exit_min_positions_schedule_from_routes_filters_reasons(self) -> None:
+        routes = pd.DataFrame(
+            [
+                {"date": "2025-12-31", "reason": "moderate_low_beta20"},
+                {"date": "2026-01-30", "reason": "default_beta"},
+            ]
+        )
+
+        schedule = risk_exit_min_positions_schedule_from_routes(
+            routes,
+            min_positions=5,
+            reasons={"default_beta"},
+        )
+
+        self.assertEqual(schedule, {"2026-01-30": 5})
+
+    def test_routed_backtest_config_scopes_router_min_positions_by_reason(self) -> None:
+        routed = RoutedScoreRun(
+            scores=pd.Series(dtype=float),
+            score_routes=pd.DataFrame(
+                [
+                    {"date": "2025-12-31", "source": "beta20", "reason": "moderate_low_beta20", "top_n": 5, "max_turnover": 1, "rank_buffer": 10},
+                    {"date": "2026-01-30", "source": "beta", "reason": "default_beta", "top_n": 5, "max_turnover": 1, "rank_buffer": 10},
+                ]
+            ),
+            year_routes=pd.DataFrame([{"decision_date": "2026-01-30", "exposure": 1.0}]),
+        )
+        prices = pd.DataFrame(index=pd.to_datetime(["2026-01-30"]))
+        definitions = {"beta": ScoreSourceDefinition(name="beta", kind="factor", top_n=5, max_turnover=1, rank_buffer=10)}
+
+        config = routed_backtest_config(
+            config={
+                "strategy": {"top_n": 5, "max_turnover": 1, "rank_buffer": 10},
+                "backtest": {"initial_capital": 100000},
+                "annual_state_router": {"risk_exit_min_positions": 5, "risk_exit_min_positions_reasons": ["default_beta"]},
+            },
+            prices=prices,
+            routed=routed,
+            source_definitions=definitions,
+            full_turnover_on_route_change=False,
+            use_defensive_timing=False,
+        )
+
+        self.assertEqual(config["risk_exit_min_positions"], 0)
+        self.assertEqual(config["risk_exit_min_positions_schedule"], {"2026-01-30": 5})
+
     def test_adjust_route_decision_discounts_strong_trailing_exposure(self) -> None:
         route = {
             "year": 2020,
@@ -258,6 +307,26 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
         self.assertEqual(adjusted["source"], "roc60")
         self.assertEqual(adjusted["reason"], "moderate_positive_roc60")
 
+    def test_adjust_route_decision_can_scale_moderate_positive_exposure(self) -> None:
+        route = {
+            "year": 2022,
+            "source": "beta",
+            "reason": "default_beta",
+            "exposure": 1.0,
+            "ret252": 0.22,
+        }
+
+        adjusted = adjust_route_decision(
+            route,
+            moderate_positive_source="roc60",
+            moderate_positive_ret252_min=0.20,
+            moderate_positive_exposure=0.8,
+        )
+
+        self.assertEqual(adjusted["source"], "roc60")
+        self.assertEqual(adjusted["reason"], "moderate_positive_roc60")
+        self.assertAlmostEqual(adjusted["exposure"], 0.8)
+
     def test_adjust_route_decision_can_route_low_moderate_positive_band(self) -> None:
         route = {
             "year": 2025,
@@ -280,6 +349,33 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
         self.assertEqual(adjusted["source"], "db_total")
         self.assertEqual(adjusted["reason"], "moderate_low_db_total")
         self.assertAlmostEqual(adjusted["exposure"], 0.6)
+
+    def test_adjust_route_decision_can_route_lower_moderate_positive_band(self) -> None:
+        route = {
+            "year": 2026,
+            "source": "beta",
+            "reason": "default_beta",
+            "exposure": 1.0,
+            "ret252": 0.171,
+        }
+
+        adjusted = adjust_route_decision(
+            route,
+            moderate_positive_source="roc60",
+            moderate_positive_ret252_min=0.20,
+            moderate_low_source="beta20",
+            moderate_low_ret252_min=0.18,
+            moderate_low_ret252_max=0.20,
+            moderate_low_exposure=0.4,
+            moderate_lower_source="rsqr20",
+            moderate_lower_ret252_min=0.16,
+            moderate_lower_ret252_max=0.18,
+            moderate_lower_exposure=0.5,
+        )
+
+        self.assertEqual(adjusted["source"], "rsqr20")
+        self.assertEqual(adjusted["reason"], "moderate_lower_rsqr20")
+        self.assertAlmostEqual(adjusted["exposure"], 0.5)
 
     def test_adjust_route_decision_prefers_high_band_over_low_band(self) -> None:
         route = {

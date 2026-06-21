@@ -89,6 +89,7 @@ def run_backtest(
     max_turnover = int(config.get("max_turnover", 1))
     rank_buffer = int(config.get("rank_buffer", 0))
     selection_schedule = _normalize_selection_schedule(config.get("selection_schedule"))
+    risk_exit_min_positions_schedule = _normalize_risk_exit_min_positions_schedule(config.get("risk_exit_min_positions_schedule"))
     industry_map = config.get("industry_map")
     max_industry_weight = config.get("max_industry_weight")
     max_weight = config.get("max_weight_per_stock")
@@ -138,6 +139,7 @@ def run_backtest(
             config,
         )
         risk_exit_trade_start = len(trade_rows)
+        risk_exit_config = _config_with_risk_exit_min_positions(config, risk_exit_min_positions_schedule, last_signal_date)
         capital = _execute_risk_exits(
             holdings,
             entry_prices,
@@ -153,7 +155,7 @@ def run_backtest(
             min_commission,
             slippage,
             prices,
-            config,
+            risk_exit_config,
         )
         risk_exit_symbols = _risk_exit_symbols_from_rows(trade_rows[risk_exit_trade_start:])
         total_before_signal = _portfolio_value(capital, holdings, close_values, last_prices)
@@ -603,6 +605,36 @@ def _selection_config_for_signal(
         int(settings.get("max_turnover", max_turnover)),
         int(settings.get("rank_buffer", rank_buffer)),
     )
+
+
+def _normalize_risk_exit_min_positions_schedule(value: object) -> dict[pd.Timestamp, int]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("risk_exit_min_positions_schedule must be a mapping of date to integer.")
+    result: dict[pd.Timestamp, int] = {}
+    for raw_date, raw_positions in value.items():
+        date = pd.Timestamp(raw_date).normalize()
+        positions = int(raw_positions)
+        if positions < 0:
+            raise ValueError("risk_exit_min_positions_schedule values must be >= 0.")
+        result[date] = positions
+    return result
+
+
+def _config_with_risk_exit_min_positions(
+    config: dict,
+    schedule: dict[pd.Timestamp, int],
+    signal_date: pd.Timestamp | None,
+) -> dict:
+    if not schedule or signal_date is None:
+        return config
+    scheduled = schedule.get(pd.Timestamp(signal_date).normalize())
+    if scheduled is None:
+        return config
+    result = dict(config)
+    result["risk_exit_min_positions"] = int(scheduled)
+    return result
 
 
 def _ensure_score_panel(score_panel: pd.Series | pd.DataFrame) -> pd.Series:

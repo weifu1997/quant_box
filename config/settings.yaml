@@ -281,10 +281,15 @@ annual_state_router:
   disable_equity_overlay: false
   moderate_positive_source: "roc60"
   moderate_positive_ret252_min: 0.20
+  moderate_positive_exposure: 1.0
   moderate_low_source: "beta20"
   moderate_low_ret252_min: 0.18
   moderate_low_ret252_max: 0.20
   moderate_low_exposure: 0.40
+  moderate_lower_source: null
+  moderate_lower_ret252_min: 0.16
+  moderate_lower_ret252_max: 0.18
+  moderate_lower_exposure: 1.0
   strong_trailing_exposure: 0.80
   turnover_mode: "rank10"
   turnover_boost_reasons:
@@ -292,6 +297,8 @@ annual_state_router:
     - "moderate_positive_roc60"
   turnover_boost_max_turnover: 2
   turnover_boost_rank_buffer: 10
+  risk_exit_min_positions: null
+  risk_exit_min_positions_reasons: []
   evidence_metrics_file: "outputs/codex_router_grid_20260614_beta20_exposure_hit_metrics.json"
   evidence_years_file: "outputs/codex_router_grid_20260614_beta20_exposure_hit_years.csv"
 

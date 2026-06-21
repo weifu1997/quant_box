@@ -70,6 +70,9 @@ def apply_research_config_overrides(config: dict[str, Any], args: argparse.Names
     if risk_exit_min_positions is not None:
         strategy = dict(result.get("strategy", {}))
         strategy["risk_exit_min_positions"] = int(risk_exit_min_positions)
+        reasons = parse_reason_list(getattr(args, "risk_exit_min_positions_reasons", ""))
+        if reasons:
+            strategy["risk_exit_min_positions_reasons"] = sorted(reasons)
         result["strategy"] = strategy
 
     backtest = dict(result.get("backtest", {}))
@@ -95,7 +98,7 @@ def apply_research_config_overrides(config: dict[str, Any], args: argparse.Names
     return result
 
 
-def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, float | bool]:
+def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, float | bool | str]:
     values = {
         "max_industry_weight": getattr(args, "max_industry_weight", None),
         "rebalance_after_risk_exit": getattr(args, "rebalance_after_risk_exit", False),
@@ -106,7 +109,11 @@ def research_config_overrides_payload(args: argparse.Namespace) -> dict[str, flo
         "defensive_sideways_exposure": args.defensive_sideways_exposure,
         "defensive_bear_exposure": args.defensive_bear_exposure,
     }
-    return {key: value if isinstance(value, bool) else float(value) for key, value in values.items() if value is not None and value is not False}
+    payload = {key: value if isinstance(value, bool) else float(value) for key, value in values.items() if value is not None and value is not False}
+    reasons = "+".join(sorted(parse_reason_list(getattr(args, "risk_exit_min_positions_reasons", ""))))
+    if reasons:
+        payload["risk_exit_min_positions_reasons"] = reasons
+    return payload
 
 
 def source_top_n_overrides_payload(args: argparse.Namespace) -> dict[str, int]:
@@ -137,8 +144,13 @@ def apply_source_top_n_overrides(
     return result
 
 
-def parse_reason_list(value: str) -> set[str]:
-    return {item.strip() for item in str(value or "").split(",") if item.strip()}
+def parse_reason_list(value: object) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    normalized = str(value or "").replace("+", ",")
+    return {item.strip() for item in normalized.split(",") if item.strip()}
 
 
 def main() -> None:
@@ -159,10 +171,15 @@ def main() -> None:
     parser.add_argument("--include-expanded-sources", action="store_true")
     parser.add_argument("--moderate-positive-source", default="")
     parser.add_argument("--moderate-positive-ret252-min", type=float, default=0.20)
+    parser.add_argument("--moderate-positive-exposure", type=float, default=1.0)
     parser.add_argument("--moderate-low-source", default="")
     parser.add_argument("--moderate-low-ret252-min", type=float, default=0.18)
     parser.add_argument("--moderate-low-ret252-max", type=float, default=0.20)
     parser.add_argument("--moderate-low-exposure", type=float, default=1.0)
+    parser.add_argument("--moderate-lower-source", default="")
+    parser.add_argument("--moderate-lower-ret252-min", type=float, default=0.16)
+    parser.add_argument("--moderate-lower-ret252-max", type=float, default=0.18)
+    parser.add_argument("--moderate-lower-exposure", type=float, default=1.0)
     parser.add_argument("--strong-trailing-exposure", type=float, default=1.0)
     parser.add_argument("--disable-equity-overlay", action="store_true")
     parser.add_argument("--equity-overlay-sideways-exposure", type=float, default=None)
@@ -173,6 +190,7 @@ def main() -> None:
     parser.add_argument("--max-industry-weight", type=float, default=None)
     parser.add_argument("--rebalance-after-risk-exit", action="store_true")
     parser.add_argument("--risk-exit-min-positions", type=int, default=None)
+    parser.add_argument("--risk-exit-min-positions-reasons", default="")
     parser.add_argument("--beta-top-n", type=int, default=None)
     parser.add_argument("--beta20-top-n", type=int, default=None)
     parser.add_argument("--turnover-boost-reasons", default="")
@@ -219,10 +237,15 @@ def main() -> None:
         fallback_source=args.fallback_source or None,
         moderate_positive_source=args.moderate_positive_source or None,
         moderate_positive_ret252_min=args.moderate_positive_ret252_min,
+        moderate_positive_exposure=args.moderate_positive_exposure,
         moderate_low_source=args.moderate_low_source or None,
         moderate_low_ret252_min=args.moderate_low_ret252_min,
         moderate_low_ret252_max=args.moderate_low_ret252_max,
         moderate_low_exposure=args.moderate_low_exposure,
+        moderate_lower_source=args.moderate_lower_source or None,
+        moderate_lower_ret252_min=args.moderate_lower_ret252_min,
+        moderate_lower_ret252_max=args.moderate_lower_ret252_max,
+        moderate_lower_exposure=args.moderate_lower_exposure,
         strong_trailing_exposure=args.strong_trailing_exposure,
         turnover_boost_reasons=parse_reason_list(args.turnover_boost_reasons),
         turnover_boost_max_turnover=args.turnover_boost_max_turnover,
@@ -274,10 +297,15 @@ def main() -> None:
         "include_expanded_sources": bool(args.include_expanded_sources),
         "moderate_positive_source": args.moderate_positive_source or None,
         "moderate_positive_ret252_min": args.moderate_positive_ret252_min,
+        "moderate_positive_exposure": args.moderate_positive_exposure,
         "moderate_low_source": args.moderate_low_source or None,
         "moderate_low_ret252_min": args.moderate_low_ret252_min,
         "moderate_low_ret252_max": args.moderate_low_ret252_max,
         "moderate_low_exposure": args.moderate_low_exposure,
+        "moderate_lower_source": args.moderate_lower_source or None,
+        "moderate_lower_ret252_min": args.moderate_lower_ret252_min,
+        "moderate_lower_ret252_max": args.moderate_lower_ret252_max,
+        "moderate_lower_exposure": args.moderate_lower_exposure,
         "strong_trailing_exposure": args.strong_trailing_exposure,
         "disable_equity_overlay": bool(args.disable_equity_overlay),
         "research_config_overrides": research_config_overrides_payload(args),
@@ -518,10 +546,15 @@ def run_annual_state_score_router(
     fallback_source: str | None = None,
     moderate_positive_source: str | None = None,
     moderate_positive_ret252_min: float = 0.20,
+    moderate_positive_exposure: float = 1.0,
     moderate_low_source: str | None = None,
     moderate_low_ret252_min: float = 0.18,
     moderate_low_ret252_max: float = 0.20,
     moderate_low_exposure: float = 1.0,
+    moderate_lower_source: str | None = None,
+    moderate_lower_ret252_min: float = 0.16,
+    moderate_lower_ret252_max: float = 0.18,
+    moderate_lower_exposure: float = 1.0,
     strong_trailing_exposure: float = 1.0,
     turnover_boost_reasons: set[str] | None = None,
     turnover_boost_max_turnover: int = 2,
@@ -541,10 +574,15 @@ def run_annual_state_score_router(
         flat_negative_exposure=flat_negative_exposure,
         moderate_positive_source=moderate_positive_source,
         moderate_positive_ret252_min=moderate_positive_ret252_min,
+        moderate_positive_exposure=moderate_positive_exposure,
         moderate_low_source=moderate_low_source,
         moderate_low_ret252_min=moderate_low_ret252_min,
         moderate_low_ret252_max=moderate_low_ret252_max,
         moderate_low_exposure=moderate_low_exposure,
+        moderate_lower_source=moderate_lower_source,
+        moderate_lower_ret252_min=moderate_lower_ret252_min,
+        moderate_lower_ret252_max=moderate_lower_ret252_max,
+        moderate_lower_exposure=moderate_lower_exposure,
         strong_trailing_exposure=strong_trailing_exposure,
     )
     route_by_year = {int(row["year"]): row for row in year_routes}
@@ -636,10 +674,15 @@ def annual_route_decisions(
     flat_negative_exposure: float,
     moderate_positive_source: str | None = None,
     moderate_positive_ret252_min: float = 0.20,
+    moderate_positive_exposure: float = 1.0,
     moderate_low_source: str | None = None,
     moderate_low_ret252_min: float = 0.18,
     moderate_low_ret252_max: float = 0.20,
     moderate_low_exposure: float = 1.0,
+    moderate_lower_source: str | None = None,
+    moderate_lower_ret252_min: float = 0.16,
+    moderate_lower_ret252_max: float = 0.18,
+    moderate_lower_exposure: float = 1.0,
     strong_trailing_exposure: float = 1.0,
 ) -> list[dict[str, Any]]:
     benchmark = pd.to_numeric(benchmark, errors="coerce").dropna().sort_index()
@@ -664,10 +707,15 @@ def annual_route_decisions(
                 route,
                 moderate_positive_source=moderate_positive_source,
                 moderate_positive_ret252_min=moderate_positive_ret252_min,
+                moderate_positive_exposure=moderate_positive_exposure,
                 moderate_low_source=moderate_low_source,
                 moderate_low_ret252_min=moderate_low_ret252_min,
                 moderate_low_ret252_max=moderate_low_ret252_max,
                 moderate_low_exposure=moderate_low_exposure,
+                moderate_lower_source=moderate_lower_source,
+                moderate_lower_ret252_min=moderate_lower_ret252_min,
+                moderate_lower_ret252_max=moderate_lower_ret252_max,
+                moderate_lower_exposure=moderate_lower_exposure,
                 strong_trailing_exposure=strong_trailing_exposure,
             )
         )
@@ -679,16 +727,32 @@ def adjust_route_decision(
     *,
     moderate_positive_source: str | None,
     moderate_positive_ret252_min: float,
+    moderate_positive_exposure: float = 1.0,
     moderate_low_source: str | None = None,
     moderate_low_ret252_min: float = 0.18,
     moderate_low_ret252_max: float = 0.20,
     moderate_low_exposure: float = 1.0,
+    moderate_lower_source: str | None = None,
+    moderate_lower_ret252_min: float = 0.16,
+    moderate_lower_ret252_max: float = 0.18,
+    moderate_lower_exposure: float = 1.0,
     strong_trailing_exposure: float = 1.0,
 ) -> dict[str, Any]:
     result = dict(route)
     if result.get("reason") == "strong_trailing_market":
         result["exposure"] = float(result.get("exposure", 1.0)) * float(strong_trailing_exposure)
     ret252 = pd.to_numeric(pd.Series([result.get("ret252")]), errors="coerce").iloc[0]
+    if (
+        moderate_lower_source
+        and result.get("reason") == "default_beta"
+        and pd.notna(ret252)
+        and float(ret252) >= float(moderate_lower_ret252_min)
+        and float(ret252) < float(moderate_lower_ret252_max)
+    ):
+        result["source"] = moderate_lower_source
+        result["reason"] = f"moderate_lower_{moderate_lower_source}"
+        result["exposure"] = float(result.get("exposure", 1.0)) * float(moderate_lower_exposure)
+        return result
     if (
         moderate_low_source
         and result.get("reason") == "default_beta"
@@ -708,6 +772,7 @@ def adjust_route_decision(
     ):
         result["source"] = moderate_positive_source
         result["reason"] = f"moderate_positive_{moderate_positive_source}"
+        result["exposure"] = float(result.get("exposure", 1.0)) * float(moderate_positive_exposure)
     return result
 
 
@@ -737,6 +802,21 @@ def routed_backtest_config(
         ),
         "exposure_schedule": exposure_schedule_from_year_routes(routed.year_routes),
     }
+    router_cfg = config.get("annual_state_router", {}) if isinstance(config.get("annual_state_router", {}), dict) else {}
+    strategy_cfg = config.get("strategy", {}) if isinstance(config.get("strategy", {}), dict) else {}
+    min_position_reasons = parse_reason_list(
+        strategy_cfg.get("risk_exit_min_positions_reasons")
+        or router_cfg.get("risk_exit_min_positions_reasons")
+        or []
+    )
+    min_positions = strategy_cfg.get("risk_exit_min_positions", router_cfg.get("risk_exit_min_positions"))
+    if min_positions is not None and min_position_reasons:
+        bt_config["risk_exit_min_positions"] = 0
+        bt_config["risk_exit_min_positions_schedule"] = risk_exit_min_positions_schedule_from_routes(
+            routed.score_routes,
+            min_positions=int(min_positions),
+            reasons=min_position_reasons,
+        )
     if use_defensive_timing:
         from src.market_regime import apply_defensive_timing_to_backtest_config
 
@@ -779,6 +859,21 @@ def exposure_schedule_from_year_routes(year_routes: pd.DataFrame) -> dict[str, f
         str(row["decision_date"]): float(row["exposure"])
         for _, row in year_routes.sort_values("decision_date").iterrows()
     }
+
+
+def risk_exit_min_positions_schedule_from_routes(
+    routes: pd.DataFrame,
+    *,
+    min_positions: int,
+    reasons: set[str],
+) -> dict[str, int]:
+    if routes.empty or min_positions <= 0 or not reasons:
+        return {}
+    result: dict[str, int] = {}
+    for _, row in routes.sort_values("date").iterrows():
+        if str(row.get("reason", "")) in reasons:
+            result[str(row["date"])] = int(min_positions)
+    return result
 
 
 def full_gate_summary(
