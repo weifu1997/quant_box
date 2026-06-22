@@ -108,3 +108,36 @@ Added route-specific annual router research controls, validated 2018 selector tu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Validate annual router candidate-only auto signal
+
+**Date**: 2026-06-23
+**Task**: Validate annual router candidate-only auto signal
+**Branch**: `main`
+
+### Summary
+
+Added candidate-only auto-signal validation, verified candidate/official output boundaries, documented the annual router validation result, and archived the completed Trellis task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5585d15` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
