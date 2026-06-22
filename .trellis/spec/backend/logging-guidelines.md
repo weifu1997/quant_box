@@ -82,7 +82,7 @@ When adding a new long-running workflow, write a status artifact that records st
 
 #### 2. Signatures
 
-- Command: `scripts/run_auto_signal.py [--allow-low-quality] [--force-official]`.
+- Command: `scripts/run_auto_signal.py [--allow-low-quality] [--force-official] [--candidate-only]`.
 - Status artifact: `outputs/auto_run_status.json`.
 - Report artifact: `outputs/auto_signal_report.json`.
 - Human confirmation artifact: `outputs/order_confirmations/order_confirmation_candidate_<DATE>.csv`.
@@ -93,6 +93,7 @@ When adding a new long-running workflow, write a status artifact that records st
 - `quality_warnings` records all failed quality checks.
 - When low-quality continuation leaves no harder block reason, copy the quality warnings into `block_reasons` for status, report, manual orders, and confirmation templates.
 - `--force-official` may produce official outputs with warnings only when there are no hard block reasons; the warnings must remain visible in `quality_warnings`.
+- `--candidate-only` forces candidate outputs even when every gate passes: `is_executable` becomes `false`, official `signal_<DATE>.csv`/`latest_holdings.csv` are never written, no promotion occurs, and `block_reasons` records `candidate_only_requested`. The flag is a hold, not a gate failure, so `quality_warnings` stays as-is (it does not record `candidate_only_requested`).
 
 #### 4. Validation & Error Matrix
 
@@ -102,6 +103,8 @@ When adding a new long-running workflow, write a status artifact that records st
 | Quality gates fail, `--allow-low-quality` is present, and `--force-official` is absent | Candidate outputs; `block_reasons` mirrors `quality_warnings` |
 | Quality gates fail, `--allow-low-quality --force-official` are present, and no hard gate fails | Official outputs; `quality_warnings` records the failed gates |
 | Account/data/governance hard gate fails | Candidate outputs; hard reasons remain in `block_reasons` |
+| `--candidate-only` is present and every gate passes | Candidate outputs only; `is_executable=false`, no official/promotion writes, `block_reasons=["candidate_only_requested"]` |
+| `--candidate-only --promote-candidate <DATE>` are combined | CLI argument error; candidate-only validation must not promote candidate artifacts |
 
 #### 5. Good/Base/Bad Cases
 
@@ -112,6 +115,7 @@ When adding a new long-running workflow, write a status artifact that records st
 #### 6. Tests Required
 
 - `tests/test_run_auto_signal.py` must assert low-quality candidate runs do not overwrite official outputs and still write non-empty `block_reasons`.
+- `tests/test_run_auto_signal.py` must assert `--candidate-only` holds outputs as candidate even when every gate passes, leaves official signal/holdings untouched, and records `candidate_only_requested`.
 - Monitoring tests should continue to count `block_reasons` from `outputs/auto_run_status.json`.
 
 #### 7. Wrong vs Correct

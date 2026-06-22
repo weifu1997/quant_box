@@ -272,6 +272,7 @@ universe_builder:
 - 如果任一门槛不通过，只输出 `candidate_signal_*.csv` 和 `manual_orders_candidate_*.csv`，不会覆盖 `outputs/latest_holdings.csv`
 - 如果门槛全部通过，输出正式 `signal_*.csv`、`manual_orders_*.csv` 和 `latest_holdings.csv`
 - `--allow-low-quality` 只允许流程继续生成候选结果；如确需在低质量门槛下覆盖正式文件，必须同时传 `--force-official`
+- `--candidate-only` 用于验证运行：即使所有门槛通过也只写候选输出，不覆盖正式信号/最新持仓，且不能和 `--promote-candidate` 同时使用
 - 缺少或校验失败的 `config/account.yaml` / `config/current_holdings.csv` 会阻止正式输出，并在交易单备注中列出原因
 
 可选账户与真实持仓文件：

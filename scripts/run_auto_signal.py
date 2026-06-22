@@ -975,6 +975,10 @@ def _run_signal_stage(
     is_executable = not quality_warnings or allowed_with_warnings
     if not is_executable and not block_reasons:
         block_reasons = list(quality_warnings)
+    if getattr(args, "candidate_only", False):
+        is_executable = False
+        if "candidate_only_requested" not in block_reasons:
+            block_reasons.append("candidate_only_requested")
 
     failure_analysis: dict[str, Any] = {"enabled": False, "issues": ["backtest_skipped"] if args.skip_backtest else []}
     failure_files: dict[str, str] = {}
@@ -1134,6 +1138,7 @@ def _write_auto_report_stage(
         "allow_low_quality": bool(args.allow_low_quality),
         "allow_unhealthy": bool(args.allow_unhealthy),
         "force_official": bool(args.force_official),
+        "candidate_only": bool(getattr(args, "candidate_only", False)),
         "skip_optimize": bool(args.skip_optimize),
         "skip_backtest": bool(args.skip_backtest),
         "validation_windows": int(len(validation)),
@@ -1202,6 +1207,11 @@ def main() -> None:
     parser.add_argument("--allow-unhealthy", action="store_true", help="Continue even if data health checks fail.")
     parser.add_argument("--allow-low-quality", action="store_true", help="Continue and write candidate outputs even if quality gates fail.")
     parser.add_argument("--force-official", action="store_true", help="Write official outputs despite allowed quality warnings.")
+    parser.add_argument(
+        "--candidate-only",
+        action="store_true",
+        help="Hold outputs as candidate even when every gate passes; never write official signal/holdings or promote.",
+    )
     parser.add_argument("--no-archive", action="store_true", help="Do not copy run artifacts into outputs/history.")
     parser.add_argument(
         "--promote-candidate",
@@ -1252,6 +1262,8 @@ def main() -> None:
         help="Maximum parameter combinations allowed per validation window. Omit to disable.",
     )
     args = parser.parse_args()
+    if args.candidate_only and args.promote_candidate:
+        parser.error("--candidate-only cannot be combined with --promote-candidate.")
 
     config = deepcopy(base_config)
     out_dir = resolve_path(config["outputs"].get("dir", "outputs"))

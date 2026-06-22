@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `run_auto_signal.py --candidate-only` for safe validation runs that never promote or overwrite official signal artifacts.
 - Made historical-universe builds fail on index fetch errors by default, required enabled historical-universe files by default, and added source-level governance coverage checks.
 - Added optimizer timeout controls with partial validation outputs for automatic signal runs.
 - Added stricter daily OHLCV validation before normalized market data enters factor and backtest pipelines.

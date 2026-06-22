@@ -455,6 +455,94 @@ class RunAutoSignalTests(unittest.TestCase):
             latest_frame = pd.read_csv(latest)
             self.assertEqual(latest_frame["instrument"].tolist(), ["E"])
 
+    def test_candidate_only_holds_outputs_when_every_gate_passes(self) -> None:
+        """函数说明：验证 --candidate-only 在全部门槛通过时仍只写候选输出且不覆盖正式持仓。"""
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, factors = _auto_config_and_factors(root)
+            latest = root / "latest_holdings.csv"
+            latest.write_text("instrument\nOLD.SZ\n", encoding="utf-8")
+            (root / "current_holdings.csv").write_text("instrument,shares\n", encoding="utf-8")
+            years_path = root / "validated_years.csv"
+            pd.DataFrame(
+                [
+                    {"year": 2022, "annual_return": 0.22, "max_drawdown": -0.10},
+                    {"year": 2023, "annual_return": 0.24, "max_drawdown": -0.12},
+                    {"year": 2024, "annual_return": 0.21, "max_drawdown": -0.18},
+                ]
+            ).to_csv(years_path, index=False)
+            summary_path = root / "validated_summary.csv"
+            pd.DataFrame(
+                [
+                    {
+                        "candidate": "validated_candidate",
+                        "annual_return": 0.21,
+                        "sharpe": 1.1,
+                        "max_drawdown": -0.18,
+                        "annual_turnover": 5.0,
+                        "annual_trade_cost_ratio": 0.02,
+                        "is_acceptable": True,
+                        "years_path": str(years_path),
+                    }
+                ]
+            ).to_csv(summary_path, index=False)
+            config["validated_strategy"] = {
+                "enabled": True,
+                "candidate": "validated_candidate",
+                "summary_file": str(summary_path),
+                "require_is_acceptable": True,
+            }
+            config["quality"] = {
+                "min_validation_windows": 3,
+                "min_positive_return_rate": 0.5,
+                "min_optimizer_annual_return": 0.20,
+                "max_drawdown_limit": -0.20,
+                "min_backtest_annual_return": 0.20,
+                "max_backtest_drawdown_limit": -0.20,
+                "max_annual_turnover": 20.0,
+                "max_annual_trade_cost_ratio": 0.2,
+            }
+            good_result = module.BacktestResult(
+                equity_curve=pd.Series(
+                    [100000.0, 130000.0],
+                    index=pd.to_datetime(["2024-01-03", "2024-01-04"]),
+                    name="equity",
+                ),
+                holdings=pd.DataFrame([{"date": "2024-01-04", "instrument": "E", "value": 100000.0}]),
+                trades=pd.DataFrame(),
+                metrics={"annual_return": 0.30, "max_drawdown": -0.10, "calmar": 3.0},
+            )
+
+            argv = [
+                "run_auto_signal.py",
+                "--skip-update",
+                "--skip-convert",
+                "--skip-optimize",
+                "--candidate-only",
+                "--no-archive",
+            ]
+            with _patched_auto_run(module, config, factors, argv), patch.object(
+                module, "run_backtest", return_value=good_result
+            ):
+                module.main()
+
+            self.assertTrue((root / "candidate_signal_2024-01-03.csv").exists())
+            self.assertTrue((root / "manual_orders_candidate_2024-01-03.csv").exists())
+            self.assertFalse((root / "signal_2024-01-03.csv").exists())
+            self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")
+            status = json.loads((root / "auto_run_status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["status"], "blocked")
+            self.assertFalse(status["is_executable"])
+            self.assertIn("candidate_only_requested", status["block_reasons"])
+            self.assertNotIn("candidate_only_requested", status["quality_warnings"])
+            report = json.loads((root / "auto_signal_report.json").read_text(encoding="utf-8"))
+            self.assertTrue(report["candidate_only"])
+            self.assertFalse(report["is_executable"])
+            self.assertNotIn("candidate_only_requested", report["quality_warnings"])
+            quality = json.loads((root / "auto_parameter_quality.json").read_text(encoding="utf-8"))
+            self.assertTrue(quality["is_acceptable"])
+
     def test_update_partial_stage_is_not_marked_complete(self) -> None:
         """函数说明：验证 test_update_partial_stage_is_not_marked_complete 覆盖的行为场景。"""
         module = importlib.import_module("scripts.run_auto_signal")
@@ -803,6 +891,34 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertTrue((root / "signal_2024-01-03.csv").exists())
             latest_frame = pd.read_csv(latest)
             self.assertEqual(latest_frame["instrument"].tolist(), ["E"])
+
+    def test_candidate_only_cannot_promote_candidate(self) -> None:
+        """函数说明：验证 --candidate-only 不能和 --promote-candidate 同时使用。"""
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            latest = root / "latest_holdings.csv"
+            latest.write_text("instrument\nOLD.SZ\n", encoding="utf-8")
+            pd.DataFrame([{"date": "2024-01-03", "instrument": "E", "action": "BUY"}]).to_csv(
+                root / "candidate_signal_2024-01-03.csv",
+                index=False,
+            )
+            pd.DataFrame({"instrument": ["E"]}).to_csv(root / "candidate_holdings_2024-01-03.csv", index=False)
+            config = {
+                "outputs": {"dir": str(root), "holdings_file": str(latest)},
+                "data": {"start_date": "2024-01-01", "end_date": "2024-01-03"},
+            }
+
+            with patch.object(
+                sys,
+                "argv",
+                ["run_auto_signal.py", "--candidate-only", "--promote-candidate", "2024-01-03"],
+            ), patch("scripts.run_auto_signal.load_config", return_value=config):
+                with self.assertRaises(SystemExit):
+                    module.main()
+
+            self.assertFalse((root / "signal_2024-01-03.csv").exists())
+            self.assertEqual(latest.read_text(encoding="utf-8"), "instrument\nOLD.SZ\n")
 
 
 def _auto_config_and_factors(root: Path) -> tuple[dict, pd.DataFrame]:

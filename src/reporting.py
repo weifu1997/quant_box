@@ -60,6 +60,7 @@ def _render_report(report: dict[str, Any]) -> str:
         f"- Allow low quality: {report.get('allow_low_quality', False)}",
         f"- Allow unhealthy: {report.get('allow_unhealthy', False)}",
         f"- Force official: {report.get('force_official', False)}",
+        f"- Candidate only: {report.get('candidate_only', False)}",
     ]
     if block_reasons:
         lines.append(f"- Block reasons: {', '.join(map(str, block_reasons))}")
