@@ -11,3 +11,5 @@ a-trade-calendar>=2028.4.11.1
 protobuf<4
 setuptools>=68,<70
 pytest>=8.0
+fastapi>=0.110
+uvicorn>=0.27

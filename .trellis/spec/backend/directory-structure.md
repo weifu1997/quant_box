@@ -6,12 +6,13 @@
 
 ## Overview
 
-`quant_box` is a single-repo Python project. There is no web API layer and no package split. Core reusable logic lives in `src/`, command-line entry points live in `scripts/`, Windows one-click wrappers live as numbered `.bat` files in the repo root, and tests mirror behavior under `tests/`.
+`quant_box` is a single-repo Python project with a small local web API for read-only dashboard review and no package split. Core reusable logic lives in `src/`, command-line entry points live in `scripts/`, the React/Vite dashboard lives in `web/`, Windows one-click wrappers live as numbered `.bat` files in the repo root, and tests mirror behavior under `tests/`.
 
 The project is a local data pipeline for manual trading decisions. Most changes should preserve this separation:
 
 - `src/` contains importable business logic, data normalization, scoring, risk, backtest, reporting, and file writers.
 - `scripts/` contains thin orchestration and CLI parsing around `src/` modules.
+- `web/` contains the local React/Vite dashboard frontend; generated `web/node_modules/` and `web/dist/` stay ignored.
 - `config/` contains committed defaults and examples only.
 - `data/` and `outputs/` contain local generated caches and reports; they are ignored except `.gitkeep` files and committed test fixtures.
 - `tests/fixtures/data_snapshot/` is the deterministic committed market-data slice used by tests.
@@ -42,6 +43,9 @@ quant_box/
     run_*.py                  CLI orchestration scripts
     check_tushare_config.py   safe local config check
     benchmark_scoring.py      lightweight performance probe
+  web/
+    package.json              React/Vite dashboard frontend
+    src/                      dashboard components, API client, styles
   tests/
     test_<module>.py          unit/regression tests
     fixtures/real_data.py     real-data fixture loader
@@ -157,6 +161,82 @@ if looks_like_field_table(price_df.columns):
 4. Keep generated files under `data/` or `outputs/`, not beside source files.
 5. Add focused tests under `tests/`, using `TemporaryDirectory` and patching `load_config`/`resolve_path` when filesystem isolation matters.
 6. Update `README.md`, `.bat` wrappers, and `tests/test_scripts_docs.py` for user-visible workflow changes.
+
+---
+
+## Scenario: Local Web Dashboard
+
+### 1. Scope / Trigger
+
+- Trigger: the project exposes local auto-signal review artifacts through a read-only web dashboard.
+- Owners: `src/dashboard.py` builds the view model, `src/dashboard_api.py` exposes FastAPI routes, `scripts/run_dashboard.py` starts the backend, and `web/` owns the React/Vite UI.
+
+### 2. Signatures
+
+- Command: `.\.venv\Scripts\python.exe scripts\run_dashboard.py [--host 127.0.0.1] [--port 8000] [--reload]`.
+- API: `GET /api/health -> {"status": "ok"}`.
+- API: `GET /api/dashboard/latest -> DashboardSnapshot`.
+- API: `GET /api/dashboard/artifacts/{artifact_id} -> FileResponse` for downloadable artifacts under the configured output directory.
+- Frontend dev command: `cd web && npm run dev`, with Vite proxying `/api` to `http://127.0.0.1:8000`.
+
+### 3. Contracts
+
+- The dashboard MVP is read-only. It must not start auto-signal runs, edit configs, promote candidate signals, apply fills, or update holdings.
+- The backend reads only the latest/current artifacts from `outputs.dir`, especially `auto_signal_report.json`, `auto_run_status.json`, `daily_signal_report.md`, and CSV/JSON paths referenced by the latest report.
+- Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
+- `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
+- Artifact download routes must be constrained to files inside the resolved output directory.
+- Frontend source belongs under `web/src/`; generated `web/node_modules/` and `web/dist/` stay ignored.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| `auto_signal_report.json` is missing | `readiness.status="missing"` and UI shows an empty state |
+| `auto_signal_report.json` is malformed | `readiness.status="error"` and `errors[]` records the JSON read failure |
+| Manual-order CSV is missing | `orders.exists=false`; the UI renders a non-crashing empty state |
+| A gate artifact is missing | Gate status is `missing`, not `pass` |
+| Artifact id is unknown or outside `outputs.dir` | `GET /api/dashboard/artifacts/{artifact_id}` returns 404 |
+| Vite dev dependencies have known moderate-or-higher advisories | Upgrade the frontend toolchain or document why the advisory is not applicable before finishing |
+
+### 5. Good/Base/Bad Cases
+
+- Good: latest report exists, manual orders exist, and dashboard shows a readiness verdict, gate cards, blockers, order preview, and artifact links.
+- Base: no latest report exists yet; dashboard still starts and tells the user the latest report is missing.
+- Bad: frontend reads raw files directly from the browser or the backend exposes an arbitrary file path download endpoint.
+
+### 6. Tests Required
+
+- Unit test dashboard view model with present latest report and manual-order CSV.
+- Unit test missing `auto_signal_report.json` returns `readiness.status="missing"`.
+- Unit test malformed report JSON returns `readiness.status="error"`.
+- Run `npm run build` for React/Vite type-check and production build validation.
+- Run `npm audit --audit-level=moderate` after adding or changing frontend dependencies.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+@app.get("/files/{path:path}")
+def read_file(path: str):
+    return FileResponse(path)
+```
+
+This turns the local dashboard into arbitrary filesystem access.
+
+#### Correct
+
+```python
+@app.get("/api/dashboard/artifacts/{artifact_id}")
+def dashboard_artifact(artifact_id: str):
+    path = resolve_dashboard_artifact(artifact_id)
+    if path is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path)
+```
+
+The resolver maps known artifact ids from the latest dashboard snapshot and constrains them to `outputs.dir`.
 
 ---
 

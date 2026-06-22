@@ -1,0 +1,69 @@
+"""FastAPI app for the local read-only signal review dashboard."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from src.config_loader import PROJECT_ROOT
+from src.dashboard import build_dashboard_snapshot, resolve_dashboard_artifact
+
+
+def create_dashboard_app() -> FastAPI:
+    """Create the local dashboard API app."""
+    app = FastAPI(title="quant_box dashboard", version="1")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=False,
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/api/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/api/dashboard/latest")
+    def latest_dashboard() -> dict:
+        return build_dashboard_snapshot()
+
+    @app.get("/api/dashboard/artifacts/{artifact_id}")
+    def dashboard_artifact(artifact_id: str) -> FileResponse:
+        path = resolve_dashboard_artifact(artifact_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Artifact not found or not downloadable.")
+        return FileResponse(path, media_type=_media_type(path), filename=path.name)
+
+    static_dir = PROJECT_ROOT / "web" / "dist"
+    if static_dir.exists():
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="dashboard")
+    else:
+
+        @app.get("/")
+        def root() -> dict[str, str]:
+            return {
+                "name": "quant_box dashboard",
+                "message": "Start the Vite dev server or build web/dist to view the dashboard UI.",
+            }
+
+    return app
+
+
+def _media_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return "application/json"
+    if suffix == ".csv":
+        return "text/csv"
+    if suffix in {".md", ".markdown"}:
+        return "text/markdown"
+    return "application/octet-stream"
+
+
+app = create_dashboard_app()
+

@@ -62,6 +62,26 @@ python -m venv .venv
 
 如果 `python` 命令不可用，脚本会自动尝试 `py -3`。
 
+## 本地 Web 仪表盘
+
+Web 仪表盘是只读的本地复核控制台，用来查看最新一次自动信号运行是否可以进入人工交易复核。它只读取 `outputs/` 下已有产物，不会运行流水线、修改配置、推广候选信号、应用成交回填或更新持仓。
+
+启动后端：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_dashboard.py
+```
+
+另开一个终端启动前端：
+
+```powershell
+cd web
+npm install
+npm run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173`。前端会把 `/api` 请求代理到 `http://127.0.0.1:8000` 的 FastAPI 后端。
+
 ## 配置 Tushare 代理
 
 不要把真实 URL 和 token 写进 `config/settings.yaml` 后提交。建议新建：
