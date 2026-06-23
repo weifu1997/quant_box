@@ -372,16 +372,24 @@ h3 {
   word-break: break-word;
 }
 
-.issue-list-danger li {
+.issue-list-danger li,
+.issue-item-danger {
   border: 1px solid rgba(209, 36, 47, 0.18);
   background: rgba(209, 36, 47, 0.06);
   color: #7a1f27;
 }
 
-.issue-list-warning li {
+.issue-list-warning li,
+.issue-list .issue-item-warning {
   border: 1px solid rgba(183, 121, 31, 0.22);
   background: rgba(183, 121, 31, 0.08);
   color: #7c4d10;
+}
+
+.issue-list .issue-item-hold {
+  border: 1px solid rgba(0, 122, 255, 0.2);
+  background: rgba(0, 122, 255, 0.07);
+  color: #07559f;
 }
 
 .quality-panel {

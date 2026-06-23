@@ -66,6 +66,14 @@ python -m venv .venv
 
 Web 仪表盘是只读的本地复核控制台，用来查看最新一次自动信号运行是否可以进入人工交易复核。它只读取 `outputs/` 下已有产物，不会运行流水线、修改配置、推广候选信号、应用成交回填或更新持仓。
 
+日常使用可以直接双击：
+
+```text
+15_启动Web仪表盘.bat
+```
+
+脚本会启动 FastAPI 后端和 React/Vite 前端，检查 `http://127.0.0.1:8000/api/health` 与 `http://127.0.0.1:5173` 可访问，然后打开浏览器。若 `web/node_modules` 不存在，会先在 `web/` 下执行 `npm install`。
+
 启动后端：
 
 ```powershell
@@ -135,6 +143,7 @@ setx TUSHARE_TOKEN "你的token"
 | `12_全量重刷股票数据.bat` | 维护工具：从配置起始日或上市日全量重刷 raw 股票数据，慢于 `04`，仅在历史数据疑似损坏时使用 |
 | `13_一键补齐历史数据_无人值守.bat` | 无人值守工具：分批补齐 2012 年以来 raw 日线，转换数据，补齐 daily_basic，并可重算 Alpha158 因子 |
 | `14_构建历史股票池.bat` | 分步工具：用 Tushare `index_weight` 构建沪深300 + 中证500 + 中证1000权重前300的历史股票池快照 |
+| `15_启动Web仪表盘.bat` | 本地复核控制台入口：启动 FastAPI 后端和 React/Vite 前端，并打开 Web 仪表盘 |
 | `scripts/run_update_point_in_time_data.py` | 命令行工具：补齐 daily_basic、HS300 指数成分权重和 ST 历史日历，并重写点时数据治理报告 |
 | `scripts/run_update_fundamentals.py` | 命令行工具：补齐 fina_indicator 和 dividend 基本面缓存，用于质量、分红和负债筛选 |
 | `scripts/run_fundamental_screen.py` | 命令行工具：生成基本面筛选 CSV 和 Markdown 解释报告 |
@@ -147,6 +156,7 @@ setx TUSHARE_TOKEN "你的token"
 03_运行测试.bat                只跑自动化测试
 13_一键补齐历史数据_无人值守.bat  下班后无人值守补齐长周期历史数据
 14_构建历史股票池.bat          生成点时历史股票池快照
+15_启动Web仪表盘.bat           打开每日信号复核控制台
 run_all.bat                    自动全流程：刷新缺失和过期数据 + data health + 回测 + 候选信号
 04 -> 06 -> 07 -> 08 -> 09 -> 10  完整研究流程
 ```

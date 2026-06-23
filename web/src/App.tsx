@@ -361,7 +361,9 @@ function IssueList({ items, empty, tone }: { items: string[]; empty: string; ton
   return (
     <ul className={`issue-list issue-list-${tone}`}>
       {items.map((item) => (
-        <li key={item}>{translateReason(item)}</li>
+        <li className={`issue-item-${issueTone(item, tone)}`} key={item}>
+          {translateReason(item)}
+        </li>
       ))}
     </ul>
   );
@@ -532,6 +534,17 @@ function translateReason(reason: string) {
     return `${prefix}已启用候选输出模式，本次不会生成或覆盖正式交易信号。`;
   }
   return trimmed;
+}
+
+function issueTone(reason: string, fallback: "danger" | "warning") {
+  const text = reason.trim();
+  if (text.includes("candidate_only_requested")) {
+    return "hold";
+  }
+  if (text.includes("daily_basic_date_coverage_below_required")) {
+    return "warning";
+  }
+  return fallback;
 }
 
 function reasonMeta(reason: string) {

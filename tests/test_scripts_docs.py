@@ -74,6 +74,17 @@ class ScriptsDocsTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("Start and inspect long-running auto signal jobs", proc.stdout)
 
+    def test_dashboard_bat_starts_backend_and_frontend(self) -> None:
+        """函数说明：验证 Web 仪表盘一键启动脚本覆盖前后端入口。"""
+        dashboard = (ROOT / "15_启动Web仪表盘.bat").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("scripts\\run_dashboard.py", dashboard)
+        self.assertIn("npm run dev", dashboard)
+        self.assertIn("http://127.0.0.1:8000/api/health", dashboard)
+        self.assertIn("http://127.0.0.1:5173", dashboard)
+        self.assertIn("15_启动Web仪表盘.bat", readme)
+
     def test_convert_data_help_does_not_start_conversion(self) -> None:
         """函数说明：验证 test_convert_data_help_does_not_start_conversion 覆盖的行为场景。"""
         proc = subprocess.run(

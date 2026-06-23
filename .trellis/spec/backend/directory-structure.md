@@ -174,6 +174,7 @@ if looks_like_field_table(price_df.columns):
 ### 2. Signatures
 
 - Command: `.\.venv\Scripts\python.exe scripts\run_dashboard.py [--host 127.0.0.1] [--port 8000] [--reload]`.
+- Batch wrapper: `15_启动Web仪表盘.bat` starts the FastAPI backend and React/Vite frontend, waits for `http://127.0.0.1:8000/api/health` and `http://127.0.0.1:5173`, then opens the dashboard URL.
 - API: `GET /api/health -> {"status": "ok"}`.
 - API: `GET /api/dashboard/latest -> DashboardSnapshot`.
 - API: `GET /api/dashboard/artifacts/{artifact_id} -> FileResponse` for downloadable artifacts under the configured output directory.
@@ -210,6 +211,7 @@ if looks_like_field_table(price_df.columns):
 - Unit test dashboard view model with present latest report and manual-order CSV.
 - Unit test missing `auto_signal_report.json` returns `readiness.status="missing"`.
 - Unit test malformed report JSON returns `readiness.status="error"`.
+- Script/docs test asserts `15_启动Web仪表盘.bat` is documented and starts the documented backend and frontend commands.
 - Run `npm run build` for React/Vite type-check and production build validation.
 - Run `npm audit --audit-level=moderate` after adding or changing frontend dependencies.
 
