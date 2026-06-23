@@ -179,6 +179,7 @@ if looks_like_field_table(price_df.columns):
 - API: `GET /api/dashboard/latest -> DashboardSnapshot`.
 - API: `GET /api/dashboard/jobs -> {"jobs": DashboardJob[], "active_job": DashboardJob|null}`.
 - API: `POST /api/dashboard/jobs` with JSON `{"action": "repair_point_in_time"}` or `{"action": "run_auto_signal", "mode": "candidate"|"normal"} -> {"job": DashboardJob}`.
+- API: `POST /api/dashboard/jobs/{job_id}/stop -> {"job": DashboardJob}` stops a running dashboard job and its child process tree.
 - API: `GET /api/dashboard/artifacts/{artifact_id} -> FileResponse` for downloadable artifacts under the configured output directory.
 - Frontend dev command: `cd web && npm run dev`, with Vite proxying `/api` to `http://127.0.0.1:8000`.
 
@@ -190,6 +191,7 @@ if looks_like_field_table(price_df.columns):
   - `run_auto_signal` with `mode="normal"`: runs `scripts/run_auto_signal.py --no-archive` and must not add `--candidate-only` or `--force-official`.
 - Dashboard actions must not expose arbitrary command execution, edit configs, promote candidate signals, apply fills, or directly update holdings.
 - Only one dashboard background job may run at a time. Job status JSON lives under `outputs/dashboard_jobs/`; logs live under `outputs/logs/dashboard_job_*.log`.
+- Dashboard job stop is a controlled action, not arbitrary process management. It may only target a recorded dashboard job whose status is `running` or `stopping`; successful user stops end as `status="cancelled"`.
 - The backend reads only the latest/current artifacts from `outputs.dir`, especially `auto_signal_report.json`, `auto_run_status.json`, `daily_signal_report.md`, and CSV/JSON paths referenced by the latest report.
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
 - `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
@@ -211,6 +213,8 @@ if looks_like_field_table(price_df.columns):
 | Dashboard job action is unknown | `POST /api/dashboard/jobs` returns 400 |
 | Dashboard job mode is not `candidate` or `normal` | `POST /api/dashboard/jobs` returns 400 |
 | A dashboard job is already running | `POST /api/dashboard/jobs` returns 409 |
+| A dashboard job is stopped by the user | The process tree is terminated, the job becomes `cancelled`, and logs remain visible |
+| A dashboard job stop targets a completed job | `POST /api/dashboard/jobs/{job_id}/stop` returns 409 |
 | A prior `running` job has no live process after service restart | The job is marked `stale`, the UI unlocks controls, and the log remains visible |
 | Vite dev dependencies have known moderate-or-higher advisories | Upgrade the frontend toolchain or document why the advisory is not applicable before finishing |
 
@@ -218,6 +222,7 @@ if looks_like_field_table(price_df.columns):
 
 - Good: latest report exists, manual orders exist, and dashboard shows a readiness verdict, gate cards, blockers, order preview, and artifact links.
 - Good: dashboard repair/rerun buttons start a whitelisted job, show a live log tail, and refresh the latest report when the job completes.
+- Good: while a dashboard job is running, the UI shows a stop button that calls the backend stop route and then displays `cancelled`.
 - Good: after dashboard-triggered `daily_basic` repair, the governance gate stops showing the stale embedded `daily_basic_date_coverage_below_required` issue and instead shows a rerun-needed freshness note.
 - Base: no latest report exists yet; dashboard still starts and tells the user the latest report is missing.
 - Bad: frontend marks a data issue fixed without starting the backend repair command.
@@ -234,6 +239,7 @@ if looks_like_field_table(price_df.columns):
 - Unit test that a newer standalone `data_governance_report.json` supersedes stale embedded auto-report governance, filters resolved stale block reasons, and emits `freshness_notes`.
 - API test that `GET /api/dashboard/jobs` reports a running active job.
 - API test that invalid dashboard jobs return 400 and already-running jobs return 409 when covered.
+- API/control test that a running dashboard job can be stopped and is reported as `cancelled`.
 - Script/docs test asserts `15_启动Web仪表盘.bat` is documented and starts the documented backend and frontend commands.
 - Run `npm run build` for React/Vite type-check and production build validation.
 - Run `npm audit --audit-level=moderate` after adding or changing frontend dependencies.

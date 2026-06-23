@@ -14,9 +14,12 @@ from src.config_loader import PROJECT_ROOT
 from src.dashboard import build_dashboard_snapshot, resolve_dashboard_artifact
 from src.dashboard_control import (
     DashboardJobConflictError,
+    DashboardJobNotFoundError,
     DashboardJobStartError,
+    DashboardJobStopError,
     list_dashboard_jobs,
     start_dashboard_job,
+    stop_dashboard_job,
 )
 
 
@@ -42,7 +45,7 @@ def create_dashboard_app() -> FastAPI:
     @app.get("/api/dashboard/jobs")
     def dashboard_jobs() -> dict[str, Any]:
         jobs = list_dashboard_jobs()
-        active = next((job for job in jobs if job.get("status") == "running"), None)
+        active = next((job for job in jobs if job.get("status") in {"running", "stopping"}), None)
         return {"jobs": jobs, "active_job": active}
 
     @app.post("/api/dashboard/jobs")
@@ -57,6 +60,16 @@ def create_dashboard_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"job": job}
+
+    @app.post("/api/dashboard/jobs/{job_id}/stop")
+    def stop_dashboard_job_api(job_id: str) -> dict[str, Any]:
+        try:
+            job = stop_dashboard_job(job_id)
+        except DashboardJobNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except DashboardJobStopError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"job": job}
 
     @app.get("/api/dashboard/artifacts/{artifact_id}")

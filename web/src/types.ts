@@ -80,7 +80,7 @@ export interface DashboardSnapshot {
 
 export type DashboardJobAction = "repair_point_in_time" | "run_auto_signal";
 export type DashboardRunMode = "candidate" | "normal";
-export type DashboardJobStatus = "running" | "succeeded" | "failed" | "stale";
+export type DashboardJobStatus = "running" | "stopping" | "succeeded" | "failed" | "stale" | "cancelled";
 
 export interface DashboardJob {
   version: number;

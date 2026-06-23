@@ -37,6 +37,18 @@ export async function startDashboardJob(
   return body.job;
 }
 
+export async function stopDashboardJob(id: string, signal?: AbortSignal): Promise<DashboardJob> {
+  const response = await fetch(`/api/dashboard/jobs/${encodeURIComponent(id)}/stop`, {
+    method: "POST",
+    signal
+  });
+  if (!response.ok) {
+    throw new Error(await responseError(response, "任务停止失败"));
+  }
+  const body = (await response.json()) as { job: DashboardJob };
+  return body.job;
+}
+
 async function responseError(response: Response, fallback: string) {
   try {
     const body = (await response.json()) as { detail?: string };

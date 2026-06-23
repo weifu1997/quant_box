@@ -12,6 +12,7 @@ import {
   RefreshCw,
   ShieldAlert,
   ShoppingCart,
+  Square,
   Table2,
   Terminal,
   TrendingUp,
@@ -21,7 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { artifactUrl, fetchDashboardJobs, fetchLatestDashboard, startDashboardJob } from "./api";
+import { artifactUrl, fetchDashboardJobs, fetchLatestDashboard, startDashboardJob, stopDashboardJob } from "./api";
 import type {
   Artifact,
   DashboardJob,
@@ -74,9 +75,11 @@ const STATUS_LABELS: Record<string, string> = {
   skipped: "已跳过",
   planning: "规划中",
   in_progress: "进行中",
+  stopping: "正在停止",
   succeeded: "已完成",
   failed: "失败",
-  stale: "状态待确认"
+  stale: "状态待确认",
+  cancelled: "已停止"
 };
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -125,7 +128,7 @@ export default function App() {
 
   const refresh = useCallback(() => setRefreshCount((value) => value + 1), []);
   const refreshJobs = useCallback(() => setJobsRefreshCount((value) => value + 1), []);
-  const activeJob = useMemo(() => jobs.find((job) => job.status === "running") ?? null, [jobs]);
+  const activeJob = useMemo(() => jobs.find(isActiveJob) ?? null, [jobs]);
 
   useEffect(() => {
     if (!activeJob) {
@@ -140,7 +143,7 @@ export default function App() {
           }
           setJobs(data.jobs);
           setJobsError(null);
-          if (!data.jobs.some((job) => job.status === "running")) {
+          if (!data.jobs.some(isActiveJob)) {
             refresh();
           }
         })
@@ -317,10 +320,11 @@ function RunControlPanel({
 }) {
   const [mode, setMode] = useState<DashboardRunMode>("candidate");
   const [pendingAction, setPendingAction] = useState<DashboardJobAction | null>(null);
+  const [pendingStop, setPendingStop] = useState(false);
   const [controlError, setControlError] = useState<string | null>(null);
-  const activeJob = jobs.find((job) => job.status === "running") ?? null;
+  const activeJob = jobs.find(isActiveJob) ?? null;
   const latestJob = activeJob ?? jobs[0] ?? null;
-  const disabled = Boolean(activeJob || pendingAction);
+  const disabled = Boolean(activeJob || pendingAction || pendingStop);
 
   const runAction = (action: DashboardJobAction, runMode?: DashboardRunMode) => {
     setPendingAction(action);
@@ -334,12 +338,27 @@ function RunControlPanel({
       .finally(() => setPendingAction(null));
   };
 
+  const stopActiveJob = () => {
+    if (!activeJob) {
+      return;
+    }
+    setPendingStop(true);
+    setControlError(null);
+    stopDashboardJob(activeJob.id)
+      .then((job) => {
+        onJobStarted(job);
+        onJobsRefresh();
+      })
+      .catch((err: Error) => setControlError(err.message))
+      .finally(() => setPendingStop(false));
+  };
+
   return (
     <section className="panel control-panel" id="control">
       <SectionTitle
         icon={activeJob ? <Loader2 className="spin-icon" size={18} /> : <Play size={18} />}
         title="运行控制"
-        aside={activeJob ? "运行中" : "就绪"}
+        aside={activeJob ? statusLabel(activeJob.status) : "就绪"}
       />
       <div className="control-grid">
         <button
@@ -365,6 +384,12 @@ function RunControlPanel({
             <span>{pendingAction === "run_auto_signal" ? "正在启动" : "重跑自动信号"}</span>
           </button>
         </div>
+        {activeJob && (
+          <button className="control-action danger" disabled={pendingStop || activeJob.status === "stopping"} onClick={stopActiveJob} type="button">
+            <Square size={16} />
+            <span>{pendingStop || activeJob.status === "stopping" ? "正在停止" : "停止当前任务"}</span>
+          </button>
+        )}
       </div>
       {controlError && <p className="inline-error">{controlError}</p>}
       {jobsError && <p className="inline-error">{jobsError}</p>}
@@ -799,6 +824,10 @@ function statusLabel(value?: string | null) {
     return "-";
   }
   return STATUS_LABELS[value] ?? value;
+}
+
+function isActiveJob(job: DashboardJob) {
+  return job.status === "running" || job.status === "stopping";
 }
 
 function commandPart(value: string) {

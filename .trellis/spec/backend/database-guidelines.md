@@ -194,6 +194,63 @@ datetime, instrument
 
 Tests assert this contract across `src/backtest.py`, `src/factor_ic.py`, `src/scoring.py`, and `src/signal_generator.py`.
 
+## Scenario: Factor Cache Freshness Under Latest-End Gate
+
+### 1. Scope / Trigger
+
+- Trigger: the auto-signal workflow loads the default Alpha158 cache before `data_health` checks factor latest-date coverage.
+- Owners: `src.factor_calculator.load_or_compute_factors` and `src.data_health.build_data_health_report`.
+
+### 2. Signatures
+
+- Config: `quality.require_latest_end_date: bool`.
+- Config: `factors.allow_stale_tail`, `factors.max_stale_tail_days`, `factors.max_stale_tail_sessions`.
+- Cache: `data/factors/alpha158.parquet` plus `data/factors/alpha158.parquet.meta.json`.
+
+### 3. Contracts
+
+- When `quality.require_latest_end_date=true`, the default factor cache must cover the resolved target end date; a stale tail must trigger recomputation even if `factors.allow_stale_tail=true`.
+- When `quality.require_latest_end_date=false`, short stale-tail reuse may still follow `factors.max_stale_tail_*` limits.
+- The factor-loading stage must not return a cache that the immediate `data_health` stage will reject for `factor_latest_before_end`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Latest-end gate enabled and cache ends before target price date | Recompute factors before returning. |
+| Latest-end gate disabled and stale tail is within configured limits | Reuse cache and log the stale-tail warning. |
+| Stale tail exceeds configured limits | Recompute factors. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: target end is `2026-06-23`, factor cache ends `2026-06-22`, latest-end gate enabled -> recompute to `2026-06-23`.
+- Base: exploratory run disables latest-end freshness and allows a short stale tail -> reuse cache with warning.
+- Bad: auto-signal logs stale-tail reuse, then `data_health` immediately blocks the same run for factor latest-date coverage.
+
+### 6. Tests Required
+
+- `tests/test_factor_calculator.py` must assert stale-tail cache reuse is disabled when `quality.require_latest_end_date=true`.
+- Existing stale-tail reuse tests must continue to prove the relaxed path works when the latest-end gate is not enabled.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+allow_stale_tail = config["factors"].get("allow_stale_tail", True)
+```
+
+This lets the factor loader return a cache ending before the target date even when the data-health gate requires latest-end coverage.
+
+#### Correct
+
+```python
+if config.get("quality", {}).get("require_latest_end_date", False):
+    allow_stale_tail = False
+```
+
+The data loading contract is aligned with the downstream freshness gate.
+
 ### Config
 
 `DEFAULT_CONFIG` in `src/config_loader.py` is the schema baseline. `config/settings.yaml` and `config/settings.local.yaml` deep-merge onto it. New config keys should be added to `DEFAULT_CONFIG`, validated where risky, and tested in `tests/test_config_loader.py`.

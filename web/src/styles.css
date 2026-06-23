@@ -331,6 +331,17 @@ h3 {
   background: var(--blue);
 }
 
+.control-action.danger {
+  color: #7a1f27;
+  border-color: rgba(209, 36, 47, 0.22);
+  background: rgba(209, 36, 47, 0.06);
+}
+
+.control-action.danger:not(:disabled):hover {
+  border-color: rgba(209, 36, 47, 0.36);
+  background: rgba(209, 36, 47, 0.1);
+}
+
 .control-action:disabled,
 .segmented-control button:disabled {
   cursor: not-allowed;
@@ -389,6 +400,14 @@ h3 {
 
 .job-running {
   border-color: rgba(0, 122, 255, 0.22);
+}
+
+.job-stopping {
+  border-color: rgba(183, 121, 31, 0.24);
+}
+
+.job-cancelled {
+  border-color: rgba(110, 110, 115, 0.18);
 }
 
 .job-failed,

@@ -323,6 +323,9 @@ def _factor_cache_meta_matches(
 
 def _allow_stale_factor_tail(config: dict) -> bool:
     """函数说明：判断是否允许复用只缺尾部少量日期的因子缓存。"""
+    quality_cfg = config.get("quality", {})
+    if bool(quality_cfg.get("require_latest_end_date", False)):
+        return False
     factor_cfg = config.get("factors", {})
     return bool(factor_cfg.get("allow_stale_tail", True))
 

@@ -13,9 +13,12 @@ from fastapi.testclient import TestClient
 from src.dashboard_api import create_dashboard_app
 from src.dashboard_control import (
     DashboardJobConflictError,
+    DashboardJobNotFoundError,
     DashboardJobStartError,
+    DashboardJobStopError,
     build_dashboard_job_command,
     list_dashboard_jobs,
+    stop_dashboard_job,
 )
 
 
@@ -114,6 +117,115 @@ class DashboardControlTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["jobs"], [job])
         self.assertEqual(body["active_job"], job)
+
+    def test_dashboard_jobs_api_marks_stopping_job_active(self) -> None:
+        job = {
+            "id": "job-1",
+            "label": "重跑自动信号（正常门槛输出）",
+            "status": "stopping",
+            "message": "正在停止任务，请稍候。",
+            "command": ["python", "scripts/run_auto_signal.py"],
+            "log_tail": [],
+        }
+        with patch("src.dashboard_api.list_dashboard_jobs", return_value=[job]):
+            response = TestClient(create_dashboard_app()).get("/api/dashboard/jobs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["active_job"], job)
+
+    def test_stop_dashboard_job_cancels_running_pid(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            job_dir.mkdir()
+            (job_dir / "job-1.json").write_text(
+                json.dumps(
+                    {
+                        "id": "job-1",
+                        "label": "重跑自动信号（正常门槛输出）",
+                        "status": "running",
+                        "message": "任务已启动。",
+                        "command": ["python", "scripts/run_auto_signal.py"],
+                        "started_at": "2026-06-24T01:07:39",
+                        "completed_at": None,
+                        "return_code": None,
+                        "log_path": str(out_dir / "job.log"),
+                        "pid": 123,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch("src.dashboard_control._output_dir", return_value=out_dir),
+                patch("src.dashboard_control._pid_is_running", return_value=True),
+                patch("src.dashboard_control._pid_matches_job", return_value=True),
+                patch("src.dashboard_control._terminate_job_process", return_value=(True, -15, "任务已停止。")),
+            ):
+                job = stop_dashboard_job("job-1")
+
+            self.assertEqual(job["status"], "cancelled")
+            self.assertEqual(job["message"], "任务已停止。")
+            self.assertEqual(job["return_code"], -15)
+
+    def test_stop_dashboard_job_rejects_completed_job(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            job_dir.mkdir()
+            (job_dir / "job-1.json").write_text(
+                json.dumps(
+                    {
+                        "id": "job-1",
+                        "label": "已完成任务",
+                        "status": "succeeded",
+                        "message": "任务完成。",
+                        "command": ["python", "scripts/run_auto_signal.py"],
+                        "started_at": "2026-06-24T01:07:39",
+                        "completed_at": "2026-06-24T01:08:39",
+                        "return_code": 0,
+                        "log_path": str(out_dir / "job.log"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("src.dashboard_control._output_dir", return_value=out_dir):
+                with self.assertRaisesRegex(DashboardJobStopError, "not running"):
+                    stop_dashboard_job("job-1")
+
+    def test_stop_dashboard_job_reports_missing_job(self) -> None:
+        with TemporaryDirectory() as tmp:
+            with patch("src.dashboard_control._output_dir", return_value=Path(tmp)):
+                with self.assertRaisesRegex(DashboardJobNotFoundError, "not found"):
+                    stop_dashboard_job("missing")
+
+    def test_dashboard_jobs_api_stops_job(self) -> None:
+        job = {
+            "id": "job-1",
+            "label": "重跑自动信号（正常门槛输出）",
+            "status": "cancelled",
+            "message": "任务已停止。",
+            "command": ["python", "scripts/run_auto_signal.py"],
+            "log_tail": [],
+        }
+        with patch("src.dashboard_api.stop_dashboard_job", return_value=job):
+            response = TestClient(create_dashboard_app()).post("/api/dashboard/jobs/job-1/stop")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["job"], job)
+
+    def test_dashboard_jobs_api_reports_missing_stop_job(self) -> None:
+        with patch("src.dashboard_api.stop_dashboard_job", side_effect=DashboardJobNotFoundError("Dashboard job not found")):
+            response = TestClient(create_dashboard_app()).post("/api/dashboard/jobs/missing/stop")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_dashboard_jobs_api_rejects_stop_for_finished_job(self) -> None:
+        with patch("src.dashboard_api.stop_dashboard_job", side_effect=DashboardJobStopError("Dashboard job is not running")):
+            response = TestClient(create_dashboard_app()).post("/api/dashboard/jobs/job-1/stop")
+
+        self.assertEqual(response.status_code, 409)
 
     def test_dashboard_jobs_api_rejects_invalid_action(self) -> None:
         with patch("src.dashboard_api.start_dashboard_job", side_effect=ValueError("Unsupported dashboard action")):
