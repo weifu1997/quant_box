@@ -2,7 +2,18 @@
 
 ## Goal
 
-Build a local web dashboard for the daily auto-signal review workflow so the user can quickly see whether the latest signal is ready for manual trading review, which gates passed or failed, and which candidate/official artifacts were generated. The first version should be read-only and Apple-inspired in visual style.
+Build a local web dashboard for the daily auto-signal review workflow so the user can quickly see whether the latest signal is ready for manual trading review, which gates passed or failed, and which candidate/official artifacts were generated. The first version was planned as read-only and Apple-inspired; the user later expanded the scope to include controlled local run actions for real data repair and signal reruns.
+
+## Scope Update: Controlled Run Actions
+
+On 2026-06-24 the user explicitly requested that the frontend be able to trigger real point-in-time `daily_basic` repair and switch/re-run auto signal output mode from the dashboard. This supersedes the original read-only limitation while keeping the safety boundary narrow:
+
+* The dashboard may trigger only whitelisted backend actions, not arbitrary commands.
+* The dashboard may start real `daily_basic` point-in-time repair through `scripts/run_update_point_in_time_data.py`.
+* The dashboard may re-run auto signal in either candidate output mode or normal gated output mode.
+* Normal gated output mode must not force official output; existing auto-signal gates still decide whether official artifacts are written.
+* Long-running jobs must expose status and log-tail output in the frontend so the user can tell the task is still active.
+* The review report panel should align visually with other dashboard panels instead of being cramped.
 
 ## What I Already Know
 
@@ -32,7 +43,7 @@ Build a local web dashboard for the daily auto-signal review workflow so the use
 ## Assumptions
 
 * MVP is local-only, accessed from the user's machine, not deployed publicly.
-* MVP is read-only and must not trigger pipeline runs, edit configs, promote signals, or write official outputs.
+* The original MVP was read-only, but current accepted scope allows controlled local repair/rerun actions through backend white-listed jobs.
 * Missing `outputs/` artifacts are normal and should render as friendly empty/error states.
 * Apple-style means Apple-inspired interaction and visual language, not copying Apple branding or assets.
 * The dashboard should be useful for daily manual review, not a marketing/landing page.
@@ -55,6 +66,12 @@ Build a local web dashboard for the daily auto-signal review workflow so the use
 * Show signal action summary and manual order table from the generated CSV artifacts.
 * Show artifact links/paths for the generated report, signal, holdings, manual orders, order confirmation, fill feedback, and quality files.
 * Show a structured summary derived from JSON/CSV artifacts and expose the latest `daily_signal_report.md` as an original report artifact link/path.
+* Provide controlled frontend actions to:
+  * repair the `daily_basic` point-in-time data gap with a real backend command;
+  * rerun auto signal in candidate output mode;
+  * rerun auto signal in normal gated output mode.
+* Show active/recent dashboard job status and log tail in the frontend.
+* Keep report-summary UI width aligned with the main dashboard panels.
 * Use an Apple-inspired UI:
   * light-first, calm, polished desktop-app feel;
   * system font stack and crisp typography;
@@ -76,7 +93,11 @@ Build a local web dashboard for the daily auto-signal review workflow so the use
 * [ ] The daily report section shows structured summary information and links to the original Markdown report without rendering the full Markdown inline.
 * [ ] The UI follows the agreed Apple-inspired style and remains dashboard-like, not landing-page-like.
 * [ ] User-facing labels, section titles, readiness copy, and common gate/block reasons are localized in Chinese.
-* [ ] MVP does not execute scripts, edit configs, write outputs, or promote official signals.
+* [ ] Dashboard run controls execute only whitelisted backend commands and do not expose arbitrary command execution.
+* [ ] The frontend can trigger real `daily_basic` point-in-time repair and show status/log output while it runs.
+* [ ] The frontend can select candidate vs normal gated auto-signal output mode before rerun.
+* [ ] Normal gated output mode does not add `--candidate-only` and does not add `--force-official`.
+* [ ] The review report panel width is aligned with other main dashboard panels.
 * [ ] Focused tests cover backend artifact parsing and missing-file behavior.
 * [ ] README or a small docs note explains how to start the dashboard.
 
@@ -84,7 +105,7 @@ Build a local web dashboard for the daily auto-signal review workflow so the use
 
 * Requirements are confirmed by the user.
 * Relevant backend/frontend specs are loaded before implementation.
-* Implementation is scoped to read-only dashboard behavior.
+* Implementation is scoped to latest-run review plus controlled local repair/rerun actions.
 * Tests are added or updated for artifact parsing and API view-model behavior.
 * Local dev startup is verified.
 * Documentation is updated for dashboard startup and MVP limitations.
@@ -97,7 +118,8 @@ Chosen direction: FastAPI backend plus React/Vite frontend.
 * Backend:
   * Add a small local API that reads existing output artifacts and returns dashboard-oriented JSON.
   * Normalize missing or malformed artifacts into explicit status objects.
-  * Keep command execution out of MVP.
+  * Expose only whitelisted dashboard jobs for `daily_basic` repair and candidate/normal auto-signal rerun.
+  * Persist dashboard job status under `outputs/dashboard_jobs/` and logs under `outputs/logs/dashboard_job_*.log`.
 * Frontend:
   * Add a `web/` app using React, TypeScript, and Vite.
   * Build an Apple-inspired dashboard shell with overview, gates, orders, artifacts, and report sections.
@@ -121,9 +143,9 @@ Consequences: This adds a web layer without changing strategy logic. It introduc
 
 ## Out of Scope
 
-* Running the auto-signal pipeline from the web UI.
+* Arbitrary command execution from the web UI.
 * Editing `config/settings.yaml`, account files, holdings, or Tushare secrets.
-* Promoting candidate signals to official outputs.
+* Promoting candidate signals to official outputs or forcing official output from the dashboard.
 * Applying fill feedback or updating holdings from the web UI.
 * Historical run browsing or archive comparison.
 * Full inline Markdown report rendering.
@@ -150,9 +172,9 @@ Consequences: This adds a web layer without changing strategy logic. It introduc
 
 ## Implementation Plan
 
-* PR1: Add read-only backend artifact reader and API view model with tests for present, missing, and malformed latest-run artifacts.
+* PR1: Add backend artifact reader and API view model with tests for present, missing, and malformed latest-run artifacts.
 * PR2: Add React/Vite dashboard shell and Apple-inspired review-console UI consuming the backend API.
-* PR3: Add documentation/start commands, polish empty states, and verify local startup.
+* PR3: Add controlled run actions, job logs, documentation/start commands, polish empty states, and verify local startup.
 
 ## Open Questions
 
