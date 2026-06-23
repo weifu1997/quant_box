@@ -79,6 +79,61 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(snapshot["readiness"]["status"], "error")
             self.assertTrue(snapshot["errors"])
 
+    def test_build_dashboard_snapshot_uses_newer_governance_after_repair(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-06-23T01:40:28",
+                        "is_executable": False,
+                        "candidate_only": True,
+                        "block_reasons": [
+                            "governance:daily_basic_date_coverage_below_required:2779/2784<1.00",
+                            "candidate_only_requested",
+                        ],
+                        "quality_warnings": [
+                            "governance:daily_basic_date_coverage_below_required:2779/2784<1.00",
+                        ],
+                        "data_governance": {
+                            "generated_at": "2026-06-23T01:40:28",
+                            "is_point_in_time_ready": False,
+                            "issues": ["daily_basic_date_coverage_below_required:2779/2784<1.00"],
+                            "warnings": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "data_governance_report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-06-24T00:36:04",
+                        "is_point_in_time_ready": True,
+                        "issues": [],
+                        "warnings": [],
+                        "daily_basic_covered_dates": 2784,
+                        "daily_basic_expected_dates": 2784,
+                        "daily_basic_date_coverage": 1.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = build_dashboard_snapshot(out_dir)
+            governance_gate = next(gate for gate in snapshot["gates"] if gate["id"] == "data_governance")
+
+            self.assertEqual(governance_gate["status"], "pass")
+            self.assertEqual(governance_gate["issues"], [])
+            self.assertTrue(governance_gate["details"]["supersedes_auto_report"])
+            self.assertEqual(
+                governance_gate["details"]["resolved_auto_report_issues"],
+                ["daily_basic_date_coverage_below_required:2779/2784<1.00"],
+            )
+            self.assertEqual(snapshot["block_reasons"], ["candidate_only_requested"])
+            self.assertEqual(snapshot["quality_warnings"], [])
+            self.assertEqual(snapshot["freshness_notes"], ["data_governance_repaired_after_auto_report"])
+
 
 if __name__ == "__main__":
     unittest.main()

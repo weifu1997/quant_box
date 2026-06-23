@@ -228,6 +228,10 @@ function Dashboard({
   snapshot: DashboardSnapshot;
 }) {
   const signalSummary = useMemo(() => actionSummary(snapshot.signal_summary), [snapshot.signal_summary]);
+  const qualityItems = useMemo(
+    () => [...(snapshot.freshness_notes ?? []), ...snapshot.quality_warnings],
+    [snapshot.freshness_notes, snapshot.quality_warnings]
+  );
   const readiness = readinessCopy(snapshot);
   return (
     <div className="dashboard-grid">
@@ -265,7 +269,7 @@ function Dashboard({
       </section>
 
       <section className="panel quality-warning-panel">
-        <QualityWarningsPanel warnings={snapshot.quality_warnings} />
+        <QualityWarningsPanel warnings={qualityItems} />
       </section>
 
       <section className="panel order-summary signal-panel">
@@ -685,9 +689,16 @@ function gateView(gate: Gate) {
   };
   const firstReason = gate.issues.length ? translateReason(gate.issues[0]) : "";
   const more = gate.issues.length > 1 ? `（另有 ${gate.issues.length - 1} 条）` : "";
+  const governanceSuperseded = Boolean(gate.details.supersedes_auto_report);
   const summaries: Record<string, string> = {
     data_health: gate.status === "pass" ? "原始数据、价格面板和因子覆盖检查通过。" : firstReason + more || defaultSummaries[gate.status],
-    data_governance: gate.status === "pass" ? "点时治理输入可用。" : firstReason + more || defaultSummaries[gate.status],
+    data_governance: governanceSuperseded
+      ? gate.status === "fail"
+        ? firstReason + more || defaultSummaries[gate.status]
+        : "最新点时治理报告已不再包含该 daily_basic 缺口；请重跑自动信号刷新复核结论。"
+      : gate.status === "pass"
+        ? "点时治理输入可用。"
+        : firstReason + more || defaultSummaries[gate.status],
     parameter_quality: gate.status === "pass" ? "参数质量达到门槛。" : firstReason + more || defaultSummaries[gate.status],
     backtest_quality: gate.status === "pass" ? "回测质量达到门槛。" : firstReason + more || defaultSummaries[gate.status],
     account: gate.status === "pass" ? "账户与持仓摘要已加载。" : firstReason + more || defaultSummaries[gate.status],
@@ -724,6 +735,9 @@ function translateReason(reason: string) {
   const dailyBasicCoverage = text.match(/^daily_basic_date_coverage_below_required:(.+)$/);
   if (dailyBasicCoverage) {
     return `${prefix}daily_basic 日期覆盖不足：${dailyBasicCoverage[1]}`;
+  }
+  if (text === "data_governance_repaired_after_auto_report") {
+    return `${prefix}daily_basic 缺口已按最新点时治理报告修复；请重跑自动信号刷新复核结论。`;
   }
   if (text === "candidate_only_requested") {
     return `${prefix}已启用候选输出模式，本次不会生成或覆盖正式交易信号。`;
@@ -765,6 +779,12 @@ function reasonMeta(reason: string) {
   if (translated.includes("daily_basic 日期覆盖")) {
     return {
       title: "daily_basic 覆盖不足",
+      detail: translated
+    };
+  }
+  if (translated.includes("重跑自动信号刷新复核结论")) {
+    return {
+      title: "自动信号报告需重跑",
       detail: translated
     };
   }

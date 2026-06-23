@@ -70,6 +70,7 @@ export interface DashboardSnapshot {
   gates: Gate[];
   block_reasons: string[];
   quality_warnings: string[];
+  freshness_notes: string[];
   signal_summary: Record<string, number>;
   orders: Orders;
   artifacts: Artifact[];

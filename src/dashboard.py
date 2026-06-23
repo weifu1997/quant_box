@@ -20,6 +20,7 @@ def build_dashboard_snapshot(out_dir: str | Path | None = None, config: Mapping[
     output_dir = _output_dir(out_dir, config)
     report_artifact = _read_json_artifact(output_dir / "auto_signal_report.json")
     status_artifact = _read_json_artifact(output_dir / "auto_run_status.json")
+    governance_artifact = _read_json_artifact(output_dir / "data_governance_report.json")
 
     report = report_artifact.get("data") if report_artifact.get("valid") else None
     status = status_artifact.get("data") if status_artifact.get("valid") else None
@@ -31,8 +32,15 @@ def build_dashboard_snapshot(out_dir: str | Path | None = None, config: Mapping[
     artifacts = _build_artifacts(output_dir, report)
     manual_orders_artifact = next((item for item in artifacts if item["id"] == "manual_orders"), None)
     orders = _build_orders(manual_orders_artifact)
-    block_reasons = _string_list((report or status or {}).get("block_reasons"))
-    quality_warnings = _string_list((report or status or {}).get("quality_warnings"))
+    governance_context = _post_run_governance_context(report, _artifact_data(governance_artifact))
+    block_reasons = _filter_resolved_governance_reasons(
+        _string_list((report or status or {}).get("block_reasons")),
+        governance_context,
+    )
+    quality_warnings = _filter_resolved_governance_reasons(
+        _string_list((report or status or {}).get("quality_warnings")),
+        governance_context,
+    )
 
     errors = [
         item["error"]
@@ -44,9 +52,10 @@ def build_dashboard_snapshot(out_dir: str | Path | None = None, config: Mapping[
         "output_dir": str(output_dir),
         "readiness": _build_readiness(report, report_artifact, block_reasons),
         "latest_run": _build_latest_run(report, status),
-        "gates": _build_gates(report, status, output_dir),
+        "gates": _build_gates(report, status, output_dir, governance_artifact, governance_context),
         "block_reasons": block_reasons,
         "quality_warnings": quality_warnings,
+        "freshness_notes": _freshness_notes(governance_context),
         "signal_summary": _mapping_value((report or {}).get("signal_summary")),
         "orders": orders,
         "artifacts": artifacts,
@@ -138,19 +147,26 @@ def _build_gates(
     report: Mapping[str, Any] | None,
     status: Mapping[str, Any] | None,
     output_dir: Path,
+    governance_artifact: Mapping[str, Any] | None = None,
+    governance_context: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     report = report or {}
     status = status or {}
     block_reasons = _string_list(report.get("block_reasons") or status.get("block_reasons"))
     data_health = _mapping_value(report.get("data_health")) or _read_json_data(output_dir / "data_health_report.json")
-    data_governance = _mapping_value(report.get("data_governance")) or _read_json_data(output_dir / "data_governance_report.json")
+    data_governance, governance_details = _dashboard_governance_payload(
+        report,
+        governance_artifact,
+        governance_context,
+        output_dir,
+    )
     parameter_quality = _mapping_value(report.get("parameter_quality")) or _read_json_data(output_dir / "auto_parameter_quality.json")
     backtest_quality = _mapping_value(report.get("backtest_quality")) or _read_json_data(output_dir / "auto_backtest_quality.json")
     account = _mapping_value(report.get("account"))
 
     return [
         _health_gate("data_health", "Data health", data_health, "is_healthy"),
-        _governance_gate(data_governance),
+        _governance_gate(data_governance, governance_details),
         _quality_gate("parameter_quality", "Parameter quality", parameter_quality),
         _quality_gate("backtest_quality", "Backtest quality", backtest_quality),
         _account_gate(account, block_reasons),
@@ -173,7 +189,7 @@ def _health_gate(gate_id: str, label: str, payload: Mapping[str, Any], bool_fiel
     return _gate(gate_id, label, status, summary, issues, details)
 
 
-def _governance_gate(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _governance_gate(payload: Mapping[str, Any], details: Mapping[str, Any] | None = None) -> dict[str, Any]:
     if not payload:
         return _gate("data_governance", "Data governance", "missing", "No artifact found.", [])
     issues = _string_list(payload.get("issues"))
@@ -187,7 +203,7 @@ def _governance_gate(payload: Mapping[str, Any]) -> dict[str, Any]:
     else:
         status = "pass"
         summary = "Point-in-time inputs are ready."
-    return _gate("data_governance", "Data governance", status, summary, issues or warnings)
+    return _gate("data_governance", "Data governance", status, summary, issues or warnings, details)
 
 
 def _quality_gate(gate_id: str, label: str, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -218,6 +234,94 @@ def _candidate_gate(report: Mapping[str, Any], block_reasons: list[str]) -> dict
     if report.get("candidate_only") or "candidate_only_requested" in block_reasons:
         return _gate("candidate_only", "Candidate-only mode", "hold", "Candidate-only output was requested.", [])
     return _gate("candidate_only", "Candidate-only mode", "pass", "Candidate-only hold is not active.", [])
+
+
+def _dashboard_governance_payload(
+    report: Mapping[str, Any],
+    governance_artifact: Mapping[str, Any] | None,
+    governance_context: Mapping[str, Any] | None,
+    output_dir: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    embedded = _mapping_value(report.get("data_governance"))
+    current = _artifact_data(governance_artifact)
+    if governance_context and current:
+        return current, _governance_details(report, governance_context)
+    if embedded:
+        return embedded, {}
+    if current:
+        return current, {}
+    return _read_json_data(output_dir / "data_governance_report.json"), {}
+
+
+def _post_run_governance_context(
+    report: Mapping[str, Any] | None,
+    current_governance: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not report or not current_governance:
+        return {}
+    embedded = _mapping_value(report.get("data_governance"))
+    if not embedded or not _is_newer_payload(current_governance, report):
+        return {}
+    current_issues = set(_string_list(current_governance.get("issues")))
+    embedded_issues = set(_string_list(embedded.get("issues")))
+    resolved_issues = sorted(issue for issue in embedded_issues if issue not in current_issues)
+    return {
+        "current": dict(current_governance),
+        "supersedes_auto_report": True,
+        "resolved_issues": resolved_issues,
+        "current_generated_at": _timestamp_text(current_governance),
+        "auto_report_generated_at": _timestamp_text(report),
+    }
+
+
+def _filter_resolved_governance_reasons(
+    reasons: list[str],
+    governance_context: Mapping[str, Any] | None,
+) -> list[str]:
+    resolved = set(_string_list((governance_context or {}).get("resolved_issues")))
+    if not resolved:
+        return reasons
+    filtered: list[str] = []
+    for reason in reasons:
+        issue = _governance_reason_issue(reason)
+        if issue and issue in resolved:
+            continue
+        filtered.append(reason)
+    return filtered
+
+
+def _freshness_notes(governance_context: Mapping[str, Any] | None) -> list[str]:
+    if governance_context and _list_value(governance_context.get("resolved_issues")):
+        return ["data_governance_repaired_after_auto_report"]
+    return []
+
+
+def _governance_details(report: Mapping[str, Any], governance_context: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "source": "data_governance_report",
+        "supersedes_auto_report": bool(governance_context.get("supersedes_auto_report")),
+        "source_generated_at": governance_context.get("current_generated_at"),
+        "auto_report_generated_at": governance_context.get("auto_report_generated_at") or _timestamp_text(report),
+        "resolved_auto_report_issues": _string_list(governance_context.get("resolved_issues")),
+    }
+
+
+def _governance_reason_issue(reason: str) -> str | None:
+    text = str(reason)
+    for prefix in ("governance:", "data_governance:"):
+        if text.startswith(prefix):
+            return text[len(prefix) :]
+    return None
+
+
+def _is_newer_payload(current: Mapping[str, Any], reference: Mapping[str, Any]) -> bool:
+    current_timestamp = _timestamp_text(current)
+    reference_timestamp = _timestamp_text(reference)
+    return bool(current_timestamp and reference_timestamp and current_timestamp > reference_timestamp)
+
+
+def _timestamp_text(payload: Mapping[str, Any]) -> str:
+    return str(payload.get("generated_at") or payload.get("completed_at") or payload.get("started_at") or "")
 
 
 def _gate(
@@ -356,8 +460,14 @@ def _read_json_artifact(path: Path) -> dict[str, Any]:
 
 def _read_json_data(path: Path) -> dict[str, Any]:
     artifact = _read_json_artifact(path)
+    return _artifact_data(artifact)
+
+
+def _artifact_data(artifact: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not artifact or not artifact.get("valid"):
+        return {}
     data = artifact.get("data")
-    return dict(data) if artifact.get("valid") and isinstance(data, Mapping) else {}
+    return dict(data) if isinstance(data, Mapping) else {}
 
 
 def _read_csv_preview(path: Path, limit: int) -> dict[str, Any]:
@@ -433,4 +543,3 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
-

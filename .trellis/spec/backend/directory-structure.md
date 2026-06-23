@@ -193,6 +193,7 @@ if looks_like_field_table(price_df.columns):
 - The backend reads only the latest/current artifacts from `outputs.dir`, especially `auto_signal_report.json`, `auto_run_status.json`, `daily_signal_report.md`, and CSV/JSON paths referenced by the latest report.
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
 - `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
+- If `data_governance_report.json` is newer than `auto_signal_report.json`, the dashboard governance gate must use the standalone governance report instead of the stale governance snapshot embedded in the auto-signal report. Resolved stale governance block reasons should be filtered from dashboard `block_reasons` / `quality_warnings`, and `freshness_notes` should tell the frontend that the auto-signal report still needs a rerun to refresh the final verdict.
 - `DashboardJob` must keep the frontend decoupled from process internals by returning compact fields: `id`, `action`, `mode`, `label`, `status`, `message`, `command`, `started_at`, `completed_at`, `return_code`, `log_path`, and `log_tail`.
 - Artifact download routes must be constrained to files inside the resolved output directory.
 - Frontend source belongs under `web/src/`; generated `web/node_modules/` and `web/dist/` stay ignored.
@@ -205,6 +206,7 @@ if looks_like_field_table(price_df.columns):
 | `auto_signal_report.json` is malformed | `readiness.status="error"` and `errors[]` records the JSON read failure |
 | Manual-order CSV is missing | `orders.exists=false`; the UI renders a non-crashing empty state |
 | A gate artifact is missing | Gate status is `missing`, not `pass` |
+| `data_governance_report.json` is newer and fixes an issue embedded in `auto_signal_report.json` | Governance gate reflects the newer report, stale governance reasons are filtered from dashboard blockers/warnings, and `freshness_notes` asks the UI to rerun auto signal |
 | Artifact id is unknown or outside `outputs.dir` | `GET /api/dashboard/artifacts/{artifact_id}` returns 404 |
 | Dashboard job action is unknown | `POST /api/dashboard/jobs` returns 400 |
 | Dashboard job mode is not `candidate` or `normal` | `POST /api/dashboard/jobs` returns 400 |
@@ -216,8 +218,10 @@ if looks_like_field_table(price_df.columns):
 
 - Good: latest report exists, manual orders exist, and dashboard shows a readiness verdict, gate cards, blockers, order preview, and artifact links.
 - Good: dashboard repair/rerun buttons start a whitelisted job, show a live log tail, and refresh the latest report when the job completes.
+- Good: after dashboard-triggered `daily_basic` repair, the governance gate stops showing the stale embedded `daily_basic_date_coverage_below_required` issue and instead shows a rerun-needed freshness note.
 - Base: no latest report exists yet; dashboard still starts and tells the user the latest report is missing.
 - Bad: frontend marks a data issue fixed without starting the backend repair command.
+- Bad: dashboard continues to show `daily_basic_date_coverage_below_required` from an older auto-signal report after a newer governance report proves the gap is fixed.
 - Bad: frontend reads raw files directly from the browser or the backend exposes an arbitrary file path download endpoint.
 - Bad: normal output mode uses `--force-official` or bypasses auto-signal gates.
 
@@ -227,6 +231,7 @@ if looks_like_field_table(price_df.columns):
 - Unit test missing `auto_signal_report.json` returns `readiness.status="missing"`.
 - Unit test malformed report JSON returns `readiness.status="error"`.
 - Unit test dashboard job command building for `repair_point_in_time`, candidate rerun, normal rerun, invalid mode, and unknown action.
+- Unit test that a newer standalone `data_governance_report.json` supersedes stale embedded auto-report governance, filters resolved stale block reasons, and emits `freshness_notes`.
 - API test that `GET /api/dashboard/jobs` reports a running active job.
 - API test that invalid dashboard jobs return 400 and already-running jobs return 409 when covered.
 - Script/docs test asserts `15_启动Web仪表盘.bat` is documented and starts the documented backend and frontend commands.
