@@ -1,4 +1,4 @@
-"""Tests for the read-only dashboard artifact view model."""
+"""Tests for the dashboard artifact view model."""
 
 from __future__ import annotations
 
@@ -82,4 +82,3 @@ class DashboardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

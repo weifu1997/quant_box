@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Added a local read-only FastAPI + React/Vite dashboard for latest auto-signal manual review.
+- Added controlled Web dashboard actions for repairing `daily_basic` point-in-time gaps and rerunning auto signal in candidate or normal gated output mode.
+- Added live dashboard job status and log-tail polling for long-running local repair/signal tasks.
+- Added a local FastAPI + React/Vite dashboard for latest auto-signal manual review.
 - Added a Windows one-click launcher for the local Web dashboard backend and frontend.
 - Added `run_auto_signal.py --candidate-only` for safe validation runs that never promote or overwrite official signal artifacts.
 - Made historical-universe builds fail on index fetch errors by default, required enabled historical-universe files by default, and added source-level governance coverage checks.

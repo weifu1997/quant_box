@@ -7,18 +7,31 @@ import {
   ExternalLink,
   FileText,
   Info,
+  Loader2,
+  Play,
   RefreshCw,
   ShieldAlert,
   ShoppingCart,
   Table2,
+  Terminal,
   TrendingUp,
+  Wrench,
   XCircle
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { artifactUrl, fetchLatestDashboard } from "./api";
-import type { Artifact, DashboardSnapshot, Gate, GateStatus, ReadinessStatus } from "./types";
+import { artifactUrl, fetchDashboardJobs, fetchLatestDashboard, startDashboardJob } from "./api";
+import type {
+  Artifact,
+  DashboardJob,
+  DashboardJobAction,
+  DashboardRunMode,
+  DashboardSnapshot,
+  Gate,
+  GateStatus,
+  ReadinessStatus
+} from "./types";
 
 const ORDER_COLUMNS = [
   "instrument",
@@ -60,7 +73,10 @@ const STATUS_LABELS: Record<string, string> = {
   error: "出错",
   skipped: "已跳过",
   planning: "规划中",
-  in_progress: "进行中"
+  in_progress: "进行中",
+  succeeded: "已完成",
+  failed: "失败",
+  stale: "状态待确认"
 };
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -70,9 +86,12 @@ const STRATEGY_LABELS: Record<string, string> = {
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
+  const [jobs, setJobs] = useState<DashboardJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [jobsError, setJobsError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  const [jobsRefreshCount, setJobsRefreshCount] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -89,7 +108,60 @@ export default function App() {
     return () => controller.abort();
   }, [refreshCount]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchDashboardJobs(controller.signal)
+      .then((data) => {
+        setJobs(data.jobs);
+        setJobsError(null);
+      })
+      .catch((err: Error) => {
+        if (err.name !== "AbortError") {
+          setJobsError(err.message);
+        }
+      });
+    return () => controller.abort();
+  }, [jobsRefreshCount]);
+
   const refresh = useCallback(() => setRefreshCount((value) => value + 1), []);
+  const refreshJobs = useCallback(() => setJobsRefreshCount((value) => value + 1), []);
+  const activeJob = useMemo(() => jobs.find((job) => job.status === "running") ?? null, [jobs]);
+
+  useEffect(() => {
+    if (!activeJob) {
+      return;
+    }
+    let stopped = false;
+    const poll = () => {
+      fetchDashboardJobs()
+        .then((data) => {
+          if (stopped) {
+            return;
+          }
+          setJobs(data.jobs);
+          setJobsError(null);
+          if (!data.jobs.some((job) => job.status === "running")) {
+            refresh();
+          }
+        })
+        .catch((err: Error) => {
+          if (!stopped) {
+            setJobsError(err.message);
+          }
+        });
+    };
+    poll();
+    const timer = window.setInterval(poll, 2500);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [activeJob?.id, refresh]);
+
+  const recordStartedJob = useCallback((job: DashboardJob) => {
+    setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+    setJobsError(null);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -98,6 +170,9 @@ export default function App() {
         <nav className="side-nav" aria-label="仪表盘分区">
           <a href="#review" aria-label="复核结论">
             <ShieldAlert size={20} />
+          </a>
+          <a href="#control" aria-label="运行控制">
+            <Play size={20} />
           </a>
           <a href="#gates" aria-label="质量门槛">
             <CheckCircle2 size={20} />
@@ -125,13 +200,33 @@ export default function App() {
 
         {loading && <StatePanel title="正在读取最新运行" message="正在读取本地 outputs 目录下的复核产物。" />}
         {error && <StatePanel title="仪表盘后端不可用" message={error} tone="danger" />}
-        {!loading && !error && snapshot && <Dashboard snapshot={snapshot} />}
+        {!loading && !error && snapshot && (
+          <Dashboard
+            jobs={jobs}
+            jobsError={jobsError}
+            onJobStarted={recordStartedJob}
+            onJobsRefresh={refreshJobs}
+            snapshot={snapshot}
+          />
+        )}
       </main>
     </div>
   );
 }
 
-function Dashboard({ snapshot }: { snapshot: DashboardSnapshot }) {
+function Dashboard({
+  jobs,
+  jobsError,
+  onJobStarted,
+  onJobsRefresh,
+  snapshot
+}: {
+  jobs: DashboardJob[];
+  jobsError: string | null;
+  onJobStarted: (job: DashboardJob) => void;
+  onJobsRefresh: () => void;
+  snapshot: DashboardSnapshot;
+}) {
   const signalSummary = useMemo(() => actionSummary(snapshot.signal_summary), [snapshot.signal_summary]);
   const readiness = readinessCopy(snapshot);
   return (
@@ -153,7 +248,9 @@ function Dashboard({ snapshot }: { snapshot: DashboardSnapshot }) {
         </div>
       </section>
 
-      <section className="panel" id="gates">
+      <RunControlPanel jobs={jobs} jobsError={jobsError} onJobStarted={onJobStarted} onJobsRefresh={onJobsRefresh} />
+
+      <section className="panel gates-panel" id="gates">
         <SectionTitle icon={<CheckCircle2 size={18} />} title="质量门槛" aside={statusLabel(snapshot.latest_run.status)} />
         <div className="gate-grid">
           {snapshot.gates.map((gate) => (
@@ -176,11 +273,6 @@ function Dashboard({ snapshot }: { snapshot: DashboardSnapshot }) {
         <SignalSummaryPanel snapshot={snapshot} />
       </section>
 
-      <section className="panel table-panel" id="orders">
-        <SectionTitle icon={<Table2 size={18} />} title="人工交易单" aside={snapshot.orders.exists ? snapshot.orders.path : "缺失"} />
-        {snapshot.orders.exists && snapshot.orders.valid ? <OrdersTable snapshot={snapshot} /> : <EmptyPanel message={snapshot.orders.error || "没有找到人工交易单产物。"} />}
-      </section>
-
       <section className="panel report-panel">
         <SectionTitle icon={<FileText size={18} />} title="复核报告" aside={snapshot.report.daily_markdown.exists ? "可打开" : "缺失"} />
         <div className="report-summary">
@@ -191,6 +283,11 @@ function Dashboard({ snapshot }: { snapshot: DashboardSnapshot }) {
         <ArtifactLink artifact={snapshot.report.daily_markdown} />
       </section>
 
+      <section className="panel table-panel" id="orders">
+        <SectionTitle icon={<Table2 size={18} />} title="人工交易单" aside={snapshot.orders.exists ? snapshot.orders.path : "缺失"} />
+        {snapshot.orders.exists && snapshot.orders.valid ? <OrdersTable snapshot={snapshot} /> : <EmptyPanel message={snapshot.orders.error || "没有找到人工交易单产物。"} />}
+      </section>
+
       <section className="panel artifacts-panel" id="artifacts">
         <SectionTitle icon={<FileText size={18} />} title="产物文件" aside={snapshot.output_dir} />
         <div className="artifact-list">
@@ -199,6 +296,104 @@ function Dashboard({ snapshot }: { snapshot: DashboardSnapshot }) {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function RunControlPanel({
+  jobs,
+  jobsError,
+  onJobStarted,
+  onJobsRefresh
+}: {
+  jobs: DashboardJob[];
+  jobsError: string | null;
+  onJobStarted: (job: DashboardJob) => void;
+  onJobsRefresh: () => void;
+}) {
+  const [mode, setMode] = useState<DashboardRunMode>("candidate");
+  const [pendingAction, setPendingAction] = useState<DashboardJobAction | null>(null);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const activeJob = jobs.find((job) => job.status === "running") ?? null;
+  const latestJob = activeJob ?? jobs[0] ?? null;
+  const disabled = Boolean(activeJob || pendingAction);
+
+  const runAction = (action: DashboardJobAction, runMode?: DashboardRunMode) => {
+    setPendingAction(action);
+    setControlError(null);
+    startDashboardJob(runMode ? { action, mode: runMode } : { action })
+      .then((job) => {
+        onJobStarted(job);
+        onJobsRefresh();
+      })
+      .catch((err: Error) => setControlError(err.message))
+      .finally(() => setPendingAction(null));
+  };
+
+  return (
+    <section className="panel control-panel" id="control">
+      <SectionTitle
+        icon={activeJob ? <Loader2 className="spin-icon" size={18} /> : <Play size={18} />}
+        title="运行控制"
+        aside={activeJob ? "运行中" : "就绪"}
+      />
+      <div className="control-grid">
+        <button
+          className="control-action"
+          disabled={disabled}
+          onClick={() => runAction("repair_point_in_time")}
+          type="button"
+        >
+          <Wrench size={17} />
+          <span>{pendingAction === "repair_point_in_time" ? "正在启动" : "修复 daily_basic 缺口"}</span>
+        </button>
+        <div className="signal-run-box">
+          <div className="segmented-control" aria-label="自动信号输出模式">
+            <button className={mode === "candidate" ? "active" : ""} disabled={disabled} onClick={() => setMode("candidate")} type="button">
+              候选输出
+            </button>
+            <button className={mode === "normal" ? "active" : ""} disabled={disabled} onClick={() => setMode("normal")} type="button">
+              正常门槛输出
+            </button>
+          </div>
+          <button className="control-action primary" disabled={disabled} onClick={() => runAction("run_auto_signal", mode)} type="button">
+            <Play size={17} />
+            <span>{pendingAction === "run_auto_signal" ? "正在启动" : "重跑自动信号"}</span>
+          </button>
+        </div>
+      </div>
+      {controlError && <p className="inline-error">{controlError}</p>}
+      {jobsError && <p className="inline-error">{jobsError}</p>}
+      {latestJob ? <JobStatusCard job={latestJob} /> : <EmptyPanel message="暂无后台任务记录。" />}
+    </section>
+  );
+}
+
+function JobStatusCard({ job }: { job: DashboardJob }) {
+  return (
+    <div className={`job-card job-${job.status}`}>
+      <div className="job-head">
+        <div>
+          <strong>{job.label}</strong>
+          <span>{statusLabel(job.status)}</span>
+        </div>
+        <small>{formatDateTime(job.completed_at || job.started_at)}</small>
+      </div>
+      <p>{job.message}</p>
+      <div className="job-command" title={job.command.join(" ")}>
+        {job.command.map(commandPart).join(" ")}
+      </div>
+      <div className="log-tail">
+        <div>
+          <Terminal size={15} />
+          <span>日志尾部</span>
+        </div>
+        {job.log_tail.length ? (
+          <pre>{job.log_tail.join("\n")}</pre>
+        ) : (
+          <p className="empty-log">{job.status === "running" ? "等待日志输出..." : "没有日志输出。"}</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -584,6 +779,10 @@ function statusLabel(value?: string | null) {
     return "-";
   }
   return STATUS_LABELS[value] ?? value;
+}
+
+function commandPart(value: string) {
+  return value.includes(" ") ? `"${value}"` : value;
 }
 
 function strategyLabel(value?: string | null) {

@@ -64,7 +64,12 @@ python -m venv .venv
 
 ## 本地 Web 仪表盘
 
-Web 仪表盘是只读的本地复核控制台，用来查看最新一次自动信号运行是否可以进入人工交易复核。它只读取 `outputs/` 下已有产物，不会运行流水线、修改配置、推广候选信号、应用成交回填或更新持仓。
+Web 仪表盘是本地复核控制台，用来查看最新一次自动信号运行是否可以进入人工交易复核。首屏展示结构化摘要、质量门槛、阻塞原因、订单摘要和报告链接；同时提供受控运行按钮，只能启动白名单后台任务：
+
+- 补齐 `daily_basic` 点时数据缺口：调用 `scripts\run_update_point_in_time_data.py`，并跳过指数成分和 ST 日历更新。
+- 重跑自动信号：可选择“候选输出”或“正常门槛输出”；正常模式不会附加 `--candidate-only`，但仍遵守自动流程质量门槛。
+
+后台任务状态写入 `outputs/dashboard_jobs/`，日志写入 `outputs/logs/dashboard_job_*.log`。仪表盘不会编辑配置、推广候选信号、应用成交回填或直接更新持仓。
 
 日常使用可以直接双击：
 
@@ -143,7 +148,7 @@ setx TUSHARE_TOKEN "你的token"
 | `12_全量重刷股票数据.bat` | 维护工具：从配置起始日或上市日全量重刷 raw 股票数据，慢于 `04`，仅在历史数据疑似损坏时使用 |
 | `13_一键补齐历史数据_无人值守.bat` | 无人值守工具：分批补齐 2012 年以来 raw 日线，转换数据，补齐 daily_basic，并可重算 Alpha158 因子 |
 | `14_构建历史股票池.bat` | 分步工具：用 Tushare `index_weight` 构建沪深300 + 中证500 + 中证1000权重前300的历史股票池快照 |
-| `15_启动Web仪表盘.bat` | 本地复核控制台入口：启动 FastAPI 后端和 React/Vite 前端，并打开 Web 仪表盘 |
+| `15_启动Web仪表盘.bat` | 本地复核控制台入口：启动 FastAPI 后端和 React/Vite 前端，并打开可查看复核结果、受控修复缺口和重跑信号的 Web 仪表盘 |
 | `scripts/run_update_point_in_time_data.py` | 命令行工具：补齐 daily_basic、HS300 指数成分权重和 ST 历史日历，并重写点时数据治理报告 |
 | `scripts/run_update_fundamentals.py` | 命令行工具：补齐 fina_indicator 和 dividend 基本面缓存，用于质量、分红和负债筛选 |
 | `scripts/run_fundamental_screen.py` | 命令行工具：生成基本面筛选 CSV 和 Markdown 解释报告 |
@@ -428,6 +433,8 @@ outputs/auto_backtest_metrics.json     自动选参后的回测指标
 outputs/auto_signal_report.json        自动信号报告
 outputs/auto_signal_job.json           后台自动流程任务信息
 outputs/logs/auto_signal_*.log         后台自动流程日志
+outputs/dashboard_jobs/*.json          Web 仪表盘受控后台任务状态
+outputs/logs/dashboard_job_*.log       Web 仪表盘受控后台任务日志
 outputs/data_governance_report.json    点时数据治理检查
 outputs/auto_research_diagnostics.json 研究诊断汇总
 outputs/auto_research_benchmark_curve.csv 基准对比净值

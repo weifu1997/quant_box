@@ -6,7 +6,7 @@
 
 ## Overview
 
-`quant_box` is a single-repo Python project with a small local web API for read-only dashboard review and no package split. Core reusable logic lives in `src/`, command-line entry points live in `scripts/`, the React/Vite dashboard lives in `web/`, Windows one-click wrappers live as numbered `.bat` files in the repo root, and tests mirror behavior under `tests/`.
+`quant_box` is a single-repo Python project with a small local web API for controlled dashboard review and no package split. Core reusable logic lives in `src/`, command-line entry points live in `scripts/`, the React/Vite dashboard lives in `web/`, Windows one-click wrappers live as numbered `.bat` files in the repo root, and tests mirror behavior under `tests/`.
 
 The project is a local data pipeline for manual trading decisions. Most changes should preserve this separation:
 
@@ -168,8 +168,8 @@ if looks_like_field_table(price_df.columns):
 
 ### 1. Scope / Trigger
 
-- Trigger: the project exposes local auto-signal review artifacts through a read-only web dashboard.
-- Owners: `src/dashboard.py` builds the view model, `src/dashboard_api.py` exposes FastAPI routes, `scripts/run_dashboard.py` starts the backend, and `web/` owns the React/Vite UI.
+- Trigger: the project exposes local auto-signal review artifacts and a narrow set of controlled repair/rerun actions through a local web dashboard.
+- Owners: `src/dashboard.py` builds the view model, `src/dashboard_control.py` owns whitelisted background actions, `src/dashboard_api.py` exposes FastAPI routes, `scripts/run_dashboard.py` starts the backend, and `web/` owns the React/Vite UI.
 
 ### 2. Signatures
 
@@ -177,15 +177,23 @@ if looks_like_field_table(price_df.columns):
 - Batch wrapper: `15_启动Web仪表盘.bat` starts the FastAPI backend and React/Vite frontend, waits for `http://127.0.0.1:8000/api/health` and `http://127.0.0.1:5173`, then opens the dashboard URL.
 - API: `GET /api/health -> {"status": "ok"}`.
 - API: `GET /api/dashboard/latest -> DashboardSnapshot`.
+- API: `GET /api/dashboard/jobs -> {"jobs": DashboardJob[], "active_job": DashboardJob|null}`.
+- API: `POST /api/dashboard/jobs` with JSON `{"action": "repair_point_in_time"}` or `{"action": "run_auto_signal", "mode": "candidate"|"normal"} -> {"job": DashboardJob}`.
 - API: `GET /api/dashboard/artifacts/{artifact_id} -> FileResponse` for downloadable artifacts under the configured output directory.
 - Frontend dev command: `cd web && npm run dev`, with Vite proxying `/api` to `http://127.0.0.1:8000`.
 
 ### 3. Contracts
 
-- The dashboard MVP is read-only. It must not start auto-signal runs, edit configs, promote candidate signals, apply fills, or update holdings.
+- The dashboard may start only whitelisted local actions:
+  - `repair_point_in_time`: runs `scripts/run_update_point_in_time_data.py` for the `daily_basic` repair window and includes `--skip-index-constituents --skip-st-calendar`.
+  - `run_auto_signal` with `mode="candidate"`: runs `scripts/run_auto_signal.py --no-archive --candidate-only`.
+  - `run_auto_signal` with `mode="normal"`: runs `scripts/run_auto_signal.py --no-archive` and must not add `--candidate-only` or `--force-official`.
+- Dashboard actions must not expose arbitrary command execution, edit configs, promote candidate signals, apply fills, or directly update holdings.
+- Only one dashboard background job may run at a time. Job status JSON lives under `outputs/dashboard_jobs/`; logs live under `outputs/logs/dashboard_job_*.log`.
 - The backend reads only the latest/current artifacts from `outputs.dir`, especially `auto_signal_report.json`, `auto_run_status.json`, `daily_signal_report.md`, and CSV/JSON paths referenced by the latest report.
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
 - `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
+- `DashboardJob` must keep the frontend decoupled from process internals by returning compact fields: `id`, `action`, `mode`, `label`, `status`, `message`, `command`, `started_at`, `completed_at`, `return_code`, `log_path`, and `log_tail`.
 - Artifact download routes must be constrained to files inside the resolved output directory.
 - Frontend source belongs under `web/src/`; generated `web/node_modules/` and `web/dist/` stay ignored.
 
@@ -198,19 +206,29 @@ if looks_like_field_table(price_df.columns):
 | Manual-order CSV is missing | `orders.exists=false`; the UI renders a non-crashing empty state |
 | A gate artifact is missing | Gate status is `missing`, not `pass` |
 | Artifact id is unknown or outside `outputs.dir` | `GET /api/dashboard/artifacts/{artifact_id}` returns 404 |
+| Dashboard job action is unknown | `POST /api/dashboard/jobs` returns 400 |
+| Dashboard job mode is not `candidate` or `normal` | `POST /api/dashboard/jobs` returns 400 |
+| A dashboard job is already running | `POST /api/dashboard/jobs` returns 409 |
+| A prior `running` job has no live process after service restart | The job is marked `stale`, the UI unlocks controls, and the log remains visible |
 | Vite dev dependencies have known moderate-or-higher advisories | Upgrade the frontend toolchain or document why the advisory is not applicable before finishing |
 
 ### 5. Good/Base/Bad Cases
 
 - Good: latest report exists, manual orders exist, and dashboard shows a readiness verdict, gate cards, blockers, order preview, and artifact links.
+- Good: dashboard repair/rerun buttons start a whitelisted job, show a live log tail, and refresh the latest report when the job completes.
 - Base: no latest report exists yet; dashboard still starts and tells the user the latest report is missing.
+- Bad: frontend marks a data issue fixed without starting the backend repair command.
 - Bad: frontend reads raw files directly from the browser or the backend exposes an arbitrary file path download endpoint.
+- Bad: normal output mode uses `--force-official` or bypasses auto-signal gates.
 
 ### 6. Tests Required
 
 - Unit test dashboard view model with present latest report and manual-order CSV.
 - Unit test missing `auto_signal_report.json` returns `readiness.status="missing"`.
 - Unit test malformed report JSON returns `readiness.status="error"`.
+- Unit test dashboard job command building for `repair_point_in_time`, candidate rerun, normal rerun, invalid mode, and unknown action.
+- API test that `GET /api/dashboard/jobs` reports a running active job.
+- API test that invalid dashboard jobs return 400 and already-running jobs return 409 when covered.
 - Script/docs test asserts `15_启动Web仪表盘.bat` is documented and starts the documented backend and frontend commands.
 - Run `npm run build` for React/Vite type-check and production build validation.
 - Run `npm audit --audit-level=moderate` after adding or changing frontend dependencies.

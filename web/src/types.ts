@@ -76,3 +76,29 @@ export interface DashboardSnapshot {
   report: ReportSection;
   errors: string[];
 }
+
+export type DashboardJobAction = "repair_point_in_time" | "run_auto_signal";
+export type DashboardRunMode = "candidate" | "normal";
+export type DashboardJobStatus = "running" | "succeeded" | "failed" | "stale";
+
+export interface DashboardJob {
+  version: number;
+  id: string;
+  action: DashboardJobAction;
+  mode?: DashboardRunMode | null;
+  label: string;
+  status: DashboardJobStatus | string;
+  message: string;
+  command: string[];
+  started_at: string;
+  completed_at?: string | null;
+  return_code?: number | null;
+  log_path: string;
+  log_tail: string[];
+  pid?: number;
+}
+
+export interface DashboardJobsResponse {
+  jobs: DashboardJob[];
+  active_job?: DashboardJob | null;
+}

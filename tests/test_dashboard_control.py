@@ -1,0 +1,147 @@
+"""Tests for controlled dashboard run actions."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from src.dashboard_api import create_dashboard_app
+from src.dashboard_control import (
+    DashboardJobConflictError,
+    DashboardJobStartError,
+    build_dashboard_job_command,
+    list_dashboard_jobs,
+)
+
+
+class DashboardControlTests(unittest.TestCase):
+    def test_repair_command_uses_daily_basic_repair_action(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            (out_dir / "data_governance_report.json").write_text(
+                json.dumps({"repair_actions": []}),
+                encoding="utf-8",
+            )
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps(
+                    {
+                        "data_governance": {
+                            "repair_actions": [
+                                {
+                                    "component": "daily_basic",
+                                    "start_date": "2015-01-05",
+                                    "end_date": "2026-06-22",
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            command, label = build_dashboard_job_command(
+                "repair_point_in_time",
+                out_dir=out_dir,
+                python_executable="python-test",
+            )
+
+            self.assertEqual(command[0], "python-test")
+            self.assertEqual(command[1], str(Path("scripts/run_update_point_in_time_data.py").resolve()))
+            self.assertEqual(command[command.index("--start-date") + 1], "2015-01-05")
+            self.assertEqual(command[command.index("--end-date") + 1], "2026-06-22")
+            self.assertIn("--skip-index-constituents", command)
+            self.assertIn("--skip-st-calendar", command)
+            self.assertIn("daily_basic", label)
+
+    def test_run_auto_signal_candidate_mode_keeps_candidate_only_flag(self) -> None:
+        command, label = build_dashboard_job_command(
+            "run_auto_signal",
+            {"mode": "candidate"},
+            python_executable="python-test",
+        )
+
+        self.assertEqual(command[0], "python-test")
+        self.assertIn("--no-archive", command)
+        self.assertIn("--candidate-only", command)
+        self.assertIn("候选输出", label)
+
+    def test_run_auto_signal_normal_mode_omits_candidate_only_flag(self) -> None:
+        command, label = build_dashboard_job_command(
+            "run_auto_signal",
+            {"mode": "normal"},
+            python_executable="python-test",
+        )
+
+        self.assertIn("--no-archive", command)
+        self.assertNotIn("--candidate-only", command)
+        self.assertIn("正常门槛输出", label)
+
+    def test_run_auto_signal_rejects_invalid_mode(self) -> None:
+        with self.assertRaisesRegex(ValueError, "mode must be candidate or normal"):
+            build_dashboard_job_command("run_auto_signal", {"mode": "force"})
+
+    def test_unknown_dashboard_action_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported dashboard action"):
+            build_dashboard_job_command("delete_everything")
+
+    def test_list_dashboard_jobs_skips_malformed_job_json(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            job_dir.mkdir()
+            (job_dir / "bad.json").write_text("{not-json", encoding="utf-8")
+            with patch("src.dashboard_control._output_dir", return_value=out_dir):
+                self.assertEqual(list_dashboard_jobs(), [])
+
+    def test_dashboard_jobs_api_marks_running_job_active(self) -> None:
+        job = {
+            "id": "job-1",
+            "label": "重跑自动信号（候选输出）",
+            "status": "running",
+            "message": "任务已启动。",
+            "command": ["python", "scripts/run_auto_signal.py", "--candidate-only"],
+            "log_tail": [],
+        }
+        with patch("src.dashboard_api.list_dashboard_jobs", return_value=[job]):
+            response = TestClient(create_dashboard_app()).get("/api/dashboard/jobs")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["jobs"], [job])
+        self.assertEqual(body["active_job"], job)
+
+    def test_dashboard_jobs_api_rejects_invalid_action(self) -> None:
+        with patch("src.dashboard_api.start_dashboard_job", side_effect=ValueError("Unsupported dashboard action")):
+            response = TestClient(create_dashboard_app()).post("/api/dashboard/jobs", json={"action": "nope"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Unsupported dashboard action")
+
+    def test_dashboard_jobs_api_rejects_concurrent_job(self) -> None:
+        with patch("src.dashboard_api.start_dashboard_job", side_effect=DashboardJobConflictError("Dashboard job already running")):
+            response = TestClient(create_dashboard_app()).post(
+                "/api/dashboard/jobs",
+                json={"action": "run_auto_signal", "mode": "candidate"},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "Dashboard job already running")
+
+    def test_dashboard_jobs_api_reports_start_failure(self) -> None:
+        with patch("src.dashboard_api.start_dashboard_job", side_effect=DashboardJobStartError("Dashboard job failed to start")):
+            response = TestClient(create_dashboard_app()).post(
+                "/api/dashboard/jobs",
+                json={"action": "repair_point_in_time"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Dashboard job failed to start")
+
+
+if __name__ == "__main__":
+    unittest.main()
