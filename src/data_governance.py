@@ -31,6 +31,7 @@ class DataGovernanceReport:
     st_calendar_has_ts_code: bool
     st_calendar_start_date: str
     st_calendar_end_date: str
+    st_calendar_coverage_end_date: str
     st_filter_mode: str
     index_constituents_file: str
     index_constituents_available: bool
@@ -158,6 +159,9 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
         st_calendar,
         ["st_start_date", "start_date", "begin_date", "date", "ann_date", "st_end_date", "end_date"],
     )
+    st_calendar_meta = _read_json_if_exists(_metadata_path(st_path)) if st_path is not None else {}
+    st_calendar_coverage_end_date = _date_text_value(st_calendar_meta.get("coverage_end_date"))
+    st_calendar_effective_end_date = st_calendar_coverage_end_date or st_calendar_end_date
     st_filter_mode = "historical_calendar" if st_calendar_available else "current_name_fallback" if data_cfg.get("exclude_st", True) else "disabled"
     if bool(data_cfg.get("exclude_st", True)) and not st_calendar_available:
         issues.append("st_calendar_missing_current_name_filter_only")
@@ -312,8 +316,8 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
     elif with_adj_factor < sampled:
         issues.append(f"raw_adj_factor_missing_in_sample:{with_adj_factor}/{sampled}")
 
-    if st_calendar_available and st_calendar_end_date and point_in_time_end and _date_after(point_in_time_end, st_calendar_end_date):
-        warnings.append(f"st_calendar_end_before_factor_end:{st_calendar_end_date}<{point_in_time_end}")
+    if st_calendar_available and st_calendar_effective_end_date and point_in_time_end and _date_after(point_in_time_end, st_calendar_effective_end_date):
+        warnings.append(f"st_calendar_end_before_factor_end:{st_calendar_effective_end_date}<{point_in_time_end}")
     if daily_basic_end and point_in_time_end and _date_after(point_in_time_end, daily_basic_end):
         warnings.append(f"daily_basic_end_before_factor_end:{daily_basic_end}<{point_in_time_end}")
     if index_available and index_end and point_in_time_end and _month_after(point_in_time_end, index_end):
@@ -380,6 +384,7 @@ def build_data_governance_report(config: dict | None = None, sample_raw_files: i
         st_calendar_has_ts_code=st_calendar_has_ts_code,
         st_calendar_start_date=st_calendar_start_date,
         st_calendar_end_date=st_calendar_end_date,
+        st_calendar_coverage_end_date=st_calendar_coverage_end_date,
         st_filter_mode=st_filter_mode,
         index_constituents_file=str(index_path),
         index_constituents_available=index_available,
@@ -483,6 +488,17 @@ def _read_json_if_exists(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
+
+
+def _metadata_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.meta.json")
+
+
+def _date_text_value(value: Any) -> str:
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return ""
+    return str(pd.Timestamp(parsed).date())
 
 
 def _int_value(value: Any) -> int:

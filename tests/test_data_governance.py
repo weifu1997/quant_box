@@ -177,6 +177,88 @@ class DataGovernanceTests(unittest.TestCase):
             saved = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(saved["repair_actions"], [])
 
+    def test_build_data_governance_report_uses_st_calendar_coverage_metadata(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_dir = root / "raw"
+            raw_dir.mkdir()
+            factor_dir = root / "factors"
+            factor_dir.mkdir()
+            universe_file = raw_dir / "mainboard_a_stocks.csv"
+            st_calendar = raw_dir / "st_calendar.csv"
+            index_file = raw_dir / "hs300_constituents.csv"
+            daily_basic_file = factor_dir / "daily_basic.parquet"
+            factor_cache = factor_dir / "alpha158.parquet"
+            adj_meta = factor_dir / "adj_factor_meta.json"
+
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "000002.SZ"],
+                    "name": ["A", "B"],
+                    "industry": ["Bank", "Tech"],
+                    "list_status": ["L", "D"],
+                    "list_date": ["20200101", "20200101"],
+                    "delist_date": ["", "20240131"],
+                }
+            ).to_csv(universe_file, index=False)
+            pd.DataFrame({"ts_code": ["000001.SZ"], "st_start_date": ["20220101"], "st_end_date": ["20240103"]}).to_csv(
+                st_calendar,
+                index=False,
+            )
+            st_calendar.with_name(f"{st_calendar.name}.meta.json").write_text(
+                json.dumps({"coverage_end_date": "2024-01-05"}),
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                {
+                    "index_code": ["000300.SH"],
+                    "con_code": ["000001.SZ"],
+                    "trade_date": ["20240105"],
+                    "weight": [1.0],
+                }
+            ).to_csv(index_file, index=False)
+            pd.DataFrame(
+                {
+                    "trade_date": ["2024-01-05"],
+                    "ts_code": ["000001.SZ"],
+                    "circ_mv": [100.0],
+                }
+            ).to_parquet(daily_basic_file)
+            pd.DataFrame({"ts_code": ["000001.SZ"], "trade_date": ["2024-01-05"], "close": [10.0], "adj_factor": [1.0]}).to_csv(
+                raw_dir / "000001.SZ.csv",
+                index=False,
+            )
+            (Path(str(factor_cache) + ".meta.json")).write_text(
+                json.dumps({"end_date": "2024-01-05", "symbols": ["000001.SZ"]}),
+                encoding="utf-8",
+            )
+            adj_metadata = build_adj_factor_metadata({"data": {"raw_dir": str(raw_dir)}})
+            write_adj_factor_metadata(adj_metadata, path=adj_meta)
+
+            report = build_data_governance_report(
+                {
+                    "data": {
+                        "start_date": "2022-01-01",
+                        "raw_dir": str(raw_dir),
+                        "constituents_file": str(universe_file),
+                        "st_calendar_file": str(st_calendar),
+                        "exclude_st": True,
+                    },
+                    "factors": {"cache_file": str(factor_cache)},
+                    "data_governance": {
+                        "index_constituents_file": str(index_file),
+                        "adj_factor_meta_file": str(adj_meta),
+                    },
+                    "research": {"exposure": {"daily_basic_file": str(daily_basic_file), "market_cap_field": "circ_mv"}},
+                },
+                sample_raw_files=1,
+            )
+
+            self.assertEqual(report.st_calendar_end_date, "2024-01-03")
+            self.assertEqual(report.st_calendar_coverage_end_date, "2024-01-05")
+            self.assertNotIn("st_calendar_end_before_factor_end:2024-01-03<2024-01-05", report.warnings)
+            self.assertEqual(report.warnings, [])
+
     def test_build_data_governance_report_flags_current_name_st_filter(self) -> None:
         """函数说明：验证 test_build_data_governance_report_flags_current_name_st_filter 覆盖的行为场景。"""
         with TemporaryDirectory() as tmp:

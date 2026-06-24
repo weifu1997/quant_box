@@ -40,6 +40,69 @@ Because these files drive trading decisions, storage changes must be explicit, t
 
 Do not introduce a database dependency unless the project explicitly chooses to move away from local-file workflows.
 
+## Scenario: ST Calendar Coverage Metadata
+
+### 1. Scope / Trigger
+
+- Trigger: `data/raw/st_calendar.csv` is a Tushare `namechange` event table. On days with no ST name-change events, the latest event date can be earlier than the factor-cache end date even when the table was refreshed through the target date.
+- Owners: `src.data_fetcher.update_st_calendar_data`, `scripts/run_update_point_in_time_data.py`, and `src.data_governance.build_data_governance_report`.
+
+### 2. Signatures
+
+- Command: `.\.venv\Scripts\python.exe scripts\run_update_point_in_time_data.py [--skip-daily-basic] [--skip-index-constituents] [--skip-st-calendar] [--end-date YYYY-MM-DD|auto]`.
+- Store: `data/raw/st_calendar.csv`.
+- Metadata store: `data/raw/st_calendar.csv.meta.json`.
+- Report fields: `st_calendar_end_date` is the latest event date; `st_calendar_coverage_end_date` is the latest date proven by the refresh metadata.
+
+### 3. Contracts
+
+- `update_st_calendar_data(..., coverage_end_date=...)` must write both the CSV event table and the sibling metadata file.
+- Metadata JSON fields are `generated_at`, `source`, `coverage_end_date`, `event_start_date`, `event_end_date`, and `rows`.
+- `coverage_end_date` is the resolved run target date passed by `scripts/run_update_point_in_time_data.py`; when unavailable, it may be empty and governance falls back to event-date behavior.
+- Governance must use `st_calendar_coverage_end_date` when deciding `st_calendar_end_before_factor_end`; it must keep `st_calendar_end_date` as event-table evidence for diagnostics.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Metadata exists and `coverage_end_date >= point_in_time_end` | Do not emit `st_calendar_end_before_factor_end`, even if the last ST event is earlier. |
+| Metadata is missing or malformed | Fall back to `st_calendar_end_date` so old caches remain diagnosable. |
+| Metadata coverage is earlier than `point_in_time_end` | Emit `st_calendar_end_before_factor_end:<coverage_end_date><<point_in_time_end>`. |
+| ST calendar CSV is missing while ST exclusion is enabled | Keep existing `st_calendar_missing_current_name_filter_only` issue. |
+
+### 5. Good/Base/Bad Cases
+
+- Good: the ST event table has `event_end_date=2026-06-23`, metadata has `coverage_end_date=2026-06-24`, and factor metadata ends `2026-06-24`; governance passes the ST freshness check.
+- Base: an older cache has no metadata; governance compares the event end date and may warn until the ST refresh is rerun.
+- Bad: treating a quiet no-event day as incomplete ST coverage and blocking or warning daily review after a successful refresh.
+
+### 6. Tests Required
+
+- `tests/test_data_fetcher.py` must assert `update_st_calendar_data` writes `st_calendar.csv.meta.json` with coverage and event dates.
+- `tests/test_data_governance.py` must assert coverage metadata suppresses `st_calendar_end_before_factor_end` when the event table is quiet on the target date.
+- Existing partial-history tests must continue to assert legacy no-metadata behavior.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+if point_in_time_end > st_calendar_end_date:
+    warnings.append("st_calendar_end_before_factor_end")
+```
+
+This confuses the latest ST event date with the date through which the event table was refreshed.
+
+#### Correct
+
+```python
+effective_end = st_calendar_coverage_end_date or st_calendar_end_date
+if point_in_time_end > effective_end:
+    warnings.append("st_calendar_end_before_factor_end")
+```
+
+The coverage metadata proves quiet no-event days without hiding stale legacy caches.
+
 ---
 
 ## Read And Write Patterns

@@ -320,6 +320,7 @@ def _governance_precheck_details(governance: Mapping[str, Any]) -> dict[str, Any
         "daily_basic_end_date": governance.get("daily_basic_end_date"),
         "daily_basic_coverage": governance.get("daily_basic_date_coverage"),
         "st_calendar_end_date": governance.get("st_calendar_end_date"),
+        "st_calendar_coverage_end_date": governance.get("st_calendar_coverage_end_date"),
         "factor_cache_meta_end_date": governance.get("factor_cache_meta_end_date"),
     }
 

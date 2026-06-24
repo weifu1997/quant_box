@@ -781,6 +781,10 @@ class DataFetcherTests(unittest.TestCase):
             cached = pd.read_csv(path)
             self.assertEqual(cached["ts_code"].tolist(), ["000001.SZ"])
             self.assertIn("st_start_date", cached.columns)
+            metadata = json.loads(path.with_name(f"{path.name}.meta.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["coverage_end_date"], "2024-01-03")
+            self.assertEqual(metadata["event_end_date"], "2024-01-02")
+            self.assertEqual(metadata["rows"], 1)
 
     def test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait(self) -> None:
         """函数说明：验证 test_fetch_daily_stock_defaults_to_five_retries_and_caps_wait 覆盖的行为场景。"""

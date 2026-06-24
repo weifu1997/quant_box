@@ -84,7 +84,7 @@ def main() -> None:
         )
         logger.info("index constituents cache written to %s", path)
     if not args.skip_st_calendar:
-        path = update_st_calendar_data(out_file=args.st_out_file)
+        path = update_st_calendar_data(out_file=args.st_out_file, coverage_end_date=end_date)
         logger.info("ST calendar written to %s", path)
 
     report = build_data_governance_report(config)

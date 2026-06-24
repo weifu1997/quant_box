@@ -356,6 +356,7 @@ def fetch_st_calendar(
 def update_st_calendar_data(
     out_file: str | Path | None = None,
     client: TushareHttpClient | None = None,
+    coverage_end_date: str | None = None,
     retries: int | None = None,
     retry_max_wait: float | None = None,
 ) -> Path:
@@ -370,7 +371,47 @@ def update_st_calendar_data(
     retry_max_wait = float(retry_max_wait) if retry_max_wait is not None else None
     frame = fetch_st_calendar(client=client, retries=retries, retry_max_wait=retry_max_wait)
     frame.to_csv(path, index=False, encoding="utf-8-sig")
+    _write_st_calendar_metadata(path, frame=frame, coverage_end_date=coverage_end_date or _resolve_st_calendar_coverage_end_date(config))
     return path
+
+
+def _write_st_calendar_metadata(path: Path, frame: pd.DataFrame, coverage_end_date: str) -> None:
+    meta_path = path.with_name(f"{path.name}.meta.json")
+    event_start, event_end = _st_calendar_event_range(frame)
+    payload = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "source": "tushare_namechange",
+        "coverage_end_date": coverage_end_date,
+        "event_start_date": event_start,
+        "event_end_date": event_end,
+        "rows": int(len(frame)),
+    }
+    meta_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _resolve_st_calendar_coverage_end_date(config: dict) -> str:
+    try:
+        return resolve_target_date_value(config.get("data", {}).get("end_date"), config=config)
+    except (ValueError, TypeError):
+        return ""
+
+
+def _st_calendar_event_range(frame: pd.DataFrame) -> tuple[str, str]:
+    date_parts: list[pd.Series] = []
+    for column in ["st_start_date", "start_date", "begin_date", "date", "ann_date", "st_end_date", "end_date"]:
+        if column not in frame.columns:
+            continue
+        values = pd.to_datetime(
+            frame[column].astype(str).str.replace("-", "", regex=False),
+            format="%Y%m%d",
+            errors="coerce",
+        ).dropna()
+        if not values.empty:
+            date_parts.append(values)
+    if not date_parts:
+        return "", ""
+    dates = pd.concat(date_parts)
+    return str(dates.min().date()), str(dates.max().date())
 
 
 def _index_candidate_codes(index_code: str, fallback_index_codes: Iterable[str] | str | None) -> list[str]:
