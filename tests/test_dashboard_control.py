@@ -231,6 +231,22 @@ class DashboardControlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["active_job"], job)
 
+    def test_dashboard_precheck_api_returns_precheck_payload(self) -> None:
+        precheck = {
+            "version": 1,
+            "generated_at": "2026-06-24T09:00:00",
+            "status": "pass",
+            "summary": "运行前检查通过，可以重跑自动信号。",
+            "can_run_normal": True,
+            "target_date_resolution": {"target_date": "2026-06-23"},
+            "items": [],
+        }
+        with patch("src.dashboard_api.build_dashboard_precheck", return_value=precheck):
+            response = TestClient(create_dashboard_app()).get("/api/dashboard/precheck")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), precheck)
+
     def test_stop_dashboard_job_cancels_running_pid(self) -> None:
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp)

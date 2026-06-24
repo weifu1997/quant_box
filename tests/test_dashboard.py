@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from src.dashboard import build_dashboard_snapshot
+from src.dashboard import build_dashboard_precheck, build_dashboard_snapshot
 
 
 class DashboardTests(unittest.TestCase):
@@ -163,6 +163,101 @@ class DashboardTests(unittest.TestCase):
 
             self.assertEqual(snapshot["blocker_actions"][0]["title"], "补齐 daily_basic 点时数据")
             self.assertEqual(snapshot["blocker_actions"][0]["action"]["action"], "repair_point_in_time")
+
+    def test_build_dashboard_precheck_passes_with_current_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "outputs"
+            out_dir.mkdir()
+            holdings = root / "current_holdings.csv"
+            holdings.write_text("instrument,shares\n000001.SZ,100\n", encoding="utf-8")
+            (out_dir / "data_health_report.json").write_text(
+                json.dumps(
+                    {
+                        "requested_end_date": "2026-06-23",
+                        "is_healthy": True,
+                        "issues": [],
+                        "raw_latest_date": "2026-06-23",
+                        "price_latest_date": "2026-06-23",
+                        "factor_latest_date": "2026-06-23",
+                        "factor_latest_target_coverage": 1.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "data_governance_report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-06-24T09:00:00",
+                        "is_point_in_time_ready": True,
+                        "issues": [],
+                        "warnings": [],
+                        "daily_basic_end_date": "2026-06-23",
+                        "daily_basic_date_coverage": 1.0,
+                        "st_calendar_end_date": "2026-06-23",
+                        "factor_cache_meta_available": True,
+                        "factor_cache_meta_end_date": "2026-06-23",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "data": {"end_date": "2026-06-23"},
+                "account": {"current_holdings_file": str(holdings), "total_asset": 1_000_000, "cash": 100_000},
+                "outputs": {"dir": str(out_dir)},
+            }
+
+            precheck = build_dashboard_precheck(out_dir=out_dir, config=config)
+
+            self.assertEqual(precheck["status"], "pass")
+            self.assertTrue(precheck["can_run_normal"])
+            self.assertTrue(all(item["status"] == "pass" for item in precheck["items"]))
+
+    def test_build_dashboard_precheck_maps_blockers_to_actions(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "outputs"
+            out_dir.mkdir()
+            holdings = root / "missing_holdings.csv"
+            (out_dir / "data_health_report.json").write_text(
+                json.dumps(
+                    {
+                        "requested_end_date": "2026-06-23",
+                        "is_healthy": False,
+                        "issues": ["factor_latest_before_end:2026-06-22<2026-06-23"],
+                        "factor_latest_date": "2026-06-22",
+                        "factor_latest_target_coverage": 0.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "data_governance_report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-06-24T09:00:00",
+                        "is_point_in_time_ready": False,
+                        "issues": ["daily_basic_date_coverage_below_required:2779/2784<1.00"],
+                        "warnings": [],
+                        "factor_cache_meta_available": True,
+                        "factor_cache_meta_end_date": "2026-06-23",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "data": {"end_date": "2026-06-23"},
+                "account": {"current_holdings_file": str(holdings), "total_asset": 1_000_000, "cash": 100_000},
+                "outputs": {"dir": str(out_dir)},
+            }
+
+            precheck = build_dashboard_precheck(out_dir=out_dir, config=config)
+            by_id = {item["id"]: item for item in precheck["items"]}
+
+            self.assertEqual(precheck["status"], "fail")
+            self.assertFalse(precheck["can_run_normal"])
+            self.assertEqual(by_id["data_governance"]["action"]["action"], "repair_point_in_time")
+            self.assertEqual(by_id["factor_freshness"]["action"]["action"], "run_auto_signal")
+            self.assertEqual(by_id["account"]["status"], "fail")
 
 
 if __name__ == "__main__":

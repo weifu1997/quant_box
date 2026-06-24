@@ -1,4 +1,11 @@
-import type { DashboardJob, DashboardJobAction, DashboardJobsResponse, DashboardRunMode, DashboardSnapshot } from "./types";
+import type {
+  DashboardJob,
+  DashboardJobAction,
+  DashboardJobsResponse,
+  DashboardPrecheck,
+  DashboardRunMode,
+  DashboardSnapshot
+} from "./types";
 
 export async function fetchLatestDashboard(signal?: AbortSignal): Promise<DashboardSnapshot> {
   const response = await fetch("/api/dashboard/latest", { signal });
@@ -18,6 +25,14 @@ export async function fetchDashboardJobs(signal?: AbortSignal): Promise<Dashboar
     throw new Error(await responseError(response, "任务状态读取失败"));
   }
   return (await response.json()) as DashboardJobsResponse;
+}
+
+export async function fetchDashboardPrecheck(signal?: AbortSignal): Promise<DashboardPrecheck> {
+  const response = await fetch("/api/dashboard/precheck", { signal });
+  if (!response.ok) {
+    throw new Error(await responseError(response, "运行前预检查读取失败"));
+  }
+  return (await response.json()) as DashboardPrecheck;
 }
 
 export async function startDashboardJob(

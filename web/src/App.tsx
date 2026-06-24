@@ -22,12 +22,14 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { artifactUrl, fetchDashboardJobs, fetchLatestDashboard, startDashboardJob, stopDashboardJob } from "./api";
+import { artifactUrl, fetchDashboardJobs, fetchDashboardPrecheck, fetchLatestDashboard, startDashboardJob, stopDashboardJob } from "./api";
 import type {
   Artifact,
   BlockerAction,
   DashboardJob,
   DashboardJobAction,
+  DashboardPrecheck,
+  DashboardPrecheckItem,
   DashboardRunMode,
   DashboardSnapshot,
   Gate,
@@ -91,11 +93,14 @@ const STRATEGY_LABELS: Record<string, string> = {
 export default function App() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [jobs, setJobs] = useState<DashboardJob[]>([]);
+  const [precheck, setPrecheck] = useState<DashboardPrecheck | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [jobsError, setJobsError] = useState<string | null>(null);
+  const [precheckError, setPrecheckError] = useState<string | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
   const [jobsRefreshCount, setJobsRefreshCount] = useState(0);
+  const [precheckRefreshCount, setPrecheckRefreshCount] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -127,8 +132,27 @@ export default function App() {
     return () => controller.abort();
   }, [jobsRefreshCount]);
 
-  const refresh = useCallback(() => setRefreshCount((value) => value + 1), []);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchDashboardPrecheck(controller.signal)
+      .then((data) => {
+        setPrecheck(data);
+        setPrecheckError(null);
+      })
+      .catch((err: Error) => {
+        if (err.name !== "AbortError") {
+          setPrecheckError(err.message);
+        }
+      });
+    return () => controller.abort();
+  }, [precheckRefreshCount]);
+
+  const refresh = useCallback(() => {
+    setRefreshCount((value) => value + 1);
+    setPrecheckRefreshCount((value) => value + 1);
+  }, []);
   const refreshJobs = useCallback(() => setJobsRefreshCount((value) => value + 1), []);
+  const refreshPrecheck = useCallback(() => setPrecheckRefreshCount((value) => value + 1), []);
   const activeJob = useMemo(() => jobs.find(isActiveJob) ?? null, [jobs]);
 
   useEffect(() => {
@@ -210,6 +234,9 @@ export default function App() {
             jobsError={jobsError}
             onJobStarted={recordStartedJob}
             onJobsRefresh={refreshJobs}
+            onPrecheckRefresh={refreshPrecheck}
+            precheck={precheck}
+            precheckError={precheckError}
             snapshot={snapshot}
           />
         )}
@@ -223,12 +250,18 @@ function Dashboard({
   jobsError,
   onJobStarted,
   onJobsRefresh,
+  onPrecheckRefresh,
+  precheck,
+  precheckError,
   snapshot
 }: {
   jobs: DashboardJob[];
   jobsError: string | null;
   onJobStarted: (job: DashboardJob) => void;
   onJobsRefresh: () => void;
+  onPrecheckRefresh: () => void;
+  precheck: DashboardPrecheck | null;
+  precheckError: string | null;
   snapshot: DashboardSnapshot;
 }) {
   const signalSummary = useMemo(() => actionSummary(snapshot.signal_summary), [snapshot.signal_summary]);
@@ -257,6 +290,15 @@ function Dashboard({
       </section>
 
       <RunControlPanel jobs={jobs} jobsError={jobsError} onJobStarted={onJobStarted} onJobsRefresh={onJobsRefresh} />
+
+      <PrecheckPanel
+        jobs={jobs}
+        onJobStarted={onJobStarted}
+        onJobsRefresh={onJobsRefresh}
+        onRefresh={onPrecheckRefresh}
+        precheck={precheck}
+        precheckError={precheckError}
+      />
 
       <section className="panel gates-panel" id="gates">
         <SectionTitle icon={<CheckCircle2 size={18} />} title="质量门槛" aside={statusLabel(snapshot.latest_run.status)} />
@@ -399,6 +441,89 @@ function RunControlPanel({
       {controlError && <p className="inline-error">{controlError}</p>}
       {jobsError && <p className="inline-error">{jobsError}</p>}
       {latestJob ? <JobStatusCard job={latestJob} /> : <EmptyPanel message="暂无后台任务记录。" />}
+    </section>
+  );
+}
+
+function PrecheckPanel({
+  jobs,
+  onJobStarted,
+  onJobsRefresh,
+  onRefresh,
+  precheck,
+  precheckError
+}: {
+  jobs: DashboardJob[];
+  onJobStarted: (job: DashboardJob) => void;
+  onJobsRefresh: () => void;
+  onRefresh: () => void;
+  precheck: DashboardPrecheck | null;
+  precheckError: string | null;
+}) {
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const activeJob = jobs.find(isActiveJob) ?? null;
+  const status = precheck?.status ?? "missing";
+  const aside = precheck ? precheckStatusLabel(status) : "未读取";
+
+  const runPrecheckAction = (item: DashboardPrecheckItem) => {
+    if (!item.action) {
+      return;
+    }
+    setPendingId(item.id);
+    setActionError(null);
+    startDashboardJob({ action: item.action.action, mode: item.action.mode ?? undefined })
+      .then((job) => {
+        onJobStarted(job);
+        onJobsRefresh();
+      })
+      .catch((err: Error) => setActionError(err.message))
+      .finally(() => setPendingId(null));
+  };
+
+  return (
+    <section className={`panel precheck-panel precheck-${status}`}>
+      <SectionTitle icon={<ClipboardList size={18} />} title="运行前预检查" aside={aside} />
+      <div className="precheck-head">
+        <div>
+          <strong>{precheck ? precheck.summary : "正在等待预检查结果"}</strong>
+          <span>{precheck ? `检查时间 ${formatDateTime(precheck.generated_at)}` : "读取本地证据，不执行数据下载或信号生成。"}</span>
+        </div>
+        <button className="icon-button compact-command" onClick={onRefresh} title="刷新预检查" type="button">
+          <RefreshCw size={16} />
+        </button>
+      </div>
+      {precheckError && <p className="inline-error">{precheckError}</p>}
+      {actionError && <p className="inline-error">{actionError}</p>}
+      {precheck ? (
+        <div className="precheck-grid">
+          {precheck.items.map((item) => (
+            <article className={`precheck-item precheck-item-${item.status}`} key={item.id}>
+              <div className="precheck-item-head">
+                <span className="status-dot" />
+                <strong>{precheckItemLabel(item)}</strong>
+              </div>
+              <p>{precheckItemSummary(item)}</p>
+              {item.action ? (
+                <button
+                  className="precheck-action"
+                  disabled={Boolean(activeJob || pendingId)}
+                  onClick={() => runPrecheckAction(item)}
+                  type="button"
+                >
+                  {pendingId === item.id ? <Loader2 className="spin-icon" size={15} /> : <Wrench size={15} />}
+                  <span>{pendingId === item.id ? "正在启动" : item.action.label}</span>
+                </button>
+              ) : (
+                <small>{precheckStatusLabel(item.status)}</small>
+              )}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyPanel message="暂无预检查结果。" />
+      )}
+      {activeJob && <p className="helper-text">后台任务运行中，预检查修复动作会在任务结束后恢复。</p>}
     </section>
   );
 }
@@ -866,6 +991,10 @@ function translateReason(reason: string) {
   if (dailyBasicCoverage) {
     return `${prefix}daily_basic 日期覆盖不足：${dailyBasicCoverage[1]}`;
   }
+  const staleArtifact = text.match(/^artifact_before_target:(.+)$/);
+  if (staleArtifact) {
+    return `${prefix}证据日期早于当前目标日期：${staleArtifact[1]}`;
+  }
   if (text === "data_governance_repaired_after_auto_report") {
     return `${prefix}daily_basic 缺口已按最新点时治理报告修复；请重跑自动信号刷新复核结论。`;
   }
@@ -922,6 +1051,32 @@ function reasonMeta(reason: string) {
     title: "质量门槛提示",
     detail: translated
   };
+}
+
+function precheckStatusLabel(value?: string | null) {
+  return {
+    pass: "通过",
+    warn: "需确认",
+    fail: "会阻塞",
+    missing: "证据缺失"
+  }[value || ""] ?? display(value);
+}
+
+function precheckItemLabel(item: DashboardPrecheckItem) {
+  return {
+    target_date: "目标交易日",
+    data_health: "数据健康",
+    data_governance: "点时治理",
+    factor_freshness: "因子新鲜度",
+    account: "账户与持仓"
+  }[item.id] ?? item.label;
+}
+
+function precheckItemSummary(item: DashboardPrecheckItem) {
+  if (item.issues.length) {
+    return translateReason(item.issues[0]);
+  }
+  return item.summary;
 }
 
 function statusLabel(value?: string | null) {

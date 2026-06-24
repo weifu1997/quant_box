@@ -161,6 +161,12 @@ h3 {
   cursor: pointer;
 }
 
+.compact-command {
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -256,6 +262,10 @@ h3 {
   grid-column: span 8;
 }
 
+.precheck-panel {
+  grid-column: span 8;
+}
+
 .control-panel,
 .blockers-panel,
 .order-summary {
@@ -344,6 +354,100 @@ h3 {
 
 .control-action:disabled,
 .segmented-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.precheck-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.precheck-head strong,
+.precheck-head span {
+  display: block;
+}
+
+.precheck-head span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.precheck-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.precheck-item {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 132px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.precheck-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.precheck-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.precheck-item small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.precheck-item-pass .status-dot {
+  background: var(--green);
+}
+
+.precheck-item-warn .status-dot,
+.precheck-item-missing .status-dot {
+  background: var(--amber);
+}
+
+.precheck-item-fail .status-dot {
+  background: var(--red);
+}
+
+.precheck-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  width: 100%;
+  padding: 0 9px;
+  border: 1px solid rgba(0, 122, 255, 0.28);
+  border-radius: 8px;
+  color: #07559f;
+  background: rgba(0, 122, 255, 0.07);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+
+.precheck-action:disabled {
   cursor: not-allowed;
   opacity: 0.52;
 }
@@ -1106,6 +1210,7 @@ tbody tr:last-child td {
 
   .gates-panel,
   .control-panel,
+  .precheck-panel,
   .blockers-panel,
   .quality-warning-panel,
   .order-summary,
@@ -1114,6 +1219,10 @@ tbody tr:last-child td {
   }
 
   .gate-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .precheck-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1155,6 +1264,7 @@ tbody tr:last-child td {
   .metric-strip,
   .report-summary,
   .gate-grid,
+  .precheck-grid,
   .progress-steps,
   .action-cards,
   .execution-strip {

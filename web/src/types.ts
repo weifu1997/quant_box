@@ -135,3 +135,29 @@ export interface DashboardJobsResponse {
   jobs: DashboardJob[];
   active_job?: DashboardJob | null;
 }
+
+export type PrecheckStatus = "pass" | "warn" | "fail" | "missing";
+
+export interface DashboardPrecheckItem {
+  id: string;
+  label: string;
+  status: PrecheckStatus | string;
+  summary: string;
+  issues: string[];
+  details: Record<string, unknown>;
+  action?: {
+    label: string;
+    action: DashboardJobAction;
+    mode?: DashboardRunMode | null;
+  } | null;
+}
+
+export interface DashboardPrecheck {
+  version: number;
+  generated_at: string;
+  status: "pass" | "warn" | "fail" | string;
+  summary: string;
+  can_run_normal: boolean;
+  target_date_resolution: Record<string, unknown>;
+  items: DashboardPrecheckItem[];
+}

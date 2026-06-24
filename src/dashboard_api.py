@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config_loader import PROJECT_ROOT
-from src.dashboard import build_dashboard_snapshot, resolve_dashboard_artifact
+from src.dashboard import build_dashboard_precheck, build_dashboard_snapshot, resolve_dashboard_artifact
 from src.dashboard_control import (
     DashboardJobConflictError,
     DashboardJobNotFoundError,
@@ -41,6 +41,10 @@ def create_dashboard_app() -> FastAPI:
     @app.get("/api/dashboard/latest")
     def latest_dashboard() -> dict:
         return build_dashboard_snapshot()
+
+    @app.get("/api/dashboard/precheck")
+    def dashboard_precheck() -> dict:
+        return build_dashboard_precheck()
 
     @app.get("/api/dashboard/jobs")
     def dashboard_jobs() -> dict[str, Any]:

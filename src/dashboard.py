@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import csv
+from datetime import datetime
 import json
 from pathlib import Path
 from typing import Any
 
 from src.config_loader import load_config, resolve_path
+from src.manual_orders import load_account_state, load_current_holdings, validate_account_inputs
+from src.trading_calendar import resolve_target_date
 
 
 DASHBOARD_VERSION = 1
@@ -79,11 +82,246 @@ def resolve_dashboard_artifact(artifact_id: str, out_dir: str | Path | None = No
     return None
 
 
+def build_dashboard_precheck(out_dir: str | Path | None = None, config: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Build a read-only pre-run check model before starting auto-signal."""
+    cfg = dict(config) if config is not None else load_config()
+    output_dir = _output_dir(out_dir, cfg)
+    target_item, target_resolution = _precheck_target_date(cfg)
+    health = _read_json_data(output_dir / "data_health_report.json")
+    governance = _read_json_data(output_dir / "data_governance_report.json")
+    items = [
+        target_item,
+        _precheck_data_health(health, target_resolution),
+        _precheck_governance(governance, target_resolution),
+        _precheck_factor_freshness(health, governance, target_resolution),
+        _precheck_account(cfg),
+    ]
+    fail_count = sum(1 for item in items if item["status"] == "fail")
+    missing_count = sum(1 for item in items if item["status"] == "missing")
+    warn_count = sum(1 for item in items if item["status"] == "warn")
+    if fail_count:
+        status = "fail"
+        summary = f"发现 {fail_count} 项阻塞，建议先修复后再重跑自动信号。"
+    elif missing_count or warn_count:
+        status = "warn"
+        summary = f"有 {missing_count + warn_count} 项需要确认；可以运行，但不建议直接依赖正式输出。"
+    else:
+        status = "pass"
+        summary = "运行前检查通过，可以重跑自动信号。"
+    return {
+        "version": DASHBOARD_VERSION,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "status": status,
+        "summary": summary,
+        "can_run_normal": status == "pass",
+        "target_date_resolution": target_resolution,
+        "items": items,
+    }
+
+
 def _output_dir(out_dir: str | Path | None, config: Mapping[str, Any] | None) -> Path:
     if out_dir is not None:
         return resolve_path(out_dir)
     cfg = dict(config) if config is not None else load_config()
     return resolve_path(_mapping_value(cfg.get("outputs")).get("dir", "outputs"))
+
+
+def _precheck_target_date(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        resolution = resolve_target_date(config.get("data", {}).get("end_date"), config=dict(config)).to_dict()
+    except Exception as exc:
+        return (
+            _precheck_item(
+                "target_date",
+                "目标交易日",
+                "fail",
+                f"无法解析自动信号目标日期：{exc}",
+                [f"target_date_resolution_failed:{exc}"],
+            ),
+            {},
+        )
+    warnings = _string_list(resolution.get("calendar_warnings"))
+    status = "warn" if warnings else "pass"
+    summary = (
+        f"目标日期 {resolution.get('target_date')}，日历来源 {resolution.get('calendar_source')}。"
+        if status == "pass"
+        else f"目标日期 {resolution.get('target_date')} 已解析，但日历存在降级：{warnings[0]}"
+    )
+    return (
+        _precheck_item(
+            "target_date",
+            "目标交易日",
+            status,
+            summary,
+            warnings,
+            {
+                "target_date": resolution.get("target_date"),
+                "latest_trade_date": resolution.get("latest_trade_date"),
+                "calendar_source": resolution.get("calendar_source"),
+                "reason": resolution.get("reason"),
+            },
+        ),
+        resolution,
+    )
+
+
+def _precheck_data_health(health: Mapping[str, Any], target_resolution: Mapping[str, Any]) -> dict[str, Any]:
+    if not health:
+        return _precheck_item("data_health", "数据健康证据", "missing", "未找到 data_health_report.json，无法提前确认数据健康。")
+    issues = _string_list(health.get("issues"))
+    if issues or not bool(health.get("is_healthy")):
+        summary = _issue_summary(issues, "数据健康检查未通过。")
+        return _precheck_item("data_health", "数据健康证据", "fail", summary, issues, _data_health_details(health))
+    stale = _artifact_target_stale(health.get("requested_end_date"), target_resolution.get("target_date"))
+    if stale:
+        return _precheck_item(
+            "data_health",
+            "数据健康证据",
+            "warn",
+            "数据健康报告的目标日期不是当前目标日期，建议重跑后再确认。",
+            [stale],
+            _data_health_details(health),
+        )
+    return _precheck_item("data_health", "数据健康证据", "pass", "原始数据、价格面板和因子覆盖最近一次检查通过。", [], _data_health_details(health))
+
+
+def _precheck_governance(governance: Mapping[str, Any], target_resolution: Mapping[str, Any]) -> dict[str, Any]:
+    if not governance:
+        return _precheck_item("data_governance", "点时治理证据", "missing", "未找到 data_governance_report.json，无法提前确认点时数据。")
+    issues = _string_list(governance.get("issues"))
+    warnings = _string_list(governance.get("warnings"))
+    stale = _artifact_target_stale(governance.get("factor_cache_meta_end_date"), target_resolution.get("target_date"))
+    if issues or governance.get("is_point_in_time_ready") is False:
+        status = "fail"
+        summary = _issue_summary(issues, "点时治理检查未通过。")
+    elif stale:
+        status = "warn"
+        summary = "点时治理报告的因子截止日期早于当前目标日期。"
+        warnings = [stale, *warnings]
+    elif warnings:
+        status = "warn"
+        summary = _issue_summary(warnings, "点时治理有提示。")
+    else:
+        status = "pass"
+        summary = "daily_basic、ST 日历和点时治理证据可用。"
+    return _precheck_item("data_governance", "点时治理证据", status, summary, issues or warnings, _governance_precheck_details(governance))
+
+
+def _precheck_factor_freshness(
+    health: Mapping[str, Any],
+    governance: Mapping[str, Any],
+    target_resolution: Mapping[str, Any],
+) -> dict[str, Any]:
+    target_date = str(target_resolution.get("target_date") or "")
+    if health:
+        issues = [issue for issue in _string_list(health.get("issues")) if issue.startswith("factor_")]
+        details = {
+            "factor_latest_date": health.get("factor_latest_date"),
+            "factor_latest_coverage": health.get("factor_latest_target_coverage"),
+            "requested_end_date": health.get("requested_end_date"),
+        }
+        if issues:
+            return _precheck_item("factor_freshness", "因子新鲜度", "fail", _issue_summary(issues, "因子新鲜度不足。"), issues, details)
+        stale = _artifact_target_stale(health.get("factor_latest_date"), target_date)
+        if stale:
+            return _precheck_item("factor_freshness", "因子新鲜度", "warn", "因子最新日期早于当前目标日期。", [stale], details)
+        return _precheck_item("factor_freshness", "因子新鲜度", "pass", "因子缓存覆盖最近一次目标日期。", [], details)
+    if governance:
+        meta_end = governance.get("factor_cache_meta_end_date")
+        details = {
+            "factor_cache_meta_end_date": meta_end,
+            "factor_cache_meta_available": governance.get("factor_cache_meta_available"),
+        }
+        if governance.get("factor_cache_meta_available") is False:
+            return _precheck_item("factor_freshness", "因子新鲜度", "missing", "因子缓存元数据缺失，无法提前确认因子新鲜度。", [], details)
+        stale = _artifact_target_stale(meta_end, target_date)
+        status = "warn" if stale else "pass"
+        summary = "因子元数据可用。" if status == "pass" else "因子元数据截止日期早于当前目标日期。"
+        return _precheck_item("factor_freshness", "因子新鲜度", status, summary, [stale] if stale else [], details)
+    return _precheck_item("factor_freshness", "因子新鲜度", "missing", "缺少数据健康或点时治理报告，无法提前确认因子新鲜度。")
+
+
+def _precheck_account(config: Mapping[str, Any]) -> dict[str, Any]:
+    cfg = dict(config)
+    try:
+        account = load_account_state(cfg)
+        holdings = load_current_holdings(cfg)
+        issues = validate_account_inputs(account, holdings, cfg)
+    except Exception as exc:
+        return _precheck_item("account", "账户与持仓", "fail", f"账户或持仓读取失败：{exc}", [f"account_precheck_failed:{exc}"])
+    details = {
+        "account_file": account.source_file,
+        "holdings_file": account.holdings_file,
+        "holdings_loaded": account.holdings_loaded,
+        "holdings_rows": int(len(holdings)),
+        "total_asset": account.total_asset,
+        "cash": account.cash,
+    }
+    status = "pass" if not issues else "fail"
+    summary = "账户与当前持仓输入可用。" if status == "pass" else _issue_summary(issues, "账户与当前持仓输入未通过。")
+    return _precheck_item("account", "账户与持仓", status, summary, issues, details)
+
+
+def _precheck_item(
+    item_id: str,
+    label: str,
+    status: str,
+    summary: str,
+    issues: list[str] | None = None,
+    details: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    action = _precheck_action(item_id, issues or [])
+    return {
+        "id": item_id,
+        "label": label,
+        "status": status,
+        "summary": summary,
+        "issues": list(issues or []),
+        "details": dict(details or {}),
+        "action": action,
+    }
+
+
+def _precheck_action(item_id: str, issues: list[str]) -> dict[str, Any] | None:
+    if item_id == "data_governance" and any(issue.startswith("daily_basic_") for issue in issues):
+        return {"label": "修复 daily_basic", "action": "repair_point_in_time"}
+    if item_id in {"data_health", "factor_freshness"} and issues:
+        return {"label": "重跑自动信号", "action": "run_auto_signal", "mode": "normal"}
+    return None
+
+
+def _artifact_target_stale(value: Any, target_date: Any) -> str:
+    if not value or not target_date:
+        return ""
+    try:
+        observed = str(Path(str(value)).name) if isinstance(value, Path) else str(value)
+        if datetime.fromisoformat(observed) < datetime.fromisoformat(str(target_date)):
+            return f"artifact_before_target:{observed}<{target_date}"
+    except ValueError:
+        return ""
+    return ""
+
+
+def _data_health_details(health: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "requested_end_date": health.get("requested_end_date"),
+        "raw_latest_date": health.get("raw_latest_date"),
+        "price_latest_date": health.get("price_latest_date"),
+        "factor_latest_date": health.get("factor_latest_date"),
+        "raw_latest_coverage": health.get("raw_latest_target_coverage"),
+        "price_latest_coverage": health.get("price_latest_target_coverage"),
+        "factor_latest_coverage": health.get("factor_latest_target_coverage"),
+    }
+
+
+def _governance_precheck_details(governance: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "generated_at": governance.get("generated_at"),
+        "daily_basic_end_date": governance.get("daily_basic_end_date"),
+        "daily_basic_coverage": governance.get("daily_basic_date_coverage"),
+        "st_calendar_end_date": governance.get("st_calendar_end_date"),
+        "factor_cache_meta_end_date": governance.get("factor_cache_meta_end_date"),
+    }
 
 
 def _build_readiness(

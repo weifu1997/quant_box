@@ -177,6 +177,7 @@ if looks_like_field_table(price_df.columns):
 - Batch wrapper: `15_启动Web仪表盘.bat` starts the FastAPI backend and React/Vite frontend, waits for `http://127.0.0.1:8000/api/health` and `http://127.0.0.1:5173`, then opens the dashboard URL.
 - API: `GET /api/health -> {"status": "ok"}`.
 - API: `GET /api/dashboard/latest -> DashboardSnapshot`.
+- API: `GET /api/dashboard/precheck -> DashboardPrecheck`.
 - API: `GET /api/dashboard/jobs -> {"jobs": DashboardJob[], "active_job": DashboardJob|null}`.
 - API: `POST /api/dashboard/jobs` with JSON `{"action": "repair_point_in_time"}` or `{"action": "run_auto_signal", "mode": "candidate"|"normal"} -> {"job": DashboardJob}`.
 - API: `POST /api/dashboard/jobs/{job_id}/stop -> {"job": DashboardJob}` stops a running dashboard job and its child process tree.
@@ -196,6 +197,8 @@ if looks_like_field_table(price_df.columns):
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
 - `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `blocker_actions`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
 - `blocker_actions` is the structured repair center contract. It maps each current blocker or stale-report freshness note to a user-facing title/detail, severity, normalized issue id, and an optional whitelisted dashboard job action. The frontend must not derive shell commands or mark blockers fixed locally.
+- `DashboardPrecheck` is a read-only pre-run evidence model with `status`, `summary`, `can_run_normal`, `target_date_resolution`, and compact `items`. It must not download data, recompute factors, write signals, promote candidate artifacts, or mutate account/holding files.
+- Precheck items cover target trading date, data health evidence, point-in-time governance evidence, factor freshness, and account/current holdings. Missing artifacts become `status="missing"` or `warn`, not fabricated passes. Failed daily-basic governance may expose only the existing `repair_point_in_time` job action; factor/data blockers may expose only the whitelisted `run_auto_signal` action.
 - If `data_governance_report.json` is newer than `auto_signal_report.json`, the dashboard governance gate must use the standalone governance report instead of the stale governance snapshot embedded in the auto-signal report. Resolved stale governance block reasons should be filtered from dashboard `block_reasons` / `quality_warnings`, and `freshness_notes` should tell the frontend that the auto-signal report still needs a rerun to refresh the final verdict.
 - `DashboardJob` must keep the frontend decoupled from process internals by returning compact fields: `id`, `action`, `mode`, `label`, `status`, `message`, `command`, `started_at`, `completed_at`, `return_code`, `log_path`, `log_tail`, and `progress`.
 - `DashboardJob.progress` contains `summary`, `percent`, `active_step`, and compact step rows. Auto-signal progress is derived from `outputs/auto_run_status.json` only when that status belongs to the current job; daily-basic repair progress is inferred from the controlled job log tail.
@@ -208,6 +211,8 @@ if looks_like_field_table(price_df.columns):
 | --- | --- |
 | `auto_signal_report.json` is missing | `readiness.status="missing"` and UI shows an empty state |
 | `auto_signal_report.json` is malformed | `readiness.status="error"` and `errors[]` records the JSON read failure |
+| Precheck cannot resolve target date | The target-date precheck item is `fail` with an actionable error summary |
+| Precheck evidence artifact is missing | The related precheck item is `missing`; the frontend renders an unknown state |
 | Manual-order CSV is missing | `orders.exists=false`; the UI renders a non-crashing empty state |
 | A gate artifact is missing | Gate status is `missing`, not `pass` |
 | `data_governance_report.json` is newer and fixes an issue embedded in `auto_signal_report.json` | Governance gate reflects the newer report, stale governance reasons are filtered from dashboard blockers/warnings, and `freshness_notes` asks the UI to rerun auto signal |
@@ -225,10 +230,12 @@ if looks_like_field_table(price_df.columns):
 - Good: latest report exists, manual orders exist, and dashboard shows a readiness verdict, gate cards, blockers, order preview, and artifact links.
 - Good: dashboard repair/rerun buttons start a whitelisted job, show a live log tail, and refresh the latest report when the job completes.
 - Good: dashboard shows structured job progress and blocker-specific repair actions instead of requiring users to interpret raw log text.
+- Good: before starting auto-signal, dashboard shows a read-only precheck for target date, data health, point-in-time governance, factor freshness, and account/holdings.
 - Good: while a dashboard job is running, the UI shows a stop button that calls the backend stop route and then displays `cancelled`.
 - Good: after dashboard-triggered `daily_basic` repair, the governance gate stops showing the stale embedded `daily_basic_date_coverage_below_required` issue and instead shows a rerun-needed freshness note.
 - Base: no latest report exists yet; dashboard still starts and tells the user the latest report is missing.
 - Bad: frontend marks a data issue fixed without starting the backend repair command.
+- Bad: precheck downloads market data, recomputes factors, writes official/candidate signal artifacts, or edits holdings.
 - Bad: dashboard continues to show `daily_basic_date_coverage_below_required` from an older auto-signal report after a newer governance report proves the gap is fixed.
 - Bad: frontend reads raw files directly from the browser or the backend exposes an arbitrary file path download endpoint.
 - Bad: normal output mode uses `--force-official` or bypasses auto-signal gates.
@@ -240,6 +247,8 @@ if looks_like_field_table(price_df.columns):
 - Unit test malformed report JSON returns `readiness.status="error"`.
 - Unit test dashboard job command building for `repair_point_in_time`, candidate rerun, normal rerun, invalid mode, and unknown action.
 - Unit test dashboard blocker action mapping for `daily_basic` repair, candidate-only rerun, and stale-report rerun notes.
+- Unit test dashboard precheck pass/fail/missing behavior, including daily-basic repair action and factor rerun action mapping.
+- API test that `GET /api/dashboard/precheck` returns the precheck payload.
 - Unit test dashboard job progress from auto-signal status files and daily-basic repair logs.
 - Unit test that a newer standalone `data_governance_report.json` supersedes stale embedded auto-report governance, filters resolved stale block reasons, and emits `freshness_notes`.
 - API test that `GET /api/dashboard/jobs` reports a running active job.
