@@ -41,6 +41,7 @@ def build_dashboard_snapshot(out_dir: str | Path | None = None, config: Mapping[
         _string_list((report or status or {}).get("quality_warnings")),
         governance_context,
     )
+    freshness_notes = _freshness_notes(governance_context)
 
     errors = [
         item["error"]
@@ -54,8 +55,9 @@ def build_dashboard_snapshot(out_dir: str | Path | None = None, config: Mapping[
         "latest_run": _build_latest_run(report, status),
         "gates": _build_gates(report, status, output_dir, governance_artifact, governance_context),
         "block_reasons": block_reasons,
+        "blocker_actions": _build_blocker_actions(block_reasons, freshness_notes),
         "quality_warnings": quality_warnings,
-        "freshness_notes": _freshness_notes(governance_context),
+        "freshness_notes": freshness_notes,
         "signal_summary": _mapping_value((report or {}).get("signal_summary")),
         "orders": orders,
         "artifacts": artifacts,
@@ -294,6 +296,74 @@ def _freshness_notes(governance_context: Mapping[str, Any] | None) -> list[str]:
     if governance_context and _list_value(governance_context.get("resolved_issues")):
         return ["data_governance_repaired_after_auto_report"]
     return []
+
+
+def _build_blocker_actions(block_reasons: list[str], freshness_notes: list[str]) -> list[dict[str, Any]]:
+    items = [_blocker_action(reason) for reason in block_reasons]
+    for note in freshness_notes:
+        items.append(_blocker_action(note, source="freshness_note"))
+    return items
+
+
+def _blocker_action(reason: str, source: str = "block_reason") -> dict[str, Any]:
+    issue = _normalized_reason(reason)
+    title = "需要人工处理"
+    detail = "该阻塞项没有安全的一键修复动作，请查看原始报告和日志。"
+    severity = "danger"
+    action: dict[str, Any] | None = None
+
+    if issue.startswith("daily_basic_"):
+        title = "补齐 daily_basic 点时数据"
+        detail = "运行点时数据修复，只补 daily_basic 缺口；完成后需要重跑自动信号刷新最终结论。"
+        severity = "warning"
+        action = {"label": "修复 daily_basic", "action": "repair_point_in_time"}
+    elif issue in {"data_governance_repaired_after_auto_report"}:
+        title = "重跑自动信号刷新结论"
+        detail = "最新点时治理报告已经修复旧报告里的缺口，需要重跑自动信号让复核结论同步。"
+        severity = "info"
+        action = {"label": "重跑自动信号", "action": "run_auto_signal", "mode": "normal"}
+    elif issue.startswith("factor_latest_") or issue.startswith("factor_coverage_"):
+        title = "刷新因子并重跑信号"
+        detail = "因子缓存或因子覆盖未达到目标日期；重跑自动信号会按当前门槛重新计算并再次检查。"
+        action = {"label": "重跑自动信号", "action": "run_auto_signal", "mode": "normal"}
+    elif issue == "candidate_only_requested":
+        title = "退出候选输出模式"
+        detail = "本次运行只生成候选产物；如需进入人工交易复核，请用正常门槛输出重跑。"
+        severity = "hold"
+        action = {"label": "正常门槛重跑", "action": "run_auto_signal", "mode": "normal"}
+    elif issue.startswith("st_calendar_"):
+        title = "补齐 ST 日历"
+        detail = "ST 日历点时数据不完整；当前仪表盘只提供 daily_basic 一键修复，请按原始报告命令处理。"
+        severity = "warning"
+    elif issue.startswith("index_constituents_") or issue.startswith("historical_universe_"):
+        title = "补齐指数/股票池点时数据"
+        detail = "股票池或指数成分历史不完整；当前仪表盘暂不提供该类一键修复，请按原始报告命令处理。"
+        severity = "warning"
+    elif issue.startswith("account_") or reason.startswith("account:"):
+        title = "检查账户与持仓输入"
+        detail = "账户或持仓输入未通过检查，需要先修正本地账户/持仓文件。"
+    elif reason.startswith("params:") or reason.startswith("backtest:"):
+        title = "复核策略质量门槛"
+        detail = "参数或回测质量未达到门槛，需要查看质量报告后调整策略证据。"
+
+    return {
+        "id": f"{source}:{reason}",
+        "source": source,
+        "reason": reason,
+        "issue": issue,
+        "title": title,
+        "detail": detail,
+        "severity": severity,
+        "action": action,
+    }
+
+
+def _normalized_reason(reason: str) -> str:
+    text = str(reason).strip()
+    for prefix in ("data:", "governance:", "data_governance:", "params:", "param:", "backtest:", "account:"):
+        if text.startswith(prefix):
+            return text[len(prefix) :]
+    return text
 
 
 def _governance_details(report: Mapping[str, Any], governance_context: Mapping[str, Any]) -> dict[str, Any]:

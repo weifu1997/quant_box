@@ -25,6 +25,7 @@ import type { ReactNode } from "react";
 import { artifactUrl, fetchDashboardJobs, fetchLatestDashboard, startDashboardJob, stopDashboardJob } from "./api";
 import type {
   Artifact,
+  BlockerAction,
   DashboardJob,
   DashboardJobAction,
   DashboardRunMode,
@@ -267,8 +268,12 @@ function Dashboard({
       </section>
 
       <section className="panel blockers-panel">
-        <SectionTitle icon={<AlertTriangle size={18} />} title="阻塞原因" aside={`${snapshot.block_reasons.length} 条`} />
-        <IssueList items={snapshot.block_reasons} empty="没有记录阻塞原因。" tone="danger" />
+        <BlockerActionCenter
+          items={snapshot.blocker_actions ?? []}
+          jobs={jobs}
+          onJobStarted={onJobStarted}
+          onJobsRefresh={onJobsRefresh}
+        />
       </section>
 
       <section className="panel quality-warning-panel">
@@ -409,6 +414,7 @@ function JobStatusCard({ job }: { job: DashboardJob }) {
         <small>{formatDateTime(job.completed_at || job.started_at)}</small>
       </div>
       <p>{job.message}</p>
+      {job.progress && <JobProgressView job={job} />}
       <div className="job-command" title={job.command.join(" ")}>
         {job.command.map(commandPart).join(" ")}
       </div>
@@ -423,6 +429,105 @@ function JobStatusCard({ job }: { job: DashboardJob }) {
           <p className="empty-log">{job.status === "running" ? "等待日志输出..." : "没有日志输出。"}</p>
         )}
       </div>
+    </div>
+  );
+}
+
+function JobProgressView({ job }: { job: DashboardJob }) {
+  const progress = job.progress;
+  if (!progress || !progress.steps.length) {
+    return null;
+  }
+  return (
+    <div className="progress-box">
+      <div className="progress-head">
+        <span>{progress.summary || "正在等待进度更新"}</span>
+        <strong>{progress.percent}%</strong>
+      </div>
+      <div className="progress-bar" aria-label="任务进度">
+        <span style={{ width: `${Math.min(Math.max(progress.percent, 0), 100)}%` }} />
+      </div>
+      <div className="progress-steps">
+        {progress.steps.map((step) => (
+          <div className={`progress-step step-${step.status}`} key={step.id}>
+            <span />
+            <div>
+              <strong>{step.label}</strong>
+              {step.message && <small>{step.message}</small>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BlockerActionCenter({
+  items,
+  jobs,
+  onJobStarted,
+  onJobsRefresh
+}: {
+  items: BlockerAction[];
+  jobs: DashboardJob[];
+  onJobStarted: (job: DashboardJob) => void;
+  onJobsRefresh: () => void;
+}) {
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const activeJob = jobs.find(isActiveJob) ?? null;
+  const runnableCount = items.filter((item) => item.action).length;
+
+  const runBlockerAction = (item: BlockerAction) => {
+    if (!item.action) {
+      return;
+    }
+    setPendingId(item.id);
+    setError(null);
+    startDashboardJob({ action: item.action.action, mode: item.action.mode ?? undefined })
+      .then((job) => {
+        onJobStarted(job);
+        onJobsRefresh();
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setPendingId(null));
+  };
+
+  return (
+    <div className="blocker-center">
+      <SectionTitle
+        icon={<AlertTriangle size={18} />}
+        title="阻塞修复中心"
+        aside={items.length ? `${runnableCount}/${items.length} 可一键处理` : "无阻塞"}
+      />
+      {items.length ? (
+        <div className="blocker-stack">
+          {items.map((item) => {
+            const disabled = Boolean(activeJob || pendingId || !item.action);
+            return (
+              <article className={`blocker-card blocker-${item.severity}`} key={item.id}>
+                <div className="blocker-copy">
+                  <strong>{item.title}</strong>
+                  <p>{item.detail}</p>
+                  <small>{translateReason(item.reason)}</small>
+                </div>
+                {item.action ? (
+                  <button className="blocker-action" disabled={disabled} onClick={() => runBlockerAction(item)} type="button">
+                    {pendingId === item.id ? <Loader2 className="spin-icon" size={16} /> : <Wrench size={16} />}
+                    <span>{pendingId === item.id ? "正在启动" : item.action.label}</span>
+                  </button>
+                ) : (
+                  <span className="pill muted">查看报告</span>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyPanel message="没有记录阻塞原因。" />
+      )}
+      {activeJob && <p className="helper-text">当前已有后台任务运行，修复按钮会在任务结束后恢复。</p>}
+      {error && <p className="inline-error">{error}</p>}
     </div>
   );
 }

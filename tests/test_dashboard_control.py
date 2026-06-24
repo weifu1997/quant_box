@@ -101,6 +101,104 @@ class DashboardControlTests(unittest.TestCase):
             with patch("src.dashboard_control._output_dir", return_value=out_dir):
                 self.assertEqual(list_dashboard_jobs(), [])
 
+    def test_list_dashboard_jobs_adds_auto_signal_progress_from_status(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            log_dir = out_dir / "logs"
+            job_dir.mkdir()
+            log_dir.mkdir()
+            (out_dir / "auto_run_status.json").write_text(
+                json.dumps(
+                    {
+                        "status": "running",
+                        "started_at": "2026-06-24T01:07:40",
+                        "stages": [
+                            {"name": "update_data", "state": "complete", "updated_at": "2026-06-24T01:08:00"},
+                            {
+                                "name": "compute_factors",
+                                "state": "running",
+                                "updated_at": "2026-06-24T01:08:30",
+                                "message": "loading factor cache",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (job_dir / "job-1.json").write_text(
+                json.dumps(
+                    {
+                        "id": "job-1",
+                        "action": "run_auto_signal",
+                        "label": "重跑自动信号（正常门槛输出）",
+                        "status": "running",
+                        "message": "任务已启动。",
+                        "command": ["python", "scripts/run_auto_signal.py"],
+                        "started_at": "2026-06-24T01:07:39",
+                        "completed_at": None,
+                        "return_code": None,
+                        "log_path": str(log_dir / "job.log"),
+                        "pid": 123,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch("src.dashboard_control._output_dir", return_value=out_dir),
+                patch("src.dashboard_control._pid_is_running", return_value=True),
+                patch("src.dashboard_control._pid_matches_job", return_value=True),
+            ):
+                jobs = list_dashboard_jobs()
+
+            self.assertEqual(jobs[0]["progress"]["active_step"], "compute_factors")
+            self.assertIn("计算因子", jobs[0]["progress"]["summary"])
+            factor_step = next(step for step in jobs[0]["progress"]["steps"] if step["id"] == "compute_factors")
+            self.assertEqual(factor_step["status"], "running")
+
+    def test_list_dashboard_jobs_adds_point_in_time_progress_from_log_tail(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            log_dir = out_dir / "logs"
+            job_dir.mkdir()
+            log_dir.mkdir()
+            log_path = log_dir / "job.log"
+            log_path.write_text(
+                "INFO:__main__:daily_basic cache written to data/factors/daily_basic.parquet\n",
+                encoding="utf-8",
+            )
+            (job_dir / "job-1.json").write_text(
+                json.dumps(
+                    {
+                        "id": "job-1",
+                        "action": "repair_point_in_time",
+                        "label": "补齐 daily_basic 点时数据",
+                        "status": "running",
+                        "message": "任务已启动。",
+                        "command": ["python", "scripts/run_update_point_in_time_data.py"],
+                        "started_at": "2026-06-24T01:07:39",
+                        "completed_at": None,
+                        "return_code": None,
+                        "log_path": str(log_path),
+                        "pid": 123,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch("src.dashboard_control._output_dir", return_value=out_dir),
+                patch("src.dashboard_control._pid_is_running", return_value=True),
+                patch("src.dashboard_control._pid_matches_job", return_value=True),
+            ):
+                jobs = list_dashboard_jobs()
+
+            self.assertEqual(jobs[0]["progress"]["active_step"], "data_governance")
+            daily_step = next(step for step in jobs[0]["progress"]["steps"] if step["id"] == "daily_basic")
+            self.assertEqual(daily_step["status"], "complete")
+
     def test_dashboard_jobs_api_marks_running_job_active(self) -> None:
         job = {
             "id": "job-1",

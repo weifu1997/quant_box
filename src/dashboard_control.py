@@ -24,6 +24,19 @@ JOB_LIMIT = 8
 LOG_TAIL_LINES = 120
 STOP_TIMEOUT_SECONDS = 5
 ACTIVE_JOB_STATUSES = {"running", "stopping"}
+AUTO_SIGNAL_STEPS = [
+    ("update_data", "更新行情数据"),
+    ("convert_data", "转换价格面板"),
+    ("compute_factors", "计算因子"),
+    ("data_health", "检查数据健康"),
+    ("adj_factor_meta", "构建复权元数据"),
+    ("data_governance", "检查点时治理"),
+    ("annual_state_router", "年度状态路由"),
+    ("optimize_params", "优化参数"),
+    ("backtest", "运行回测"),
+    ("research_diagnostics", "生成研究诊断"),
+    ("generate_signal", "生成信号与订单"),
+]
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PROCESS_LOCK = threading.Lock()
 _RUNNING_PROCESSES: dict[str, subprocess.Popen[bytes]] = {}
@@ -312,7 +325,185 @@ def _decorate_job(job: Mapping[str, Any]) -> dict[str, Any]:
     decorated = dict(job)
     log_path = Path(str(decorated.get("log_path") or ""))
     decorated["log_tail"] = _read_log_tail(log_path)
+    decorated["progress"] = _job_progress(decorated, decorated["log_tail"])
     return decorated
+
+
+def _job_progress(job: Mapping[str, Any], log_tail: list[str]) -> dict[str, Any]:
+    action = str(job.get("action") or "")
+    if action == "run_auto_signal":
+        return _auto_signal_progress(job)
+    if action == "repair_point_in_time":
+        return _point_in_time_progress(job, log_tail)
+    return _generic_progress(job)
+
+
+def _auto_signal_progress(job: Mapping[str, Any]) -> dict[str, Any]:
+    out_dir = _job_output_dir(job)
+    status = _read_json(out_dir / "auto_run_status.json")
+    stage_rows = _list_value(status.get("stages"))
+    latest_by_name: dict[str, dict[str, Any]] = {}
+    if _timestamp_is_not_before(status.get("started_at"), job.get("started_at")):
+        for stage in stage_rows:
+            if not isinstance(stage, Mapping):
+                continue
+            name = str(stage.get("name") or "")
+            latest_by_name[name] = dict(stage)
+    steps = []
+    for step_id, label in AUTO_SIGNAL_STEPS:
+        stage = latest_by_name.get(step_id, {})
+        steps.append(
+            {
+                "id": step_id,
+                "label": label,
+                "status": _progress_status(stage.get("state")),
+                "message": str(stage.get("message") or ""),
+                "updated_at": stage.get("updated_at"),
+            }
+        )
+    return _progress_payload(job, steps)
+
+
+def _point_in_time_progress(job: Mapping[str, Any], log_tail: list[str]) -> dict[str, Any]:
+    log_text = "\n".join(log_tail).lower()
+    daily_done = "daily_basic cache written" in log_text
+    governance_done = "data governance report written" in log_text
+    steps = [
+        {
+            "id": "daily_basic",
+            "label": "补齐 daily_basic",
+            "status": "complete" if daily_done else _first_step_status(job),
+            "message": "daily_basic 缓存已写入。" if daily_done else "",
+            "updated_at": None,
+        },
+        {
+            "id": "data_governance",
+            "label": "刷新点时治理报告",
+            "status": "complete" if governance_done else ("running" if daily_done and _is_job_running(job) else "pending"),
+            "message": "点时治理报告已刷新。" if governance_done else "",
+            "updated_at": None,
+        },
+    ]
+    return _progress_payload(job, steps)
+
+
+def _generic_progress(job: Mapping[str, Any]) -> dict[str, Any]:
+    return _progress_payload(
+        job,
+        [
+            {
+                "id": "job",
+                "label": str(job.get("label") or "后台任务"),
+                "status": "running" if _is_job_running(job) else _completed_progress_status(job),
+                "message": str(job.get("message") or ""),
+                "updated_at": job.get("completed_at") or job.get("started_at"),
+            }
+        ],
+    )
+
+
+def _progress_payload(job: Mapping[str, Any], steps: list[dict[str, Any]]) -> dict[str, Any]:
+    adjusted = _apply_terminal_progress(job, steps)
+    current = next((step for step in adjusted if step["status"] == "running"), None)
+    if current is None:
+        current = next((step for step in reversed(adjusted) if step["status"] in {"complete", "failed", "skipped"}), None)
+    complete_count = sum(1 for step in adjusted if step["status"] in {"complete", "skipped"})
+    percent = round((complete_count / len(adjusted)) * 100) if adjusted else 0
+    if str(job.get("status")) == "succeeded":
+        percent = 100
+    return {
+        "summary": _progress_summary(job, current),
+        "percent": percent,
+        "active_step": current["id"] if current else None,
+        "steps": adjusted,
+    }
+
+
+def _apply_terminal_progress(job: Mapping[str, Any], steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    status = str(job.get("status") or "")
+    if status not in {"succeeded", "failed", "cancelled", "stale"}:
+        return steps
+    updated = [dict(step) for step in steps]
+    if status == "succeeded":
+        for step in updated:
+            if step["status"] in {"pending", "running"}:
+                step["status"] = "complete"
+        return updated
+    terminal = "failed" if status in {"failed", "stale"} else "skipped"
+    for step in updated:
+        if step["status"] == "running":
+            step["status"] = terminal
+            return updated
+    for step in reversed(updated):
+        if step["status"] == "pending":
+            step["status"] = terminal
+            return updated
+    return updated
+
+
+def _progress_summary(job: Mapping[str, Any], current: Mapping[str, Any] | None) -> str:
+    status = str(job.get("status") or "")
+    if status == "succeeded":
+        return "任务已完成。"
+    if status == "failed":
+        return "任务失败，请查看日志尾部。"
+    if status == "cancelled":
+        return "任务已停止。"
+    if status == "stale":
+        return "任务状态待确认，请查看日志尾部。"
+    if current:
+        label = str(current.get("label") or "")
+        message = str(current.get("message") or "")
+        return f"{label}：{message}" if message else label
+    return str(job.get("message") or "")
+
+
+def _progress_status(state: Any) -> str:
+    text = str(state or "").lower()
+    if text in {"complete", "completed", "succeeded"}:
+        return "complete"
+    if text in {"running", "in_progress", "planning"}:
+        return "running"
+    if text in {"skipped", "skip"}:
+        return "skipped"
+    if text in {"failed", "error", "timeout"}:
+        return "failed"
+    return "pending"
+
+
+def _first_step_status(job: Mapping[str, Any]) -> str:
+    return "running" if _is_job_running(job) else _completed_progress_status(job)
+
+
+def _completed_progress_status(job: Mapping[str, Any]) -> str:
+    status = str(job.get("status") or "")
+    if status == "succeeded":
+        return "complete"
+    if status in {"failed", "stale"}:
+        return "failed"
+    if status == "cancelled":
+        return "skipped"
+    return "pending"
+
+
+def _is_job_running(job: Mapping[str, Any]) -> bool:
+    return str(job.get("status") or "") in ACTIVE_JOB_STATUSES
+
+
+def _job_output_dir(job: Mapping[str, Any]) -> Path:
+    log_path = Path(str(job.get("log_path") or ""))
+    if log_path.parent.name == "logs":
+        return log_path.parent.parent
+    return _output_dir()
+
+
+def _timestamp_is_not_before(value: Any, reference: Any) -> bool:
+    if not value or not reference:
+        return False
+    try:
+        return datetime.fromisoformat(str(value)) >= datetime.fromisoformat(str(reference))
+    except ValueError:
+        return str(value) >= str(reference)
 
 
 def _read_log_tail(path: Path) -> list[str]:

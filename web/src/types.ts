@@ -69,6 +69,7 @@ export interface DashboardSnapshot {
   latest_run: LatestRun;
   gates: Gate[];
   block_reasons: string[];
+  blocker_actions: BlockerAction[];
   quality_warnings: string[];
   freshness_notes: string[];
   signal_summary: Record<string, number>;
@@ -81,6 +82,36 @@ export interface DashboardSnapshot {
 export type DashboardJobAction = "repair_point_in_time" | "run_auto_signal";
 export type DashboardRunMode = "candidate" | "normal";
 export type DashboardJobStatus = "running" | "stopping" | "succeeded" | "failed" | "stale" | "cancelled";
+
+export interface BlockerAction {
+  id: string;
+  source: "block_reason" | "freshness_note" | string;
+  reason: string;
+  issue: string;
+  title: string;
+  detail: string;
+  severity: "danger" | "warning" | "info" | "hold" | string;
+  action?: {
+    label: string;
+    action: DashboardJobAction;
+    mode?: DashboardRunMode | null;
+  } | null;
+}
+
+export interface JobProgressStep {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "complete" | "failed" | "skipped" | string;
+  message?: string | null;
+  updated_at?: string | null;
+}
+
+export interface JobProgress {
+  summary: string;
+  percent: number;
+  active_step?: string | null;
+  steps: JobProgressStep[];
+}
 
 export interface DashboardJob {
   version: number;
@@ -96,6 +127,7 @@ export interface DashboardJob {
   return_code?: number | null;
   log_path: string;
   log_tail: string[];
+  progress?: JobProgress;
   pid?: number;
 }
 

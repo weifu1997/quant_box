@@ -194,9 +194,11 @@ if looks_like_field_table(price_df.columns):
 - Dashboard job stop is a controlled action, not arbitrary process management. It may only target a recorded dashboard job whose status is `running` or `stopping`; successful user stops end as `status="cancelled"`.
 - The backend reads only the latest/current artifacts from `outputs.dir`, especially `auto_signal_report.json`, `auto_run_status.json`, `daily_signal_report.md`, and CSV/JSON paths referenced by the latest report.
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
-- `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
+- `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `blocker_actions`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
+- `blocker_actions` is the structured repair center contract. It maps each current blocker or stale-report freshness note to a user-facing title/detail, severity, normalized issue id, and an optional whitelisted dashboard job action. The frontend must not derive shell commands or mark blockers fixed locally.
 - If `data_governance_report.json` is newer than `auto_signal_report.json`, the dashboard governance gate must use the standalone governance report instead of the stale governance snapshot embedded in the auto-signal report. Resolved stale governance block reasons should be filtered from dashboard `block_reasons` / `quality_warnings`, and `freshness_notes` should tell the frontend that the auto-signal report still needs a rerun to refresh the final verdict.
-- `DashboardJob` must keep the frontend decoupled from process internals by returning compact fields: `id`, `action`, `mode`, `label`, `status`, `message`, `command`, `started_at`, `completed_at`, `return_code`, `log_path`, and `log_tail`.
+- `DashboardJob` must keep the frontend decoupled from process internals by returning compact fields: `id`, `action`, `mode`, `label`, `status`, `message`, `command`, `started_at`, `completed_at`, `return_code`, `log_path`, `log_tail`, and `progress`.
+- `DashboardJob.progress` contains `summary`, `percent`, `active_step`, and compact step rows. Auto-signal progress is derived from `outputs/auto_run_status.json` only when that status belongs to the current job; daily-basic repair progress is inferred from the controlled job log tail.
 - Artifact download routes must be constrained to files inside the resolved output directory.
 - Frontend source belongs under `web/src/`; generated `web/node_modules/` and `web/dist/` stay ignored.
 
@@ -222,6 +224,7 @@ if looks_like_field_table(price_df.columns):
 
 - Good: latest report exists, manual orders exist, and dashboard shows a readiness verdict, gate cards, blockers, order preview, and artifact links.
 - Good: dashboard repair/rerun buttons start a whitelisted job, show a live log tail, and refresh the latest report when the job completes.
+- Good: dashboard shows structured job progress and blocker-specific repair actions instead of requiring users to interpret raw log text.
 - Good: while a dashboard job is running, the UI shows a stop button that calls the backend stop route and then displays `cancelled`.
 - Good: after dashboard-triggered `daily_basic` repair, the governance gate stops showing the stale embedded `daily_basic_date_coverage_below_required` issue and instead shows a rerun-needed freshness note.
 - Base: no latest report exists yet; dashboard still starts and tells the user the latest report is missing.
@@ -236,6 +239,8 @@ if looks_like_field_table(price_df.columns):
 - Unit test missing `auto_signal_report.json` returns `readiness.status="missing"`.
 - Unit test malformed report JSON returns `readiness.status="error"`.
 - Unit test dashboard job command building for `repair_point_in_time`, candidate rerun, normal rerun, invalid mode, and unknown action.
+- Unit test dashboard blocker action mapping for `daily_basic` repair, candidate-only rerun, and stale-report rerun notes.
+- Unit test dashboard job progress from auto-signal status files and daily-basic repair logs.
 - Unit test that a newer standalone `data_governance_report.json` supersedes stale embedded auto-report governance, filters resolved stale block reasons, and emits `freshness_notes`.
 - API test that `GET /api/dashboard/jobs` reports a running active job.
 - API test that invalid dashboard jobs return 400 and already-running jobs return 409 when covered.

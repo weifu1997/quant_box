@@ -131,8 +131,38 @@ class DashboardTests(unittest.TestCase):
                 ["daily_basic_date_coverage_below_required:2779/2784<1.00"],
             )
             self.assertEqual(snapshot["block_reasons"], ["candidate_only_requested"])
+            self.assertEqual(snapshot["blocker_actions"][0]["action"]["action"], "run_auto_signal")
+            self.assertEqual(snapshot["blocker_actions"][0]["action"]["mode"], "normal")
             self.assertEqual(snapshot["quality_warnings"], [])
             self.assertEqual(snapshot["freshness_notes"], ["data_governance_repaired_after_auto_report"])
+            self.assertEqual(snapshot["blocker_actions"][1]["source"], "freshness_note")
+            self.assertEqual(snapshot["blocker_actions"][1]["action"]["action"], "run_auto_signal")
+
+    def test_build_dashboard_snapshot_maps_daily_basic_blocker_to_repair_action(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-06-23T01:40:28",
+                        "is_executable": False,
+                        "block_reasons": ["governance:daily_basic_date_coverage_below_required:2779/2784<1.00"],
+                        "quality_warnings": [],
+                        "data_governance": {
+                            "generated_at": "2026-06-23T01:40:28",
+                            "is_point_in_time_ready": False,
+                            "issues": ["daily_basic_date_coverage_below_required:2779/2784<1.00"],
+                            "warnings": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = build_dashboard_snapshot(out_dir)
+
+            self.assertEqual(snapshot["blocker_actions"][0]["title"], "补齐 daily_basic 点时数据")
+            self.assertEqual(snapshot["blocker_actions"][0]["action"]["action"], "repair_point_in_time")
 
 
 if __name__ == "__main__":
