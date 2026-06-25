@@ -196,6 +196,7 @@ if looks_like_field_table(price_df.columns):
 - The backend reads only the latest/current artifacts from `outputs.dir`, especially `auto_signal_report.json`, `auto_run_status.json`, `daily_signal_report.md`, and CSV/JSON paths referenced by the latest report.
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
 - `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `blocker_actions`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
+- `DashboardSnapshot.orders.rows` may enrich manual-order CSV rows with `name` from the configured stock universe file. The backend owns this lookup; the frontend must not read `data/raw/mainboard_a_stocks.csv` directly.
 - `blocker_actions` is the structured repair center contract. It maps each current blocker or stale-report freshness note to a user-facing title/detail, severity, normalized issue id, and an optional whitelisted dashboard job action. The frontend must not derive shell commands or mark blockers fixed locally.
 - `DashboardPrecheck` is a read-only pre-run evidence model with `status`, `summary`, `can_run_normal`, `target_date_resolution`, and compact `items`. It must not download data, recompute factors, write signals, promote candidate artifacts, or mutate account/holding files.
 - Precheck items cover target trading date, data health evidence, point-in-time governance evidence, factor freshness, and account/current holdings. Missing artifacts become `status="missing"` or `warn`, not fabricated passes. Failed daily-basic governance may expose only the existing `repair_point_in_time` job action; factor/data blockers may expose only the whitelisted `run_auto_signal` action.
@@ -214,6 +215,7 @@ if looks_like_field_table(price_df.columns):
 | Precheck cannot resolve target date | The target-date precheck item is `fail` with an actionable error summary |
 | Precheck evidence artifact is missing | The related precheck item is `missing`; the frontend renders an unknown state |
 | Manual-order CSV is missing | `orders.exists=false`; the UI renders a non-crashing empty state |
+| Stock universe file is missing or lacks a usable name column | Manual-order rows remain valid; `name` enrichment is omitted or blank |
 | A gate artifact is missing | Gate status is `missing`, not `pass` |
 | `data_governance_report.json` is newer and fixes an issue embedded in `auto_signal_report.json` | Governance gate reflects the newer report, stale governance reasons are filtered from dashboard blockers/warnings, and `freshness_notes` asks the UI to rerun auto signal |
 | Artifact id is unknown or outside `outputs.dir` | `GET /api/dashboard/artifacts/{artifact_id}` returns 404 |
@@ -228,6 +230,7 @@ if looks_like_field_table(price_df.columns):
 ### 5. Good/Base/Bad Cases
 
 - Good: latest report exists, manual orders exist, and dashboard shows a readiness verdict, gate cards, blockers, order preview, and artifact links.
+- Good: manual-order rows include `instrument` and backend-enriched `name`, so the UI can show stock code and stock name side by side.
 - Good: dashboard repair/rerun buttons start a whitelisted job, show a live log tail, and refresh the latest report when the job completes.
 - Good: dashboard shows structured job progress and blocker-specific repair actions instead of requiring users to interpret raw log text.
 - Good: before starting auto-signal, dashboard shows a read-only precheck for target date, data health, point-in-time governance, factor freshness, and account/holdings.

@@ -39,6 +39,7 @@ import type {
 
 const ORDER_COLUMNS = [
   "instrument",
+  "name",
   "action",
   "is_order_actionable",
   "target_weight",
@@ -52,6 +53,7 @@ const ORDER_COLUMNS = [
 
 const ORDER_COLUMN_LABELS: Record<string, string> = {
   instrument: "股票代码",
+  name: "股票名称",
   action: "动作",
   is_order_actionable: "可执行",
   target_weight: "目标权重",

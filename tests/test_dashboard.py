@@ -14,11 +14,19 @@ class DashboardTests(unittest.TestCase):
     def test_build_dashboard_snapshot_summarizes_latest_report_and_orders(self) -> None:
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
+            raw_dir = out_dir / "raw"
+            raw_dir.mkdir()
             orders = out_dir / "manual_orders_candidate_2026-06-09.csv"
             orders.write_text(
                 "instrument,action,is_order_actionable,target_value,note\n"
                 "001268.SZ,BUY,false,120000,blocked\n"
                 "603116.SH,BUY,true,120000,ready\n",
+                encoding="utf-8-sig",
+            )
+            (raw_dir / "mainboard_a_stocks.csv").write_text(
+                "ts_code,name\n"
+                "001268.SZ,联合精密\n"
+                "603116.SH,红蜻蜓\n",
                 encoding="utf-8-sig",
             )
             (out_dir / "daily_signal_report.md").write_text("# Daily report\n", encoding="utf-8")
@@ -49,13 +57,15 @@ class DashboardTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            snapshot = build_dashboard_snapshot(out_dir)
+            snapshot = build_dashboard_snapshot(out_dir, config={"data": {"constituents_file": str(raw_dir / "mainboard_a_stocks.csv")}})
 
             self.assertEqual(snapshot["readiness"]["status"], "candidate_only")
             self.assertEqual(snapshot["latest_run"]["strategy_mode"], "annual_state_router")
             self.assertEqual(snapshot["latest_run"]["latest_stage"]["name"], "generate_signal")
             self.assertEqual(snapshot["signal_summary"]["BUY"], 2)
             self.assertEqual(snapshot["orders"]["total_rows"], 2)
+            self.assertEqual(snapshot["orders"]["columns"][:2], ["instrument", "name"])
+            self.assertEqual(snapshot["orders"]["rows"][0]["name"], "联合精密")
             self.assertEqual(snapshot["orders"]["action_counts"], {"BUY": 2})
             self.assertEqual(snapshot["orders"]["actionable_count"], 1)
             self.assertTrue(any(gate["id"] == "data_health" and gate["status"] == "pass" for gate in snapshot["gates"]))

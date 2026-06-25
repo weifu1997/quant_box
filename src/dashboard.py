@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.common import normalize_instrument
 from src.config_loader import load_config, resolve_path
 from src.manual_orders import load_account_state, load_current_holdings, validate_account_inputs
 from src.trading_calendar import resolve_target_date
@@ -34,7 +35,7 @@ def build_dashboard_snapshot(out_dir: str | Path | None = None, config: Mapping[
 
     artifacts = _build_artifacts(output_dir, report)
     manual_orders_artifact = next((item for item in artifacts if item["id"] == "manual_orders"), None)
-    orders = _build_orders(manual_orders_artifact)
+    orders = _build_orders(manual_orders_artifact, config=config)
     governance_context = _post_run_governance_context(report, _artifact_data(governance_artifact))
     block_reasons = _filter_resolved_governance_reasons(
         _string_list((report or status or {}).get("block_reasons")),
@@ -651,7 +652,7 @@ def _gate(
     }
 
 
-def _build_orders(artifact: Mapping[str, Any] | None) -> dict[str, Any]:
+def _build_orders(artifact: Mapping[str, Any] | None, config: Mapping[str, Any] | None = None) -> dict[str, Any]:
     if not artifact or not artifact.get("path"):
         return {
             "path": "",
@@ -666,6 +667,7 @@ def _build_orders(artifact: Mapping[str, Any] | None) -> dict[str, Any]:
             "error": "manual_orders artifact was not referenced by the latest report.",
         }
     preview = _read_csv_preview(Path(str(artifact["path"])), CSV_PREVIEW_LIMIT)
+    _enrich_order_names(preview, config=config)
     action_counts: dict[str, int] = {}
     actionable_count = 0
     for row in preview["rows"]:
@@ -676,6 +678,52 @@ def _build_orders(artifact: Mapping[str, Any] | None) -> dict[str, Any]:
     preview["action_counts"] = action_counts
     preview["actionable_count"] = actionable_count
     return preview
+
+
+def _enrich_order_names(preview: dict[str, Any], config: Mapping[str, Any] | None = None) -> None:
+    if not preview.get("valid") or "instrument" not in preview.get("columns", []):
+        return
+    name_map = _instrument_name_map(config)
+    if not name_map:
+        return
+    columns = list(preview.get("columns", []))
+    if "name" not in columns:
+        insert_at = columns.index("instrument") + 1
+        columns.insert(insert_at, "name")
+        preview["columns"] = columns
+    for row in preview.get("rows", []):
+        if not isinstance(row, dict):
+            continue
+        existing = str(row.get("name", "")).strip()
+        if existing:
+            continue
+        instrument = normalize_instrument(row.get("instrument", ""))
+        row["name"] = name_map.get(instrument, "")
+
+
+def _instrument_name_map(config: Mapping[str, Any] | None = None) -> dict[str, str]:
+    cfg = dict(config) if config is not None else load_config()
+    data_cfg = _mapping_value(cfg.get("data"))
+    path = resolve_path(data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if "name" not in (reader.fieldnames or []):
+                return {}
+            code_column = next((column for column in ["ts_code", "instrument", "ticker", "symbol"] if column in (reader.fieldnames or [])), "")
+            if not code_column:
+                return {}
+            result: dict[str, str] = {}
+            for row in reader:
+                instrument = normalize_instrument(row.get(code_column, ""))
+                name = str(row.get("name", "")).strip()
+                if instrument and name:
+                    result[instrument] = name
+            return result
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return {}
 
 
 def _build_artifacts(output_dir: Path, report: Mapping[str, Any] | None) -> list[dict[str, Any]]:
