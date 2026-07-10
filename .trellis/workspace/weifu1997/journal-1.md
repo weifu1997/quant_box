@@ -141,3 +141,36 @@ Added candidate-only auto-signal validation, verified candidate/official output 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Complete cross-platform Web quant workspace
+
+**Date**: 2026-07-11
+**Task**: Complete cross-platform Web quant workspace
+**Branch**: `main`
+
+### Summary
+
+Built and verified the Windows/Ubuntu Web workspace, controlled operations, execution/account loops, full candidate and normal signal pipelines, performance fixes, mobile layout, and quality gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b420694` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
