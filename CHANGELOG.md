@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Reduced a current-cache Web auto-signal run to about six minutes by skipping unchanged conversion outputs and building annual-router sources only for reachable states/dates.
+- Prevented full-market Alpha158 memory failures by bounding Qlib workers, disabling unused learn processors, and avoiding full-frame infinity replacement.
+- Fixed factor-cache reuse when configured history predates the first available local price, avoiding unnecessary multi-gigabyte recomputation.
+- Added Web repair actions and structured progress for full point-in-time data and historical-universe workflows.
+- Redacted the private Tushare proxy endpoint from Web-visible configuration-check logs.
+- Fixed real-data mobile overflow across the dashboard, operations center, and account workspace.
+- Added Web account and current-holdings management with backend validation, explicit confirmation, backups, and atomic file replacement.
+- Added Playwright browser coverage for navigation, workflow actions, execution/account forms, and mobile layout.
+- Added backend-validated workflow parameter schemas and bounded advanced research actions for the Web operations center.
+- Added a cross-platform Web operations center for core data, factor, research, backtest, diagnostic, and candidate-signal workflows.
+- Added controlled Web fill-feedback editing and validated current-holdings updates with audit artifacts.
 - Added controlled Web dashboard actions for repairing `daily_basic` point-in-time gaps and rerunning auto signal in candidate or normal gated output mode.
 - Added live dashboard job status and log-tail polling for long-running local repair/signal tasks.
 - Added a local FastAPI + React/Vite dashboard for latest auto-signal manual review.

@@ -158,6 +158,17 @@ quality:
         self.assertEqual(DEFAULT_CONFIG["data"]["daily_basic_file"], "data/factors/daily_basic.parquet")
         self.assertEqual(DEFAULT_CONFIG["data"]["st_calendar_file"], "data/raw/st_calendar.csv")
 
+    def test_default_qlib_config_limits_parallel_factor_workers(self) -> None:
+        self.assertEqual(DEFAULT_CONFIG["qlib"]["kernels"], 4)
+
+    def test_load_config_rejects_non_positive_qlib_kernels(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.yaml"
+            path.write_text("qlib:\n  kernels: 0\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "qlib.kernels must be >= 1"):
+                load_config(path)
+
     def test_default_config_includes_historical_universe_builder(self) -> None:
         """Verify the historical universe builder defaults are available."""
         universe = DEFAULT_CONFIG["universe_builder"]

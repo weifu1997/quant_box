@@ -15,7 +15,7 @@ from src.config_loader import load_config, resolve_path
 from src.trading_calendar import resolve_target_date_value
 
 logger = logging.getLogger(__name__)
-_QLIB_INIT_STATE: tuple[str, str] | None = None
+_QLIB_INIT_STATE: tuple[str, str, int | None] | None = None
 
 
 def compute_alpha158_factors(
@@ -37,9 +37,10 @@ def compute_alpha158_factors(
     qlib_cfg = config.get("qlib", {})
     provider = resolve_path(provider_uri or qlib_cfg["provider_uri"])
     region = qlib_cfg.get("region", "cn")
+    kernels = int(qlib_cfg.get("kernels", 4))
     instruments = instruments or qlib_cfg.get("instruments", "csi300")
 
-    _ensure_qlib_initialized(qlib, provider, region)
+    _ensure_qlib_initialized(qlib, provider, region, kernels=kernels)
     with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore"):
         # Alpha158 may emit noisy log(0) RuntimeWarnings while producing NaN feature values.
         warnings.filterwarnings("ignore", message="divide by zero encountered in log", category=RuntimeWarning)
@@ -49,30 +50,54 @@ def compute_alpha158_factors(
             end_time=end,
             fit_start_time=start_date,
             fit_end_time=end,
+            # This workflow requests features only. Qlib's default learn
+            # processors still build and copy a feature+label learn frame,
+            # which can add several GiB for the full A-share history.
+            learn_processors=[],
         )
         dataset = DatasetH(handler, segments={"full": (start_date, end)})
         factors = dataset.prepare("full", col_set="feature")
     if not isinstance(factors.index, pd.MultiIndex):
         raise ValueError("Expected Alpha158 result to use a MultiIndex of datetime/instrument.")
-    return factors.replace([np.inf, -np.inf], np.nan).sort_index()
+    factors = _replace_infinite_factors_in_place(factors)
+    if not factors.index.is_monotonic_increasing:
+        factors = factors.sort_index()
+    return factors
 
 
-def _ensure_qlib_initialized(qlib_module, provider: Path, region: str) -> None:
+def _replace_infinite_factors_in_place(factors: pd.DataFrame) -> pd.DataFrame:
+    """Replace infinities one column at a time to cap Alpha158 peak memory."""
+    for column in factors.columns:
+        values = factors[column].to_numpy(copy=False)
+        if not np.issubdtype(values.dtype, np.floating):
+            continue
+        infinite = np.isinf(values)
+        if infinite.any():
+            values[infinite] = np.nan
+    return factors
+
+
+def _ensure_qlib_initialized(qlib_module, provider: Path, region: str, kernels: int | None = None) -> None:
     """函数说明：确保 ensure_qlib_initialized 的内部辅助逻辑。"""
     global _QLIB_INIT_STATE
-    state = (str(provider), str(region))
+    state = (str(provider), str(region), kernels)
     if _QLIB_INIT_STATE == state:
         return
     if _QLIB_INIT_STATE is not None and _QLIB_INIT_STATE != state:
         logger.warning(
-            "Reinitializing qlib from provider=%s region=%s to provider=%s region=%s.",
+            "Reinitializing qlib from provider=%s region=%s kernels=%s to provider=%s region=%s kernels=%s.",
             _QLIB_INIT_STATE[0],
             _QLIB_INIT_STATE[1],
+            _QLIB_INIT_STATE[2],
             state[0],
             state[1],
+            state[2],
         )
     try:
-        qlib_module.init(provider_uri=state[0], region=state[1])
+        init_kwargs = {"provider_uri": state[0], "region": state[1]}
+        if kernels is not None:
+            init_kwargs["kernels"] = kernels
+        qlib_module.init(**init_kwargs)
     except Exception as exc:
         if "already" not in str(exc).lower() and "initialized" not in str(exc).lower():
             raise
@@ -314,11 +339,33 @@ def _factor_cache_meta_matches(
         requested_end = pd.Timestamp(expected.get("end_date")).normalize()
     except (TypeError, ValueError):
         return False
-    if cached_start > requested_start:
+    first_price_date = _first_available_price_date(config)
+    required_start = max(requested_start, first_price_date) if first_price_date is not None else requested_start
+    if cached_start > required_start:
         return False
     if cached_end < requested_end and not allow_stale_end:
         return False
     return True
+
+
+def _first_available_price_date(config: dict) -> pd.Timestamp | None:
+    """Return the first stored price date without loading the wide price panel."""
+    price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
+    if not price_path.exists() and price_path.name in {"ohlcv.parquet", "ohlcv_adjusted.parquet"}:
+        fallback_name = "close_adjusted.parquet" if price_path.name == "ohlcv_adjusted.parquet" else "close.parquet"
+        fallback = price_path.with_name(fallback_name)
+        if fallback.exists():
+            price_path = fallback
+    if not price_path.exists():
+        return None
+    try:
+        index = pd.read_parquet(price_path, columns=[]).index
+    except (OSError, ValueError, TypeError):
+        return None
+    if len(index) == 0:
+        return None
+    value = pd.to_datetime(index, errors="coerce").min()
+    return None if pd.isna(value) else pd.Timestamp(value).normalize()
 
 
 def _allow_stale_factor_tail(config: dict) -> bool:

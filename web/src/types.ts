@@ -79,7 +79,28 @@ export interface DashboardSnapshot {
   errors: string[];
 }
 
-export type DashboardJobAction = "repair_point_in_time" | "run_auto_signal";
+export type DashboardJobAction =
+  | "repair_point_in_time"
+  | "run_auto_signal"
+  | "check_tushare_config"
+  | "update_market_data"
+  | "update_point_in_time_all"
+  | "update_fundamentals"
+  | "build_historical_universe"
+  | "convert_data"
+  | "calculate_factors"
+  | "factor_diagnostics"
+  | "optimize_parameters"
+  | "run_backtest"
+  | "quant_diagnostics"
+  | "optimization_review"
+  | "evidence_optimizer"
+  | "fundamental_screen"
+  | "generate_candidate_signal"
+  | "risk_refine"
+  | "regime_blend_probe"
+  | "rebalance_drift_probe"
+  | "annual_router_grid";
 export type DashboardRunMode = "candidate" | "normal";
 export type DashboardJobStatus = "running" | "stopping" | "succeeded" | "failed" | "stale" | "cancelled";
 
@@ -118,6 +139,7 @@ export interface DashboardJob {
   id: string;
   action: DashboardJobAction;
   mode?: DashboardRunMode | null;
+  parameters?: Record<string, unknown> | null;
   label: string;
   status: DashboardJobStatus | string;
   message: string;
@@ -134,6 +156,26 @@ export interface DashboardJob {
 export interface DashboardJobsResponse {
   jobs: DashboardJob[];
   active_job?: DashboardJob | null;
+}
+
+export interface DashboardWorkflow {
+  action: string;
+  label: string;
+  category: "data" | "pipeline" | "research" | "signal" | string;
+  description: string;
+  duration: string;
+  parameters: WorkflowParameter[];
+}
+
+export interface WorkflowParameter {
+  name: string;
+  label: string;
+  type: "boolean" | "integer" | "number" | "date" | "text" | string;
+  default?: unknown;
+  optional?: boolean;
+  min?: number;
+  max?: number;
+  help?: string;
 }
 
 export type PrecheckStatus = "pass" | "warn" | "fail" | "missing";
@@ -160,4 +202,117 @@ export interface DashboardPrecheck {
   can_run_normal: boolean;
   target_date_resolution: Record<string, unknown>;
   items: DashboardPrecheckItem[];
+}
+
+export type FillStatus = "PENDING" | "FILLED" | "PARTIAL" | "CANCELLED" | "SKIPPED";
+
+export interface ExecutionFillRow {
+  row_id: number;
+  signal_date?: string | null;
+  intended_trade_date?: string | null;
+  instrument: string;
+  side: string;
+  planned_order_shares: number | string;
+  fill_status: FillStatus | string;
+  actual_trade_date?: string | null;
+  executed_shares?: number | string | null;
+  executed_price?: number | string | null;
+  commission_cost?: number | string | null;
+  tax_cost?: number | string | null;
+  transfer_fee_cost?: number | string | null;
+  slippage_note?: string | null;
+  broker_order_id?: string | null;
+  fill_note?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ExecutionHoldingRow {
+  instrument: string;
+  shares: number;
+}
+
+export interface ExecutionSummary {
+  fill_rows: number;
+  applied_fill_rows: number;
+  executed_shares: number;
+  fill_status_counts: Record<string, number>;
+}
+
+export interface ExecutionWorkspaceData {
+  version: number;
+  status: "missing" | "error" | "ready" | "needs_input" | string;
+  message: string;
+  source_id?: string | null;
+  source_path?: string | null;
+  signal_date?: string | null;
+  intended_trade_date?: string | null;
+  rows: ExecutionFillRow[];
+  holdings: ExecutionHoldingRow[];
+  editable_fields: string[];
+  issues?: string[];
+  pending_count?: number;
+}
+
+export interface ExecutionPreview {
+  valid: boolean;
+  issues: string[];
+  source_id: string;
+  current_holdings: ExecutionHoldingRow[];
+  updated_holdings: ExecutionHoldingRow[];
+  summary: ExecutionSummary;
+}
+
+export interface ExecutionApplyResult {
+  status: "applied" | string;
+  message: string;
+  source_id: string;
+  holdings_path: string;
+  audit_path: string;
+  holdings: ExecutionHoldingRow[];
+  summary: ExecutionSummary;
+}
+
+export interface AccountFormData {
+  total_asset: number | string;
+  cash: number | string;
+  max_position_pct?: number | string | null;
+  lot_size: number | string;
+  star_market_lot_size: number | string;
+}
+
+export interface AccountHoldingRow {
+  instrument: string;
+  shares: number | string;
+}
+
+export interface AccountWorkspaceData {
+  version: number;
+  status: "ready" | "needs_input" | string;
+  message: string;
+  account: AccountFormData;
+  holdings: AccountHoldingRow[];
+  issues: string[];
+  account_file: string;
+  holdings_file: string;
+  account_file_exists: boolean;
+  holdings_file_exists: boolean;
+}
+
+export interface AccountPreview {
+  valid: boolean;
+  issues: string[];
+  account: AccountFormData;
+  holdings: AccountHoldingRow[];
+  position_count: number;
+  holding_shares: number;
+}
+
+export interface AccountApplyResult {
+  status: "applied" | string;
+  message: string;
+  account_file: string;
+  holdings_file: string;
+  backup_dir?: string | null;
+  account: AccountFormData;
+  holdings: AccountHoldingRow[];
 }

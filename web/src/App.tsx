@@ -1,21 +1,31 @@
 import {
   AlertTriangle,
+  ArrowDown,
   BarChart3,
+  BookOpen,
   CheckCircle2,
   CircleDot,
   ClipboardList,
+  Database,
   ExternalLink,
   FileText,
+  Gauge,
+  GitBranch,
   Info,
+  Layers3,
+  LayoutDashboard,
+  ListChecks,
   Loader2,
   Play,
   RefreshCw,
+  Settings2,
   ShieldAlert,
   ShoppingCart,
   Square,
   Table2,
   Terminal,
   TrendingUp,
+  Workflow,
   Wrench,
   XCircle
 } from "lucide-react";
@@ -23,6 +33,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { artifactUrl, fetchDashboardJobs, fetchDashboardPrecheck, fetchLatestDashboard, startDashboardJob, stopDashboardJob } from "./api";
+import ExecutionWorkspace from "./ExecutionWorkspace";
+import OperationsWorkspace from "./OperationsWorkspace";
+import AccountWorkspace from "./AccountWorkspace";
 import type {
   Artifact,
   BlockerAction,
@@ -92,7 +105,10 @@ const STRATEGY_LABELS: Record<string, string> = {
   strategy_config: "普通策略配置"
 };
 
+type WorkspaceView = "dashboard" | "operations" | "execution" | "account" | "overview";
+
 export default function App() {
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("dashboard");
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [jobs, setJobs] = useState<DashboardJob[]>([]);
   const [precheck, setPrecheck] = useState<DashboardPrecheck | null>(null);
@@ -197,40 +213,84 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-mark">Q</div>
-        <nav className="side-nav" aria-label="仪表盘分区">
-          <a href="#review" aria-label="复核结论">
-            <ShieldAlert size={20} />
-          </a>
-          <a href="#control" aria-label="运行控制">
-            <Play size={20} />
-          </a>
-          <a href="#gates" aria-label="质量门槛">
-            <CheckCircle2 size={20} />
-          </a>
-          <a href="#orders" aria-label="交易单">
-            <Table2 size={20} />
-          </a>
-          <a href="#artifacts" aria-label="产物">
-            <FileText size={20} />
-          </a>
+        <nav className="side-nav" aria-label="主要工作区">
+          <button
+            aria-label="打开每日复核台"
+            className={workspaceView === "dashboard" ? "active" : ""}
+            onClick={() => setWorkspaceView("dashboard")}
+            title="每日复核台"
+            type="button"
+          >
+            <LayoutDashboard size={20} />
+          </button>
+          <button
+            aria-label="打开量化操作中心"
+            className={workspaceView === "operations" ? "active" : ""}
+            onClick={() => setWorkspaceView("operations")}
+            title="量化操作中心"
+            type="button"
+          >
+            <Workflow size={20} />
+          </button>
+          <button
+            aria-label="打开项目全景"
+            className={workspaceView === "overview" ? "active" : ""}
+            onClick={() => setWorkspaceView("overview")}
+            title="项目全景"
+            type="button"
+          >
+            <BookOpen size={20} />
+          </button>
+          <button
+            aria-label="打开交易执行工作区"
+            className={workspaceView === "execution" ? "active" : ""}
+            onClick={() => setWorkspaceView("execution")}
+            title="交易执行"
+            type="button"
+          >
+            <ListChecks size={20} />
+          </button>
+          <button aria-label="打开账户与持仓" className={workspaceView === "account" ? "active" : ""} onClick={() => setWorkspaceView("account")} title="账户与持仓" type="button"><Settings2 size={20} /></button>
         </nav>
+        <span className="sidebar-caption">{workspaceView === "dashboard" ? "复核" : workspaceView === "operations" ? "操作" : workspaceView === "execution" ? "执行" : workspaceView === "account" ? "账户" : "全景"}</span>
       </aside>
 
       <main className="workspace">
         <header className="topbar">
           <div>
             <p className="eyebrow">quant_box</p>
-            <h1>自动信号复核</h1>
+            <h1>{workspaceView === "dashboard" ? "自动信号复核" : workspaceView === "operations" ? "量化操作中心" : workspaceView === "execution" ? "交易执行" : workspaceView === "account" ? "账户与持仓" : "项目全景"}</h1>
           </div>
-          <button className="icon-button command-button" type="button" onClick={refresh} title="刷新仪表盘">
-            <RefreshCw size={18} />
-            <span>刷新</span>
-          </button>
+          {workspaceView === "dashboard" ? (
+            <button className="icon-button command-button" type="button" onClick={refresh} title="刷新仪表盘">
+              <RefreshCw size={18} />
+              <span>刷新</span>
+            </button>
+          ) : workspaceView === "overview" ? (
+            <button className="icon-button command-button" type="button" onClick={() => setWorkspaceView("dashboard")}>
+              <LayoutDashboard size={18} />
+              <span>进入复核台</span>
+            </button>
+          ) : null}
         </header>
 
-        {loading && <StatePanel title="正在读取最新运行" message="正在读取本地 outputs 目录下的复核产物。" />}
-        {error && <StatePanel title="仪表盘后端不可用" message={error} tone="danger" />}
-        {!loading && !error && snapshot && (
+        {workspaceView === "dashboard" && (
+          <nav className="dashboard-shortcuts" aria-label="复核台快捷导航">
+            <a href="#review"><ShieldAlert size={15} />复核结论</a>
+            <a href="#control"><Play size={15} />运行控制</a>
+            <a href="#gates"><CheckCircle2 size={15} />质量门槛</a>
+            <a href="#orders"><Table2 size={15} />人工交易单</a>
+            <a href="#artifacts"><FileText size={15} />产物文件</a>
+          </nav>
+        )}
+
+        {workspaceView === "overview" && <ProjectOverview onOpenDashboard={() => setWorkspaceView("dashboard")} />}
+        {workspaceView === "operations" && <OperationsWorkspace jobs={jobs} onJobStarted={recordStartedJob} onJobsRefresh={refreshJobs} />}
+        {workspaceView === "execution" && <ExecutionWorkspace />}
+        {workspaceView === "account" && <AccountWorkspace />}
+        {workspaceView === "dashboard" && loading && <StatePanel title="正在读取最新运行" message="正在读取本地 outputs 目录下的复核产物。" />}
+        {workspaceView === "dashboard" && error && <StatePanel title="仪表盘后端不可用" message={error} tone="danger" />}
+        {workspaceView === "dashboard" && !loading && !error && snapshot && (
           <Dashboard
             jobs={jobs}
             jobsError={jobsError}
@@ -245,6 +305,162 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function ProjectOverview({ onOpenDashboard }: { onOpenDashboard: () => void }) {
+  const questions = [
+    "今天的数据是否完整、可靠？",
+    "当前策略是否经过足够的样本外验证？",
+    "最新信号是否满足正式交易门槛？",
+    "如果满足，人工应该买什么、卖什么、买卖多少？"
+  ];
+  const outputs = ["信号文件", "目标持仓", "人工交易单", "质量检查报告", "阻塞原因", "订单确认模板", "成交回填模板", "Web 复核结论"];
+  const pipeline = [
+    ["数据源", "Tushare 日线、估值、ST、指数成分、财务数据"],
+    ["数据治理", "清洗、复权、交易日历与点时正确性检查"],
+    ["因子研究", "Qlib Alpha158、IC 评估、动态权重与基本面筛选"],
+    ["策略路由", "综合评分、Top 15、月度调仓与市场状态暴露"],
+    ["真实回测", "交易费用、滑点、容量、涨跌停、停牌与风险退出"],
+    ["质量门槛", "数据、参数、回测、账户与持仓共同决定可执行性"],
+    ["人工闭环", "交易单、订单确认、成交回填与最新持仓更新"]
+  ];
+  const dataSources = ["A 股主板日线 OHLCV", "复权因子", "daily_basic 估值与市值", "ST 历史状态", "三大指数历史成分", "财务指标与分红", "交易日历"];
+  const pointInTimeChecks = ["ST 历史日历覆盖", "指数历史成分覆盖", "daily_basic 日期覆盖", "财务披露滞后", "复权因子版本", "因子缓存新鲜度", "历史股票池来源覆盖"];
+  const researchCapabilities = ["Alpha158 计算与缓存", "单因子和年度 IC", "因子分组收益", "rolling IC 动态权重", "相关性过滤与动态选择", "行业、市值中性化", "流动性与基本面筛选", "可选机器学习策略"];
+  const tradingConstraints = ["手续费、最低佣金、印花税、过户费", "固定与动态滑点", "成交额参与率和容量限制", "不同板块与 ST 涨跌停", "停牌、无成交与长期停牌退出", "止损、止盈和市场状态仓位", "行业集中度与换手限制"];
+  const qualityGroups = [
+    ["数据健康", "原始行情、价格面板、因子覆盖和目标日期"],
+    ["数据治理", "ST、指数成分、股票池、daily_basic 与元数据"],
+    ["参数质量", "验证窗口、正收益率、Sharpe、回撤和样本外收益"],
+    ["回测质量", "年化收益、最大回撤、换手和交易成本"],
+    ["账户持仓", "账户资产、现金、真实持仓、手数和参考价格"]
+  ];
+  const workflow = ["运行每日自动流程", "查看复核结论与报告", "确认 is_executable", "检查门槛和阻塞原因", "核对人工交易单", "在券商端手工下单", "填写成交回填 CSV", "校验后更新真实持仓"];
+
+  return (
+    <div className="overview-page">
+      <section className="overview-intro">
+        <div>
+          <span className="overview-kicker">本地量化研究与人工交易决策系统</span>
+          <h2>从数据可信，到信号可执行</h2>
+          <p>quant_box 把数据治理、因子研究、真实化回测、质量门槛和人工交易闭环集中在一个本地工作台中。系统负责给出证据和订单建议，最终交易决定始终由你确认。</p>
+          <div className="overview-actions">
+            <button className="overview-primary" onClick={onOpenDashboard} type="button">
+              <LayoutDashboard size={18} />
+              打开每日复核台
+            </button>
+            <span><ShieldAlert size={16} /> 不自动下单 · 不绕过质量门槛</span>
+          </div>
+        </div>
+        <div className="position-card">
+          <small>项目定位</small>
+          <strong>本地量化研究平台</strong>
+          <ArrowDown size={18} />
+          <strong>每日信号生产流水线</strong>
+          <ArrowDown size={18} />
+          <strong>人工交易决策控制台</strong>
+        </div>
+      </section>
+
+      <section className="overview-section">
+        <OverviewHeading number="01" icon={<Gauge size={19} />} title="它解决什么问题" subtitle="把每天最重要的判断压缩成四个问题" />
+        <div className="question-grid">
+          {questions.map((question, index) => <article key={question}><span>0{index + 1}</span><strong>{question}</strong></article>)}
+        </div>
+        <div className="output-strip">
+          <span>最终产物</span>
+          <div>{outputs.map((output) => <strong key={output}>{output}</strong>)}</div>
+        </div>
+      </section>
+
+      <section className="overview-section">
+        <OverviewHeading number="02" icon={<GitBranch size={19} />} title="整体数据流" subtitle="每一层都为下一层提供可验证的证据" />
+        <div className="pipeline-track">
+          {pipeline.map(([title, detail], index) => (
+            <article key={title}>
+              <span>{index + 1}</span>
+              <div><strong>{title}</strong><p>{detail}</p></div>
+              {index < pipeline.length - 1 && <ArrowDown className="pipeline-arrow" size={17} />}
+            </article>
+          ))}
+        </div>
+        <p className="safety-note"><ShieldAlert size={18} /> 任一关键质量门槛未通过，只生成候选结果，不覆盖正式信号和最新持仓。</p>
+      </section>
+
+      <div className="overview-two-column">
+        <section className="overview-section">
+          <OverviewHeading number="03" icon={<Database size={19} />} title="数据层" subtitle="本地缓存、私密配置与点时正确性" />
+          <TagCloud items={dataSources} />
+          <DirectoryMap />
+          <h3 className="overview-subtitle">点时治理检查</h3>
+          <CheckList items={pointInTimeChecks} />
+        </section>
+
+        <section className="overview-section">
+          <OverviewHeading number="04" icon={<Layers3 size={19} />} title="因子与选股研究" subtitle="从 Alpha158 到市场状态路由" />
+          <TagCloud items={researchCapabilities} />
+          <div className="strategy-card">
+            <div><small>默认持仓</small><strong>Top 15</strong></div>
+            <div><small>调仓频率</small><strong>月度</strong></div>
+            <div><small>换手控制</small><strong>Rank Buffer</strong></div>
+          </div>
+          <p className="overview-copy">年度状态路由会依据趋势、波动和回撤，在不同因子来源与仓位暴露之间切换，让策略不再依赖一套固定选股逻辑。</p>
+        </section>
+      </div>
+
+      <section className="overview-section">
+        <OverviewHeading number="05" icon={<TrendingUp size={19} />} title="为什么回测更接近真实交易" subtitle="不是无摩擦的收盘价排名游戏" />
+        <div className="constraint-grid">{tradingConstraints.map((item) => <article key={item}><CheckCircle2 size={17} /><span>{item}</span></article>)}</div>
+        <div className="backtest-facts">
+          <Metric label="默认初始资金" value="¥1,000,000" />
+          <Metric label="最大成交额参与率" value="5%" />
+          <Metric label="正式收益目标" value="约 20% / 年" />
+          <Metric label="最大回撤门槛" value="不差于 -20%" />
+        </div>
+      </section>
+
+      <section className="overview-section quality-architecture">
+        <OverviewHeading number="06" icon={<ShieldAlert size={19} />} title="质量门槛是核心安全机制" subtitle="脚本跑完，不等于信号可以交易" />
+        <div className="quality-architecture-grid">
+          {qualityGroups.map(([title, detail]) => <article key={title}><CheckCircle2 size={18} /><div><strong>{title}</strong><p>{detail}</p></div></article>)}
+        </div>
+        <div className="candidate-boundary">
+          <div><small>门槛失败时仍会生成</small><strong>候选信号 · 候选交易单 · 阻塞原因 · 确认与回填模板</strong></div>
+          <div><small>绝不会自动覆盖</small><strong>正式信号 · 正式交易单 · outputs/latest_holdings.csv</strong></div>
+        </div>
+      </section>
+
+      <section className="overview-section">
+        <OverviewHeading number="07" icon={<ShoppingCart size={19} />} title="每日信号与人工交易闭环" subtitle="从复核到真实成交，每一步都可追踪" />
+        <div className="workflow-row">
+          {workflow.map((item, index) => <article key={item}><span>{index + 1}</span><strong>{item}</strong></article>)}
+        </div>
+        <p className="safety-note"><ClipboardList size={18} /> 成交回填会拒绝 PENDING、缺失成交数量、超计划成交和超持仓卖出，校验失败不会静默修改真实持仓。</p>
+      </section>
+    </div>
+  );
+}
+
+function OverviewHeading({ number, icon, title, subtitle }: { number: string; icon: ReactNode; title: string; subtitle: string }) {
+  return <div className="overview-heading"><span>{number}</span><div className="overview-heading-icon">{icon}</div><div><h2>{title}</h2><p>{subtitle}</p></div></div>;
+}
+
+function TagCloud({ items }: { items: string[] }) {
+  return <div className="tag-cloud">{items.map((item) => <span key={item}>{item}</span>)}</div>;
+}
+
+function CheckList({ items }: { items: string[] }) {
+  return <ul className="overview-check-list">{items.map((item) => <li key={item}><CheckCircle2 size={15} />{item}</li>)}</ul>;
+}
+
+function DirectoryMap() {
+  return <div className="directory-map">
+    <code>data/raw/</code><span>原始 CSV</span>
+    <code>data/qlib_data/</code><span>Qlib provider</span>
+    <code>data/prices/</code><span>回测价格面板</span>
+    <code>data/factors/</code><span>因子、IC 与估值缓存</span>
+    <code>data/fundamentals/</code><span>财务指标与分红</span>
+  </div>;
 }
 
 function Dashboard({

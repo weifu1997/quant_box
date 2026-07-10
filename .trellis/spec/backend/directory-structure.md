@@ -206,6 +206,249 @@ if looks_like_field_table(price_df.columns):
 - Artifact download routes must be constrained to files inside the resolved output directory.
 - Frontend source belongs under `web/src/`; generated `web/node_modules/` and `web/dist/` stay ignored.
 
+## Scenario: Dashboard Trade Execution And Holdings Update
+
+### 1. Scope / Trigger
+
+- Trigger: the local Web dashboard records real broker fills from the latest official execution template and applies them to `config/current_holdings.csv`.
+- Owners: `src/dashboard_execution.py` owns template selection, editable-field merging, validation, atomic writes, and audit output; `src/dashboard_api.py` exposes the API; `web/src/ExecutionWorkspace.tsx` owns user input and explicit confirmation.
+
+### 2. Signatures
+
+- API: `GET /api/dashboard/execution -> ExecutionWorkspaceData`.
+- API: `POST /api/dashboard/execution/preview` with `{"source_id": str, "rows": ExecutionFillRow[]} -> ExecutionPreview`.
+- API: `POST /api/dashboard/execution/apply` with `{"source_id": str, "rows": ExecutionFillRow[], "confirm": true} -> ExecutionApplyResult`.
+- Source template: latest `outputs/fill_feedback/fill_feedback_YYYY-MM-DD.csv` or configured `manual_orders.fill_feedback_dir` equivalent.
+- Holdings output: configured `account.current_holdings_file`, normally `config/current_holdings.csv`.
+- Audit output: `outputs/fill_apply_audit_<signal-date>.json`.
+
+### 3. Contracts
+
+- Only official templates named `fill_feedback_*.csv` are eligible. `fill_feedback_candidate_*.csv` must never be returned as an applicable template.
+- The backend resolves the latest template and returns its filename as `source_id`. Preview/apply requests must send that exact id; stale or user-selected paths are rejected.
+- Every original row must be submitted exactly once with its backend-provided `row_id`.
+- Web-editable fields are limited to `fill_status`, `actual_trade_date`, `executed_shares`, `executed_price`, costs, broker id, slippage note, and fill note.
+- `instrument`, `side`, `planned_order_shares`, signal date, and other plan fields always come from the stored template. Payload attempts to change them are ignored.
+- Preview reuses `validate_fill_feedback` and `apply_fill_feedback` and never writes files.
+- Apply requires `confirm=true`, repeats validation, atomically replaces the fill CSV and holdings CSV, and writes a JSON audit.
+- The existing validation rules remain authoritative: `PENDING` is invalid for application, FILLED/PARTIAL require positive executed shares, execution cannot exceed planned size, and sells cannot make holdings negative.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| No official fill template exists | GET returns `status="missing"`; preview/apply returns 404 |
+| Only candidate template exists | Treat as no official template; never allow holdings update |
+| `source_id` differs from current latest template | 400 asking the user to refresh the execution workspace |
+| Rows are missing, duplicated, or have invalid ids | 400; no files are written |
+| Payload changes instrument/side/planned shares | Ignore those values and preserve stored template fields |
+| Any row remains `PENDING` | Preview returns `valid=false`; apply returns 400 |
+| Executed shares exceed planned shares | Preview invalid; apply rejected |
+| Sell would make a position negative | Preview invalid; apply rejected |
+| `confirm` is not exactly `true` | Apply returns 400; holdings remain unchanged |
+| Validation succeeds | Save fill feedback, update holdings, and write audit JSON |
+
+### 5. Good/Base/Bad Cases
+
+- Good: an official BUY row is marked FILLED for its planned quantity, preview shows the increased position, explicit confirmation updates holdings, and an audit file is written.
+- Base: no official signal exists yet; the UI explains that there is no applicable execution template.
+- Good: CANCELLED or SKIPPED rows do not change holdings and do not require executed shares.
+- Bad: a browser request changes a SELL row into BUY or increases planned shares; backend merging must ignore both attempted changes.
+- Bad: a candidate fill template is applied to official holdings.
+
+### 6. Tests Required
+
+- `tests/test_dashboard_execution.py` must prove candidate templates are excluded.
+- Tests must prove immutable plan fields survive malicious payload overrides.
+- Tests must prove apply requires explicit confirmation and writes holdings plus audit only after validation.
+- Tests must prove a stale `source_id` is rejected.
+- API tests must assert validation errors map to HTTP 400 and missing templates map to HTTP 404.
+- Existing `tests/test_run_apply_fills.py` and `src.manual_orders.validate_fill_feedback` tests remain the source of truth for fill validation semantics.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+fills = pd.DataFrame(payload["rows"])
+save_updated_holdings(apply_fill_feedback(current, fills), config)
+```
+
+This trusts browser-supplied instruments, sides, and planned quantities and can apply a candidate or stale template.
+
+#### Correct
+
+```python
+original = pd.read_csv(latest_official_fill_path)
+fills = merge_only_editable_fields(original, payload["rows"])
+issues = validate_fill_feedback(current, fills)
+if issues or payload.get("confirm") is not True:
+    reject_without_writes()
+```
+
+The stored official template owns the order plan; the browser supplies execution results only.
+
+## Scenario: Dashboard Account And Holdings Management
+
+### 1. Scope / Trigger
+
+- Trigger: Web users create or update the account inputs required for official manual orders without editing YAML/CSV by hand.
+- Owners: `src/dashboard_account.py` owns the field whitelist, validation, backup, and atomic file replacement; `src/dashboard_api.py` exposes the API; `web/src/AccountWorkspace.tsx` owns the form.
+
+### 2. Signatures
+
+- API: `GET /api/dashboard/account -> AccountWorkspaceData`.
+- API: `POST /api/dashboard/account/preview` with `{"account": AccountFormData, "holdings": AccountHoldingRow[]} -> AccountPreview`.
+- API: `POST /api/dashboard/account/apply` with the preview payload plus `"confirm": true -> AccountApplyResult`.
+- Account output: configured `account.file`, normally `config/account.yaml`.
+- Holdings output: configured `account.current_holdings_file`, normally `config/current_holdings.csv`.
+- Backups: `outputs/account_backups/<timestamp>/account.yaml` and/or `current_holdings.csv` when prior files exist.
+
+### 3. Contracts
+
+- The API exposes and accepts only `total_asset`, `cash`, `max_position_pct`, `lot_size`, `star_market_lot_size`, and holdings rows with `instrument`/`shares`.
+- Tushare credentials, strategy settings, paths, and all unrelated local config must never be included in the response or accepted from the form.
+- Account numbers must be finite. Total asset must be positive; cash cannot be negative; max position is empty or within `[0, 1]`; lot sizes are positive integers.
+- Holdings instruments are normalized to uppercase Tushare codes. Existing `validate_account_inputs` / `validate_current_holdings` remain authoritative for duplicates, invalid symbols, negative/fractional shares, and lot multiples.
+- Preview performs validation only and never writes files.
+- Apply requires `confirm=true`, repeats validation, backs up existing files, and atomically replaces the account YAML and holdings CSV.
+- Empty holdings are valid and represent an empty portfolio; the holdings file is still written so downstream code knows the state was explicitly provided.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Account or holdings payload has the wrong shape | HTTP 400; no writes |
+| Numeric field is NaN or infinite | HTTP 400 naming the field |
+| Total asset is zero/non-positive | Preview invalid; apply rejected |
+| Duplicate or malformed instrument | Preview invalid; apply rejected |
+| Shares are negative, fractional, or not a lot multiple | Preview invalid; apply rejected |
+| `confirm` is not exactly `true` | Apply rejected; files unchanged |
+| Existing account/holdings files exist | Copy them to a timestamped backup directory before replacement |
+| Valid empty holdings list | Save account and an empty `instrument,shares` CSV |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a valid account and normalized holdings preview successfully, then explicit confirmation writes both files and preserves backups.
+- Base: a new installation has no account or holdings file; the form starts from configured defaults and creates both files.
+- Good: an empty holdings list records an intentional empty portfolio.
+- Bad: the account endpoint returns a Tushare token or accepts a user-provided output path.
+- Bad: browser-only input checks are trusted without repeating backend validation.
+
+### 6. Tests Required
+
+- `tests/test_dashboard_account.py` must assert normalization and valid preview output.
+- Tests must assert duplicate/invalid-lot holdings are rejected.
+- Tests must assert NaN/infinite values are rejected.
+- Tests must assert apply requires confirmation and creates backups before writing.
+- Tests must assert the workspace response does not expose Tushare or unrelated config.
+- API tests must assert invalid payloads map to HTTP 400.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+config = load_config()
+config.update(payload)
+yaml.safe_dump(config, account_path.open("w"))
+```
+
+This exposes and overwrites unrelated settings, may leak secrets, and skips holdings validation and backups.
+
+#### Correct
+
+```python
+account = parse_whitelisted_account_fields(payload["account"])
+holdings = normalize_holdings(payload["holdings"])
+issues = validate_account_inputs(account, holdings, config)
+if issues or payload.get("confirm") is not True:
+    reject_without_writes()
+backup_existing_files()
+atomic_write_account_and_holdings()
+```
+
+The Web form controls only its owned contract and the backend remains the final authority.
+
+## Scenario: Parameterized Dashboard Workflows
+
+### 1. Scope / Trigger
+
+- Trigger: Web users need bounded control over dates, batch sizes, cache behavior, optimization size, and advanced research probes without receiving arbitrary command execution.
+- Owner: `src/dashboard_control.py` owns `WORKFLOW_CATALOG`, public parameter schemas, validation, and command construction; `web/src/OperationsWorkspace.tsx` renders the public schema.
+
+### 2. Signatures
+
+- Catalog API: `GET /api/dashboard/workflows -> {"workflows": DashboardWorkflow[]}`.
+- Start API: `POST /api/dashboard/jobs` with `{"action": str, "parameters": {name: value}}`.
+- Internal catalog parameter fields: `name`, `label`, `type`, `flag`, `default`, optional `min`, `max`, `optional`, `pattern`, `help`.
+- Public parameter fields omit `flag` and `pattern`; the browser never receives CLI construction details.
+
+### 3. Contracts
+
+- Every action and parameter name is declared in `WORKFLOW_CATALOG`. Unknown actions or parameter keys are rejected.
+- Supported parameter types are boolean flags, integers, finite numbers, ISO dates, and bounded text formats.
+- Boolean parameters must be JSON booleans; strings such as `"true"` are invalid.
+- Integer/number ranges are enforced by the backend even when the browser input has HTML min/max attributes.
+- Date values use `YYYY-MM-DD`. Optional blank dates are omitted so the script uses project config defaults.
+- Text values require an explicit backend pattern when their grammar matters, such as comma-separated drift thresholds.
+- File inputs, output paths, executable paths, shell fragments, and arbitrary symbol lists are not Web parameters. They remain owned by project config or purpose-built APIs.
+- Commands are passed to `subprocess.Popen` as argument arrays with `shell=False`; no joined shell string is built.
+- Expensive defaults are bounded. For example, annual-router grid runs default to 20 combinations rather than the CLI's unlimited `0` behavior.
+- Windows and Ubuntu use the same validated argument list and `sys.executable`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| `parameters` is not an object | HTTP 400 |
+| Unknown parameter key | HTTP 400 naming the unsupported keys |
+| Boolean is submitted as a string | HTTP 400 |
+| Integer/number is outside min/max | HTTP 400 naming the violated bound |
+| Number is NaN/infinite | HTTP 400 |
+| Date is not `YYYY-MM-DD` | HTTP 400 |
+| Text violates its declared grammar | HTTP 400 |
+| Optional value is blank | Omit its CLI flag and use config/script default |
+| Valid parameter set | Append the fixed flag/value arguments to the fixed script command |
+
+### 5. Good/Base/Bad Cases
+
+- Good: market update submits `chunk_size=500`, `sleep_seconds=0.5`, and a valid end date; the backend produces separate fixed arguments.
+- Base: no parameters are submitted; safe catalog defaults are used.
+- Good: an advanced annual-router grid defaults to 20 combinations and reuses its score cache.
+- Bad: the browser submits `output=../../outside.csv` or an undeclared `--force-official` equivalent.
+- Bad: a text threshold contains `;whoami`; backend format validation rejects it even though subprocess does not invoke a shell.
+
+### 6. Tests Required
+
+- `tests/test_dashboard_control.py` must assert public schemas omit internal flags and scripts.
+- Tests must assert typed parameters produce the intended CLI argument list.
+- Tests must assert unknown keys, wrong types, non-finite numbers, range violations, invalid dates, and text injection formats are rejected.
+- Tests must assert bounded advanced defaults, especially maximum combination limits.
+- Playwright tests must edit a generated parameter field and assert the expected JSON `parameters` payload reaches the start API.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+command = payload["command"].split()
+subprocess.Popen(command)
+```
+
+This delegates executable, path, flag, and safety decisions to the browser.
+
+#### Correct
+
+```python
+workflow = catalog[action]
+parameters = validate_declared_schema(workflow, payload.get("parameters", {}))
+command = [sys.executable, project_script(workflow), *workflow.base_args, *parameters]
+subprocess.Popen(command, shell=False)
+```
+
+The catalog owns the executable contract; the browser supplies bounded values only.
+
 ### 4. Validation & Error Matrix
 
 | Condition | Behavior |
@@ -295,3 +538,74 @@ The resolver maps known artifact ids from the latest dashboard snapshot and cons
 - `src/risk_policy.py` prevents risk settings from being copied across signal and backtest paths.
 - `scripts/run_auto_signal.py` breaks a long workflow into stage result dataclasses and writes resumable status artifacts.
 - `tests/fixtures/real_data.py` provides deterministic real-data fixtures without depending on private local caches.
+
+## Scenario: Full-Market Factor And Web Pipeline Performance
+
+### 1. Scope / Trigger
+
+- Trigger: Alpha158 or the automatic Web workflow operates on the full local A-share history, where avoidable copies or stale-cache mistakes can add multiple GiB or several minutes.
+- Owners: `src/factor_calculator.py`, `scripts/run_auto_signal.py`, and annual-router source builders.
+
+### 2. Signatures
+
+- Config: `qlib.kernels` is a positive integer; Windows defaults to `4` and Ubuntu may override it locally.
+- Factor API: `load_or_compute_factors(start_date, end_date, cache_file, force=False, columns=None)`.
+- Automatic command: `scripts/run_auto_signal.py [--skip-convert] [--force-factor]`.
+- Conversion skip status message: `cache_current_no_raw_changes`.
+
+### 3. Contracts
+
+- Alpha158 feature-only computation passes `learn_processors=[]`; Qlib's label learning processors must not copy the full feature frame when labels are unused.
+- Infinite values are inspected by column. Do not call full-frame `replace([inf, -inf], nan)` on the full Alpha158 matrix.
+- A factor cache whose start date equals the first available price date is valid even when configured history starts earlier than local prices.
+- Conversion may be skipped only when the market update completed with `written_symbols=0`, the configured price panel covers the target date, and Qlib calendar/instrument outputs exist and cover the target date.
+- Annual routing uses canonical month-end dates derived from prices. Each source uses its latest score on or before that date; future scores are never allowed.
+- Annual-router source construction first previews yearly routes, builds only reachable sources, and limits expensive quality scoring to the dates that can use it.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| `qlib.kernels < 1` | Config validation fails |
+| Raw update wrote one or more files | Conversion runs |
+| Price/Qlib output missing or behind target | Conversion runs |
+| No raw changes and all outputs cover target | Conversion is skipped with `cache_current_no_raw_changes` |
+| Cache begins at first available price date | Reuse cache even if configured history begins earlier |
+| Routed source has no score on or before signal date | Fail with `No scores for source=...` |
+| Source has a mid-month last observation | Use it only for a later canonical month-end, never create an extra signal date |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a repeated Web run with current raw data skips conversion and reuses the 2015-start factor cache in seconds.
+- Good: full Alpha158 computation finishes without the default Qlib learn-frame copy or a full-frame infinity mask.
+- Base: changed raw data runs conversion and refreshes factor evidence normally.
+- Bad: comparing configured `history_start_date=2012` directly to a cache whose price history legitimately starts in 2015.
+- Bad: unioning source-specific partial-month dates into the annual rebalance calendar.
+
+### 6. Tests Required
+
+- `tests/test_factor_calculator.py` must cover bounded kernels, first-price-date cache reuse, and column-wise infinity cleanup.
+- `tests/test_run_auto_signal.py` must cover conversion reuse prerequisites and fresh annual-router primary factor files.
+- Annual-router tests must prove canonical signal dates use the latest prior source score.
+- A real Web-click candidate run must record stage timing and prove that candidate/official output gates remain intact.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+factors = factors.replace([np.inf, -np.inf], np.nan)
+dates = routed_signal_dates(score_sources)
+```
+
+This creates a full-frame mask and lets stale partial-month source dates redefine the rebalance calendar.
+
+#### Correct
+
+```python
+factors = _replace_infinite_factors_in_place(factors)
+dates = month_end_signal_dates(prices.index, start_date=start_date, end_date=end_date)
+daily = latest_score_on_or_before(score_sources[source], date)
+```
+
+Memory stays bounded and the routing calendar remains point-in-time correct.

@@ -49,6 +49,31 @@ class RunAutoSignalTests(unittest.TestCase):
 
         self.assertEqual(output_date, "2024-01-03")
 
+    def test_conversion_cache_reuse_requires_no_raw_changes_and_current_outputs(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            price_path = root / "prices.parquet"
+            provider = root / "qlib"
+            (provider / "calendars").mkdir(parents=True)
+            (provider / "instruments").mkdir(parents=True)
+            pd.DataFrame(index=pd.to_datetime(["2024-01-02", "2024-01-03"])).to_parquet(price_path)
+            (provider / "calendars" / "day.txt").write_text("2024-01-02\n2024-01-03\n", encoding="utf-8")
+            (provider / "instruments" / "all.txt").write_text("A\t2024-01-02\t2024-01-03\n", encoding="utf-8")
+            config = {"ic": {"price_file": str(price_path)}, "qlib": {"provider_uri": str(provider)}}
+            update = {"status": "complete", "written_symbols": 0}
+
+            with patch.object(module, "resolve_path", side_effect=lambda value: Path(value)):
+                self.assertTrue(module._can_reuse_conversion_outputs(update, config, "2024-01-03"))
+                self.assertFalse(
+                    module._can_reuse_conversion_outputs({**update, "written_symbols": 1}, config, "2024-01-03")
+                )
+                self.assertFalse(module._can_reuse_conversion_outputs(update, config, "2024-01-04"))
+
+            price_path.unlink()
+            with patch.object(module, "resolve_path", side_effect=lambda value: Path(value)):
+                self.assertFalse(module._can_reuse_conversion_outputs(update, config, "2024-01-03"))
+
     def test_backtest_stage_skip_writes_metrics_and_quality(self) -> None:
         """Verify the extracted backtest stage keeps skip-backtest artifacts stable."""
         module = importlib.import_module("scripts.run_auto_signal")
@@ -68,6 +93,34 @@ class RunAutoSignalTests(unittest.TestCase):
             self.assertEqual(result.research_diagnostics["issues"], ["backtest_skipped"])
             self.assertIn(root / "auto_backtest_metrics.json", artifacts)
             self.assertEqual([stage["state"] for stage in status["stages"] if stage["name"] == "backtest"], ["skipped"])
+
+    def test_annual_state_router_uses_fresh_primary_factor_file(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        config = {
+            "factors": {"cache_file": "data/factors/alpha158.parquet"},
+            "annual_state_router": {
+                "factor_file": "data/factors/alpha158.parquet",
+                "include_expanded_sources": True,
+                "initial_source": "beta",
+                "moderate_positive_source": "roc60",
+                "moderate_low_source": "beta20",
+                "moderate_lower_source": None,
+                "fallback_source": None,
+                "turnover_mode": "rank10",
+                "source_factor_files": {
+                    "db_size": "data/factors/stale_research.parquet",
+                    "selector": "data/factors/stale_research.parquet",
+                },
+            },
+        }
+
+        definitions = module._annual_state_router_source_definitions(config)
+
+        self.assertTrue({"beta", "db_size", "quality", "selector", "industry", "roc60", "beta20"}.issubset(definitions))
+        self.assertEqual(definitions["beta"].factor_file, "data/factors/alpha158.parquet")
+        self.assertEqual(definitions["roc60"].factor_file, "data/factors/alpha158.parquet")
+        self.assertEqual(definitions["beta20"].factor_file, "data/factors/alpha158.parquet")
+        self.assertEqual(definitions["db_size"].factor_file, "data/factors/stale_research.parquet")
 
     def test_annual_state_router_quality_uses_formal_evidence(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")

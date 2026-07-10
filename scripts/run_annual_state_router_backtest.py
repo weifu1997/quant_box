@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
@@ -450,9 +451,14 @@ def build_score_sources(
     start_date: str,
     end_date: str,
     source_definitions: dict[str, ScoreSourceDefinition],
+    progress_callback: Callable[[str, int, int, str], None] | None = None,
+    signal_dates_by_source: dict[str, list[pd.Timestamp]] | None = None,
 ) -> dict[str, pd.Series]:
     sources: dict[str, pd.Series] = {}
-    for name, definition in source_definitions.items():
+    total = len(source_definitions)
+    for index, (name, definition) in enumerate(source_definitions.items(), start=1):
+        if progress_callback is not None:
+            progress_callback(name, index, total, "running")
         if definition.kind == "factor":
             sources[name] = build_factor_source_scores(
                 config=config,
@@ -462,7 +468,8 @@ def build_score_sources(
                 end_date=end_date,
             )
         elif definition.kind == "quality":
-            sources[name] = build_quality_scores(config, signal_dates)
+            source_dates = (signal_dates_by_source or {}).get(name, signal_dates)
+            sources[name] = build_quality_scores(config, source_dates)
         elif definition.kind == "selector":
             sources[name] = build_selector_source_scores(
                 config=config,
@@ -473,6 +480,8 @@ def build_score_sources(
             )
         else:
             raise ValueError(f"Unsupported score source kind: {definition.kind}")
+        if progress_callback is not None:
+            progress_callback(name, index, total, "complete")
     return sources
 
 
@@ -543,6 +552,7 @@ def run_annual_state_score_router(
     initial_source: str,
     missing_ret252_exposure: float,
     flat_negative_exposure: float,
+    signal_dates: list[pd.Timestamp] | None = None,
     fallback_source: str | None = None,
     moderate_positive_source: str | None = None,
     moderate_positive_ret252_min: float = 0.20,
@@ -562,7 +572,11 @@ def run_annual_state_score_router(
 ) -> RoutedScoreRun:
     if initial_source not in score_sources:
         raise ValueError(f"initial_source is not in score sources: {initial_source}")
-    dates = routed_signal_dates(score_sources)
+    dates = (
+        sorted({pd.Timestamp(date).normalize() for date in signal_dates})
+        if signal_dates is not None
+        else routed_signal_dates(score_sources)
+    )
     normalized_price_dates = pd.DatetimeIndex(pd.to_datetime(price_dates).normalize()).unique().sort_values()
     signal_trade_dates = signal_trade_date_map(dates, normalized_price_dates)
     year_routes = annual_route_decisions(
@@ -599,13 +613,13 @@ def run_annual_state_score_router(
         if source not in score_sources:
             raise ValueError(f"Routed source is not in score sources: {source}")
         actual_source = source
-        daily = daily_score_for_date(score_sources[source], date)
+        daily = latest_score_on_or_before(score_sources[source], date)
         fallback_used = False
         if daily.empty and fallback_source:
             if fallback_source not in score_sources:
                 raise ValueError(f"fallback_source is not in score sources: {fallback_source}")
             actual_source = fallback_source
-            daily = daily_score_for_date(score_sources[fallback_source], date)
+            daily = latest_score_on_or_before(score_sources[fallback_source], date)
             fallback_used = True
         if daily.empty:
             raise ValueError(f"No scores for source={source} date={date.date()}.")
@@ -637,6 +651,18 @@ def run_annual_state_score_router(
         )
     scores = pd.concat(parts).sort_index().rename("score") if parts else pd.Series(dtype=float, name="score")
     return RoutedScoreRun(scores=scores, score_routes=pd.DataFrame(rows), year_routes=pd.DataFrame(route_by_year.values()))
+
+
+def latest_score_on_or_before(scores: pd.Series, date: pd.Timestamp) -> pd.Series:
+    """Read the newest point-in-time score cross-section available by a signal date."""
+    if scores.empty or not isinstance(scores.index, pd.MultiIndex):
+        return pd.Series(dtype=float, name=scores.name)
+    target = pd.Timestamp(date).normalize()
+    dates = pd.DatetimeIndex(pd.to_datetime(scores.index.get_level_values(0)).normalize())
+    eligible = dates[dates <= target]
+    if eligible.empty:
+        return pd.Series(dtype=float, name=scores.name)
+    return daily_score_for_date(scores, pd.Timestamp(eligible.max()).normalize())
 
 
 def routed_signal_dates(score_sources: dict[str, pd.Series]) -> list[pd.Timestamp]:

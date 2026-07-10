@@ -1,4 +1,4 @@
-"""Run the local read-only web dashboard."""
+"""Run the cross-platform quant_box Web workspace."""
 
 from __future__ import annotations
 
@@ -30,4 +30,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

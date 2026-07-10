@@ -43,7 +43,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "exclude_st": True,
         "st_calendar_file": "data/raw/st_calendar.csv",
     },
-    "qlib": {"provider_uri": "data/qlib_data", "region": "cn", "instruments": "mainboard_a", "missing_value": None},
+    "qlib": {"provider_uri": "data/qlib_data", "region": "cn", "instruments": "mainboard_a", "missing_value": None, "kernels": 4},
     "factors": {"cache_file": "data/factors/alpha158.parquet"},
     "fundamentals": {
         "fina_indicator_file": "data/fundamentals/fina_indicator.parquet",
@@ -604,6 +604,7 @@ def _mapping_of_strings(value: Any) -> str | None:
 
 
 _CONFIG_VALIDATORS: dict[str, _Validator] = {
+    "qlib.kernels": _int_at_least(1),
     "tushare.http_url": _string_value,
     "tushare.token": _string_value,
     "tushare.timeout": _number_at_least(0),

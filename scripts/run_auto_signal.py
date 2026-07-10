@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -61,10 +62,12 @@ from src.trading_calendar import next_business_day, next_trade_date, resolve_tar
 from scripts.run_annual_state_router_backtest import (
     RoutedScoreRun,
     ScoreSourceDefinition,
+    annual_route_decisions,
     build_score_sources,
     default_source_definitions,
     routed_backtest_config,
     run_annual_state_score_router,
+    signal_trade_date_map,
 )
 from scripts.run_annual_state_router_grid import definitions_for_turnover_mode
 from scripts.run_fundamental_quality_backtest import month_end_signal_dates
@@ -266,7 +269,29 @@ def _annual_state_router_source_definitions(config: dict[str, Any]) -> dict[str,
         for name, factor_file in source_factor_files.items():
             if name in definitions and factor_file:
                 definitions[name] = replace(definitions[name], factor_file=str(factor_file))
-    return definitions_for_turnover_mode(definitions, str(router_cfg.get("turnover_mode", "default")))
+    definitions = definitions_for_turnover_mode(definitions, str(router_cfg.get("turnover_mode", "default")))
+    required_names = {
+        "beta",
+        "db_size",
+        "quality",
+        "selector",
+        "industry",
+        *{
+        str(router_cfg.get(key) or "").strip()
+        for key in (
+            "initial_source",
+            "fallback_source",
+            "moderate_positive_source",
+            "moderate_low_source",
+            "moderate_lower_source",
+        )
+        },
+    }
+    required_names.discard("")
+    missing = sorted(required_names - definitions.keys())
+    if missing:
+        raise ValueError(f"annual_state_router references unknown score sources: {', '.join(missing)}")
+    return definitions
 
 
 def _build_annual_state_router_runtime(
@@ -285,6 +310,42 @@ def _build_annual_state_router_runtime(
     if not signal_dates:
         raise ValueError("annual_state_router has no signal dates in the requested backtest window.")
     source_definitions = _annual_state_router_source_definitions(config)
+    benchmark = _benchmark_close(prices, config, config.get("market_regime", {})).dropna().sort_index()
+    if benchmark.empty:
+        raise ValueError("annual_state_router benchmark close series is empty.")
+    normalized_price_dates = pd.DatetimeIndex(pd.to_datetime(prices.index).normalize()).unique().sort_values()
+    trade_dates = signal_trade_date_map(signal_dates, normalized_price_dates)
+    route_preview = annual_route_decisions(
+        years=sorted({int(trade_date.year) for trade_date in trade_dates.values()}),
+        price_dates=normalized_price_dates,
+        benchmark=benchmark,
+        initial_source=str(router_cfg.get("initial_source", "beta")),
+        missing_ret252_exposure=float(router_cfg.get("missing_ret252_exposure", 0.65)),
+        flat_negative_exposure=float(router_cfg.get("flat_negative_exposure", 0.90)),
+        moderate_positive_source=_optional_router_text(router_cfg.get("moderate_positive_source")),
+        moderate_positive_ret252_min=float(router_cfg.get("moderate_positive_ret252_min", 0.20)),
+        moderate_positive_exposure=float(router_cfg.get("moderate_positive_exposure", 1.0)),
+        moderate_low_source=_optional_router_text(router_cfg.get("moderate_low_source")),
+        moderate_low_ret252_min=float(router_cfg.get("moderate_low_ret252_min", 0.18)),
+        moderate_low_ret252_max=float(router_cfg.get("moderate_low_ret252_max", 0.20)),
+        moderate_low_exposure=float(router_cfg.get("moderate_low_exposure", 1.0)),
+        moderate_lower_source=_optional_router_text(router_cfg.get("moderate_lower_source")),
+        moderate_lower_ret252_min=float(router_cfg.get("moderate_lower_ret252_min", 0.16)),
+        moderate_lower_ret252_max=float(router_cfg.get("moderate_lower_ret252_max", 0.18)),
+        moderate_lower_exposure=float(router_cfg.get("moderate_lower_exposure", 1.0)),
+        strong_trailing_exposure=float(router_cfg.get("strong_trailing_exposure", 1.0)),
+    )
+    route_by_year = {int(row["year"]): row for row in route_preview}
+    signal_dates_by_source: dict[str, list[pd.Timestamp]] = {}
+    for signal_date, trade_date in trade_dates.items():
+        source = str(route_by_year[int(trade_date.year)]["source"])
+        signal_dates_by_source.setdefault(source, []).append(signal_date)
+    fallback_source = _optional_router_text(router_cfg.get("fallback_source"))
+    if fallback_source:
+        signal_dates_by_source[fallback_source] = list(signal_dates)
+    source_definitions = {
+        name: definition for name, definition in source_definitions.items() if name in signal_dates_by_source
+    }
     score_sources = build_score_sources(
         config=config,
         prices=prices,
@@ -292,17 +353,23 @@ def _build_annual_state_router_runtime(
         start_date=start_date,
         end_date=end_date,
         source_definitions=source_definitions,
+        signal_dates_by_source=signal_dates_by_source,
+        progress_callback=lambda name, index, total, state: _stage(
+            status,
+            out_dir,
+            "annual_state_router",
+            "running",
+            f"score source {index}/{total}: {name} ({state})",
+        ),
     )
-    benchmark = _benchmark_close(prices, config, config.get("market_regime", {})).dropna().sort_index()
-    if benchmark.empty:
-        raise ValueError("annual_state_router benchmark close series is empty.")
 
     _stage(status, out_dir, "annual_state_router", "running", "routing annual state scores")
     routed = run_annual_state_score_router(
         score_sources=score_sources,
         source_definitions=source_definitions,
-        price_dates=pd.DatetimeIndex(pd.to_datetime(prices.index).normalize()),
+        price_dates=normalized_price_dates,
         benchmark=benchmark,
+        signal_dates=signal_dates,
         initial_source=str(router_cfg.get("initial_source", "beta")),
         missing_ret252_exposure=float(router_cfg.get("missing_ret252_exposure", 0.65)),
         flat_negative_exposure=float(router_cfg.get("flat_negative_exposure", 0.90)),
@@ -547,6 +614,7 @@ def _run_data_preparation_stage(
     artifacts: list[Path],
 ) -> DataPreparationStageResult:
     """Run update, conversion, factor loading, and data quality stages."""
+    update_info: dict[str, Any] | None = None
     if not args.skip_update:
         _stage(status, out_dir, "update_data", "running")
         logger.info("Updating raw stock data that is missing or stale.")
@@ -569,10 +637,14 @@ def _run_data_preparation_stage(
         _stage(status, out_dir, "update_data", "skipped")
 
     if not args.skip_convert:
-        _stage(status, out_dir, "convert_data", "running")
-        logger.info("Converting raw data to Qlib provider and price panels.")
-        convert_to_qlib_format()
-        _stage(status, out_dir, "convert_data", "complete")
+        if _can_reuse_conversion_outputs(update_info, config, end_date):
+            logger.info("Skipping conversion because no raw files changed and conversion outputs cover %s.", end_date)
+            _stage(status, out_dir, "convert_data", "skipped", "cache_current_no_raw_changes")
+        else:
+            _stage(status, out_dir, "convert_data", "running")
+            logger.info("Converting raw data to Qlib provider and price panels.")
+            convert_to_qlib_format()
+            _stage(status, out_dir, "convert_data", "complete")
     else:
         _stage(status, out_dir, "convert_data", "skipped")
 
@@ -1324,6 +1396,11 @@ def main() -> None:
         parameter_quality_gate = parameter_quality.is_acceptable or args.allow_low_quality
 
         logger.info("Selected strategy params: %s", selected_params)
+        if _annual_state_router_enabled(selected_config) and len(factors) > 1:
+            factors = factors.tail(1).copy()
+            data_stage.factors = factors
+            gc.collect()
+            logger.info("Released the full factor frame before annual-state source construction; retained one date row.")
         backtest_stage = _run_backtest_stage(args, selected_config, factors, prices, end_date, out_dir, status, artifacts)
         result = backtest_stage.result
         backtest_runtime_config = backtest_stage.backtest_runtime_config
@@ -1450,6 +1527,32 @@ def _update_status_message(info: dict[str, Any]) -> str:
     if info.get("last_error"):
         parts.append(f"last_error={info['last_error']}")
     return "; ".join(parts)
+
+
+def _can_reuse_conversion_outputs(update_info: dict[str, Any] | None, config: dict[str, Any], end_date: str) -> bool:
+    """Return whether a no-change update may reuse current Qlib/price outputs."""
+    if not update_info or str(update_info.get("status")) != "complete":
+        return False
+    if int(update_info.get("written_symbols", 0) or 0) != 0:
+        return False
+
+    target = pd.Timestamp(end_date).normalize()
+    price_path = resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet"))
+    provider = resolve_path(config.get("qlib", {}).get("provider_uri", "data/qlib_data"))
+    calendar_path = provider / "calendars" / "day.txt"
+    instrument_path = provider / "instruments" / "all.txt"
+    if not price_path.exists() or not calendar_path.exists() or not instrument_path.exists():
+        return False
+    try:
+        price_index = pd.read_parquet(price_path, columns=[]).index
+        if len(price_index) == 0 or pd.to_datetime(price_index).max().normalize() < target:
+            return False
+        calendar = pd.read_csv(calendar_path, header=None, usecols=[0]).iloc[:, 0]
+        if calendar.empty or pd.to_datetime(calendar, errors="coerce").max().normalize() < target:
+            return False
+    except (OSError, ValueError, TypeError, IndexError):
+        return False
+    return True
 
 
 def _resolve_signal_date_arg(value: str, target_end_date: str) -> str:

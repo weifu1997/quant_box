@@ -174,6 +174,36 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(snapshot["blocker_actions"][0]["title"], "补齐 daily_basic 点时数据")
             self.assertEqual(snapshot["blocker_actions"][0]["action"]["action"], "repair_point_in_time")
 
+    def test_build_dashboard_snapshot_maps_universe_blockers_to_web_repairs(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-11T04:19:34",
+                        "is_executable": False,
+                        "block_reasons": [
+                            "governance:index_constituents_end_before_factor_end:2026-06-01<2026-07-10",
+                            "governance:historical_universe_end_before_factor_end:2026-06-01<2026-07-10",
+                        ],
+                        "quality_warnings": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = build_dashboard_snapshot(out_dir)
+            actions = {item["issue"]: item["action"]["action"] for item in snapshot["blocker_actions"]}
+
+            self.assertEqual(
+                actions["index_constituents_end_before_factor_end:2026-06-01<2026-07-10"],
+                "update_point_in_time_all",
+            )
+            self.assertEqual(
+                actions["historical_universe_end_before_factor_end:2026-06-01<2026-07-10"],
+                "build_historical_universe",
+            )
+
     def test_build_dashboard_precheck_passes_with_current_evidence(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

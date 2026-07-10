@@ -24,8 +24,9 @@ def main() -> None:
         params={"ts_code": "000001.SZ", "start_date": "20240102", "end_date": "20240105"},
         fields=DAILY_FIELDS,
     )
+    preview["url"] = "<configured-private-endpoint>"
     logger.info("Request preview:\n%s", json.dumps(preview, ensure_ascii=False, indent=2))
-    logger.info("This command does not send a network request and does not print your token.")
+    logger.info("This command does not send a network request and does not print your token or private endpoint.")
 
 
 if __name__ == "__main__":

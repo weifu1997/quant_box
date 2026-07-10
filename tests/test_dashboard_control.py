@@ -18,6 +18,7 @@ from src.dashboard_control import (
     DashboardJobStopError,
     build_dashboard_job_command,
     list_dashboard_jobs,
+    list_dashboard_workflows,
     stop_dashboard_job,
 )
 
@@ -73,6 +74,17 @@ class DashboardControlTests(unittest.TestCase):
         self.assertIn("--candidate-only", command)
         self.assertIn("候选输出", label)
 
+    def test_historical_universe_web_action_tolerates_partial_index_windows(self) -> None:
+        command, label = build_dashboard_job_command(
+            "build_historical_universe",
+            python_executable="python-test",
+        )
+
+        self.assertEqual(command[1], str(Path("scripts/run_build_universe.py").resolve()))
+        self.assertIn("--skip-index-errors", command)
+        self.assertNotIn("--skip-fetch", command)
+        self.assertIn("历史股票池", label)
+
     def test_run_auto_signal_normal_mode_omits_candidate_only_flag(self) -> None:
         command, label = build_dashboard_job_command(
             "run_auto_signal",
@@ -91,6 +103,79 @@ class DashboardControlTests(unittest.TestCase):
     def test_unknown_dashboard_action_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported dashboard action"):
             build_dashboard_job_command("delete_everything")
+
+    def test_workflow_catalog_does_not_expose_command_arguments(self) -> None:
+        workflows = list_dashboard_workflows()
+
+        self.assertTrue(any(item["action"] == "update_market_data" for item in workflows))
+        self.assertTrue(any(item["action"] == "run_backtest" for item in workflows))
+        self.assertTrue(all("script" not in item and "args" not in item for item in workflows))
+        self.assertTrue(all("flag" not in parameter for item in workflows for parameter in item.get("parameters", [])))
+
+    def test_core_workflow_commands_use_current_python_and_repo_scripts(self) -> None:
+        cases = {
+            "update_market_data": "run_update_data.py",
+            "convert_data": "run_convert_data.py",
+            "calculate_factors": "run_calc_factors.py",
+            "optimize_parameters": "run_optimize.py",
+            "run_backtest": "run_backtest.py",
+            "generate_candidate_signal": "run_daily_signal.py",
+        }
+        for action, script in cases.items():
+            with self.subTest(action=action):
+                command, label = build_dashboard_job_command(action, python_executable="python-test")
+                self.assertEqual(command[0], "python-test")
+                self.assertEqual(Path(command[1]).name, script)
+                self.assertTrue(label)
+
+    def test_generate_candidate_signal_never_adds_official_flag(self) -> None:
+        command, _label = build_dashboard_job_command("generate_candidate_signal", python_executable="python-test")
+
+        self.assertNotIn("--official", command)
+        self.assertIn("--date", command)
+
+    def test_workflow_parameters_build_typed_command_arguments(self) -> None:
+        command, _label = build_dashboard_job_command(
+            "update_market_data",
+            {
+                "parameters": {
+                    "end_date": "2026-07-10",
+                    "chunk_size": 500,
+                    "sleep_seconds": 0.5,
+                    "max_chunks": 2,
+                    "include_existing": True,
+                }
+            },
+            python_executable="python-test",
+        )
+
+        self.assertEqual(command[command.index("--end-date") + 1], "2026-07-10")
+        self.assertEqual(command[command.index("--chunk-size") + 1], "500")
+        self.assertEqual(command[command.index("--sleep-seconds") + 1], "0.5")
+        self.assertEqual(command[command.index("--max-chunks") + 1], "2")
+        self.assertIn("--include-existing", command)
+
+    def test_workflow_parameters_use_safe_defaults(self) -> None:
+        command, _label = build_dashboard_job_command("annual_router_grid", python_executable="python-test")
+
+        self.assertEqual(command[command.index("--max-combinations") + 1], "20")
+        self.assertNotIn("--force-rebuild-cache", command)
+
+    def test_workflow_parameters_reject_unknown_or_out_of_range_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported workflow parameters: output"):
+            build_dashboard_job_command("run_backtest", {"parameters": {"output": "outside.csv"}})
+        with self.assertRaisesRegex(ValueError, "chunk_size must be <= 2000"):
+            build_dashboard_job_command("update_market_data", {"parameters": {"chunk_size": 999999}})
+        with self.assertRaisesRegex(ValueError, "end_date must use YYYY-MM-DD"):
+            build_dashboard_job_command("run_backtest", {"parameters": {"end_date": "latest;rm -rf /"}})
+        with self.assertRaisesRegex(ValueError, "thresholds has an invalid format"):
+            build_dashboard_job_command("rebalance_drift_probe", {"parameters": {"thresholds": "0.1;whoami"}})
+
+    def test_workflow_parameters_reject_wrong_types_and_non_finite_numbers(self) -> None:
+        with self.assertRaisesRegex(ValueError, "full_grid must be a boolean"):
+            build_dashboard_job_command("optimize_parameters", {"parameters": {"full_grid": "true"}})
+        with self.assertRaisesRegex(ValueError, "max_seconds must be finite"):
+            build_dashboard_job_command("risk_refine", {"parameters": {"max_seconds": "inf"}})
 
     def test_list_dashboard_jobs_skips_malformed_job_json(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -157,6 +242,47 @@ class DashboardControlTests(unittest.TestCase):
             factor_step = next(step for step in jobs[0]["progress"]["steps"] if step["id"] == "compute_factors")
             self.assertEqual(factor_step["status"], "running")
 
+    def test_auto_signal_progress_includes_current_data_update_fraction(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            log_dir = out_dir / "logs"
+            job_dir.mkdir()
+            log_dir.mkdir()
+            (out_dir / "auto_run_status.json").write_text(
+                json.dumps({"started_at": "2026-07-11T02:10:28", "stages": [{"name": "update_data", "state": "running", "updated_at": "2026-07-11T02:10:30"}]}),
+                encoding="utf-8",
+            )
+            (out_dir / "data_update_progress.json").write_text(
+                json.dumps({"updated_at": "2026-07-11T02:12:00", "target_symbols": 1000, "fresh_or_confirmed_symbols": 500}),
+                encoding="utf-8",
+            )
+            (job_dir / "job-1.json").write_text(
+                json.dumps({"id": "job-1", "action": "run_auto_signal", "status": "running", "message": "任务已启动。", "command": ["python", "scripts/run_auto_signal.py"], "started_at": "2026-07-11T02:10:28", "log_path": str(log_dir / "job.log"), "pid": 123}),
+                encoding="utf-8",
+            )
+            with patch("src.dashboard_control._output_dir", return_value=out_dir), patch("src.dashboard_control._pid_is_running", return_value=True), patch("src.dashboard_control._pid_matches_job", return_value=True):
+                job = list_dashboard_jobs()[0]
+
+            update_step = next(step for step in job["progress"]["steps"] if step["id"] == "update_data")
+            self.assertIn("500/1000", update_step["message"])
+            self.assertEqual(job["progress"]["percent"], 5)
+
+    def test_auto_signal_progress_ignores_stale_data_update_file(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            log_dir = out_dir / "logs"
+            job_dir.mkdir()
+            log_dir.mkdir()
+            (out_dir / "auto_run_status.json").write_text(json.dumps({"started_at": "2026-07-11T02:10:28", "stages": [{"name": "update_data", "state": "running"}]}), encoding="utf-8")
+            (out_dir / "data_update_progress.json").write_text(json.dumps({"updated_at": "2026-07-10T02:00:00", "target_symbols": 1000, "fresh_or_confirmed_symbols": 900}), encoding="utf-8")
+            (job_dir / "job-1.json").write_text(json.dumps({"id": "job-1", "action": "run_auto_signal", "status": "running", "message": "任务已启动。", "command": ["python", "scripts/run_auto_signal.py"], "started_at": "2026-07-11T02:10:28", "log_path": str(log_dir / "job.log"), "pid": 123}), encoding="utf-8")
+            with patch("src.dashboard_control._output_dir", return_value=out_dir), patch("src.dashboard_control._pid_is_running", return_value=True), patch("src.dashboard_control._pid_matches_job", return_value=True):
+                job = list_dashboard_jobs()[0]
+
+            self.assertEqual(job["progress"]["percent"], 0)
+
     def test_list_dashboard_jobs_adds_point_in_time_progress_from_log_tail(self) -> None:
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
@@ -198,6 +324,62 @@ class DashboardControlTests(unittest.TestCase):
             self.assertEqual(jobs[0]["progress"]["active_step"], "data_governance")
             daily_step = next(step for step in jobs[0]["progress"]["steps"] if step["id"] == "daily_basic")
             self.assertEqual(daily_step["status"], "complete")
+
+            payload = json.loads((job_dir / "job-1.json").read_text(encoding="utf-8"))
+            payload["action"] = "update_point_in_time_all"
+            (job_dir / "job-1.json").write_text(json.dumps(payload), encoding="utf-8")
+            with (
+                patch("src.dashboard_control._output_dir", return_value=out_dir),
+                patch("src.dashboard_control._pid_is_running", return_value=True),
+                patch("src.dashboard_control._pid_matches_job", return_value=True),
+            ):
+                full_jobs = list_dashboard_jobs()
+            full_daily_step = next(
+                step for step in full_jobs[0]["progress"]["steps"] if step["id"] == "daily_basic"
+            )
+            self.assertEqual(full_daily_step["status"], "complete")
+
+    def test_list_dashboard_jobs_tracks_historical_universe_substeps(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            log_dir = out_dir / "logs"
+            job_dir.mkdir()
+            log_dir.mkdir()
+            log_path = log_dir / "job.log"
+            log_path.write_text(
+                "INFO:index_weight cache updated for 000300.SH: cache.csv\n"
+                "INFO:index_weight cache updated for 000905.SH: cache.csv\n",
+                encoding="utf-8",
+            )
+            (job_dir / "job-1.json").write_text(
+                json.dumps(
+                    {
+                        "id": "job-1",
+                        "action": "build_historical_universe",
+                        "label": "构建历史股票池",
+                        "status": "running",
+                        "message": "任务已启动。",
+                        "command": ["python", "scripts/run_build_universe.py", "--skip-index-errors"],
+                        "started_at": "2026-07-11T04:46:06",
+                        "log_path": str(log_path),
+                        "pid": 123,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch("src.dashboard_control._output_dir", return_value=out_dir),
+                patch("src.dashboard_control._pid_is_running", return_value=True),
+                patch("src.dashboard_control._pid_matches_job", return_value=True),
+            ):
+                job = list_dashboard_jobs()[0]
+
+            statuses = {step["id"]: step["status"] for step in job["progress"]["steps"]}
+            self.assertEqual(statuses["000300.sh"], "complete")
+            self.assertEqual(statuses["000905.sh"], "complete")
+            self.assertEqual(statuses["000852.sh"], "running")
+            self.assertEqual(statuses["historical_universe"], "pending")
 
     def test_dashboard_jobs_api_marks_running_job_active(self) -> None:
         job = {

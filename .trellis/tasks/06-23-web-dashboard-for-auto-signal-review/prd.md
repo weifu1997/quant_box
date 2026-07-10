@@ -15,6 +15,21 @@ On 2026-06-24 the user explicitly requested that the frontend be able to trigger
 * Long-running jobs must expose status and log-tail output in the frontend so the user can tell the task is still active.
 * The review report panel should align visually with other dashboard panels instead of being cramped.
 
+## Scope Update: Web-First Project Workspace
+
+On 2026-07-10 the user clarified that the Web application will become the primary surface for future viewing and operations. The dashboard must therefore remain an efficient daily review console while also explaining the full system clearly enough to serve as the user's main project workspace.
+
+* Keep the latest-run review console as the default operational screen.
+* Add a dedicated project-overview workspace instead of mixing long explanatory content into the trading review flow.
+* Explain the four decisions the project supports, the end-to-end data flow, data and point-in-time governance, factor research, realistic backtesting, quality gates, and the manual trading/fill-feedback loop.
+* Make the two workspaces easy to switch from a persistent navigation surface.
+* Preserve the controlled-action safety boundary: becoming Web-first does not authorize arbitrary commands, forced official output, automatic trading, or direct holdings mutation.
+* Keep the UI polished, Chinese-localized, responsive, and practical for repeated daily use.
+* Add a controlled trade-execution workspace that edits the latest official fill-feedback template, previews holdings changes, and applies validated fills to current holdings after explicit confirmation.
+* Treat instrument, side, and planned order size as immutable backend-owned fields; candidate templates must never be applicable to official holdings.
+* Add a safe account-and-holdings workspace so official-order prerequisites can be configured without manual YAML/CSV editing.
+* Restrict account editing to whitelisted trading inputs, never expose Tushare credentials or arbitrary configuration, and back up existing account files before replacement.
+
 ## What I Already Know
 
 * The user wants to formally proceed with a separate Trellis task named `web-dashboard-for-auto-signal-review`.
@@ -80,6 +95,10 @@ On 2026-06-24 the user explicitly requested that the frontend be able to trigger
   * compact financial tables optimized for scanning;
   * no marketing hero page, no decorative blobs/orbs, and no oversized promo layout.
 * Keep the first screen as the usable dashboard.
+* Provide a project-overview workspace covering the system purpose, pipeline, data layer, factor research, realistic backtest constraints, quality architecture, and manual execution loop.
+* Keep project education separate from the operational review hierarchy so explanatory content does not hide the latest readiness verdict or run controls.
+* Treat the Web dashboard as the primary user-facing workspace while retaining the existing safe CLI and batch workflows as underlying execution paths.
+* Support the manual execution loop from Web: enter fill status/quantity/price/costs, preview validation, and explicitly apply valid fills to current holdings with an audit artifact.
 
 ## Acceptance Criteria
 
@@ -100,6 +119,19 @@ On 2026-06-24 the user explicitly requested that the frontend be able to trigger
 * [ ] The review report panel width is aligned with other main dashboard panels.
 * [ ] Focused tests cover backend artifact parsing and missing-file behavior.
 * [ ] README or a small docs note explains how to start the dashboard.
+* [ ] Persistent navigation switches between the daily review console and the project-overview workspace.
+* [ ] The project-overview workspace covers all seven user-specified project areas and clearly states the candidate-vs-official safety boundary.
+* [ ] The overview remains readable on desktop and narrow/mobile layouts without degrading the operational dashboard.
+* [ ] A trade-execution workspace loads only the latest official fill-feedback template and excludes candidate templates.
+* [ ] Web users can edit only execution-result fields; instrument, side, and planned shares remain unchanged even if a request attempts to override them.
+* [ ] Applying fills requires a successful preview/validation and explicit confirmation, writes an audit JSON, and rejects pending, over-planned, or over-position sells without modifying holdings.
+* [ ] The Web account workspace can preview and save total asset, cash, position cap, lot sizes, and normalized current holdings.
+* [ ] Account saves require explicit confirmation, reject non-finite/invalid/duplicate/non-lot inputs, back up existing files, and never expose unrelated local settings or secrets.
+* [ ] Playwright browser tests cover workspace navigation, workflow run/stop requests, execution preview/apply, account preview/save, and narrow-screen overflow.
+* [ ] Browser tests can run against system Chrome on Windows and Playwright Chromium on Ubuntu.
+* [ ] Workflow cards with configurable behavior render backend-provided parameter schemas and submit values under a structured `parameters` object.
+* [ ] The backend rejects unknown fields, invalid types, non-finite/out-of-range values, invalid dates, and malformed list text; file/output paths and arbitrary commands remain unavailable.
+* [ ] Advanced risk refinement, regime blend, rebalance drift, and annual-router grid workflows are available with bounded defaults.
 
 ## Definition of Done
 

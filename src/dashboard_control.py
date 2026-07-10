@@ -1,10 +1,11 @@
-"""Controlled dashboard actions for local repair and signal reruns."""
+"""Cross-platform controlled dashboard actions for quant_box workflows."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -37,6 +38,74 @@ AUTO_SIGNAL_STEPS = [
     ("research_diagnostics", "生成研究诊断"),
     ("generate_signal", "生成信号与订单"),
 ]
+WORKFLOW_CATALOG: tuple[dict[str, Any], ...] = (
+    {"action": "check_tushare_config", "label": "检查 Tushare 配置", "category": "data", "description": "只读检查代理地址和 token 是否已配置，不发起网络请求。", "duration": "少于 1 分钟", "script": "check_tushare_config.py", "args": []},
+    {"action": "update_market_data", "label": "增量更新行情", "category": "data", "description": "补齐缺失或过期的主板股票日线数据，支持中断后继续。", "duration": "5–60 分钟", "script": "run_update_data.py", "args": [], "parameters": [
+        {"name": "end_date", "label": "目标日期", "type": "date", "flag": "--end-date", "default": "", "optional": True, "help": "留空使用配置目标日期。"},
+        {"name": "chunk_size", "label": "每批股票数", "type": "integer", "flag": "--chunk-size", "default": 300, "min": 1, "max": 2000},
+        {"name": "sleep_seconds", "label": "批次等待秒数", "type": "number", "flag": "--sleep-seconds", "default": 0, "min": 0, "max": 60},
+        {"name": "max_chunks", "label": "最多批次", "type": "integer", "flag": "--max-chunks", "default": "", "optional": True, "min": 1, "max": 10000},
+        {"name": "include_existing", "label": "同时刷新已有股票", "type": "boolean", "flag": "--include-existing", "default": False},
+    ]},
+    {"action": "update_point_in_time_all", "label": "更新点时治理数据", "category": "data", "description": "补齐 daily_basic、指数成分和 ST 历史日历并刷新治理报告。", "duration": "5–120 分钟", "script": "run_update_point_in_time_data.py", "args": [], "parameters": [
+        {"name": "end_date", "label": "目标日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "max_dates", "label": "最多 daily_basic 日期", "type": "integer", "flag": "--max-dates", "default": "", "optional": True, "min": 1, "max": 10000},
+        {"name": "max_index_windows", "label": "最多指数窗口", "type": "integer", "flag": "--max-index-windows", "default": "", "optional": True, "min": 1, "max": 10000},
+        {"name": "sleep_seconds", "label": "请求等待秒数", "type": "number", "flag": "--sleep-seconds", "default": 0, "min": 0, "max": 60},
+    ]},
+    {"action": "update_fundamentals", "label": "更新财务与分红", "category": "data", "description": "按缺失项补齐财务指标和分红缓存。", "duration": "10–120 分钟", "script": "run_update_fundamentals.py", "args": ["--missing-only"], "parameters": [
+        {"name": "end_date", "label": "目标日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "max_symbols", "label": "最多股票数", "type": "integer", "flag": "--max-symbols", "default": "", "optional": True, "min": 1, "max": 10000},
+        {"name": "sleep_seconds", "label": "请求等待秒数", "type": "number", "flag": "--sleep-seconds", "default": 0, "min": 0, "max": 60},
+    ]},
+    {"action": "build_historical_universe", "label": "构建历史股票池", "category": "data", "description": "增量更新沪深300、中证500和中证1000成分；单窗口失败会保留警告，再构建点时股票池。", "duration": "5–60 分钟", "script": "run_build_universe.py", "args": ["--skip-index-errors"]},
+    {"action": "convert_data", "label": "转换价格数据", "category": "pipeline", "description": "把原始 CSV 转换为 Qlib provider 和本地价格面板。", "duration": "2–15 分钟", "script": "run_convert_data.py", "args": []},
+    {"action": "calculate_factors", "label": "计算 Alpha158 因子", "category": "pipeline", "description": "计算或复用 Alpha158 因子缓存。", "duration": "5–30 分钟", "script": "run_calc_factors.py", "args": [], "parameters": [
+        {"name": "end_date", "label": "结束日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "force", "label": "强制重新计算", "type": "boolean", "flag": "--force", "default": False, "help": "忽略有效缓存，耗时显著增加。"},
+    ]},
+    {"action": "factor_diagnostics", "label": "运行因子诊断", "category": "research", "description": "生成 IC、年度稳定性和因子分组收益报告。", "duration": "2–15 分钟", "script": "run_factor_diagnostics.py", "args": []},
+    {"action": "optimize_parameters", "label": "优化策略参数", "category": "research", "description": "运行默认有界 walk-forward 参数搜索。", "duration": "5–60 分钟", "script": "run_optimize.py", "args": [], "parameters": [
+        {"name": "start_date", "label": "开始日期", "type": "date", "flag": "--start-date", "default": "", "optional": True},
+        {"name": "end_date", "label": "结束日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "full_grid", "label": "完整参数网格", "type": "boolean", "flag": "--full-grid", "default": False, "help": "完整网格可能比快速基线慢数倍。"},
+        {"name": "train_years", "label": "训练年数", "type": "integer", "flag": "--train-years", "default": 3, "min": 1, "max": 15},
+        {"name": "test_months", "label": "测试月数", "type": "integer", "flag": "--test-months", "default": 12, "min": 1, "max": 60},
+        {"name": "step_months", "label": "滚动步长月数", "type": "integer", "flag": "--step-months", "default": 12, "min": 1, "max": 60},
+    ]},
+    {"action": "run_backtest", "label": "运行真实化回测", "category": "research", "description": "使用当前配置运行包含成本、容量和涨跌停约束的回测。", "duration": "2–20 分钟", "script": "run_backtest.py", "args": [], "parameters": [
+        {"name": "start_date", "label": "开始日期", "type": "date", "flag": "--start-date", "default": "", "optional": True},
+        {"name": "end_date", "label": "结束日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+    ]},
+    {"action": "quant_diagnostics", "label": "生成量化诊断", "category": "research", "description": "生成五层回测诊断和一致性检查报告。", "duration": "1–10 分钟", "script": "run_quant_diagnostics.py", "args": []},
+    {"action": "optimization_review", "label": "生成优化复核", "category": "research", "description": "复核策略风格、风险和交易约束。", "duration": "1–10 分钟", "script": "run_optimization_review.py", "args": []},
+    {"action": "evidence_optimizer", "label": "生成证据优化计划", "category": "research", "description": "依据诊断产物生成可追踪的优化建议。", "duration": "1–10 分钟", "script": "run_evidence_optimizer.py", "args": []},
+    {"action": "fundamental_screen", "label": "生成基本面筛选", "category": "research", "description": "输出质量、分红、负债和估值筛选报告。", "duration": "1–10 分钟", "script": "run_fundamental_screen.py", "args": ["--date", "latest"]},
+    {"action": "generate_candidate_signal", "label": "生成候选信号", "category": "signal", "description": "基于当前缓存生成最新候选信号，不覆盖正式持仓。", "duration": "1–10 分钟", "script": "run_daily_signal.py", "args": ["--date", "latest"]},
+    {"action": "risk_refine", "label": "风险参数精炼", "category": "advanced", "description": "在有限时间内搜索流动性、止损、仓位与熔断组合。", "duration": "15–120 分钟", "script": "run_risk_refine.py", "args": [], "parameters": [
+        {"name": "start_date", "label": "开始日期", "type": "date", "flag": "--start-date", "default": "", "optional": True},
+        {"name": "end_date", "label": "结束日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "max_seconds", "label": "最长运行秒数", "type": "number", "flag": "--max-seconds", "default": 900, "min": 60, "max": 14400},
+        {"name": "resume", "label": "继续已有结果", "type": "boolean", "flag": "--resume", "default": True},
+    ]},
+    {"action": "regime_blend_probe", "label": "市场状态混合探针", "category": "advanced", "description": "快速比较市场状态、流动性和防御权重组合。", "duration": "5–45 分钟", "script": "run_regime_blend_probe.py", "args": [], "parameters": [
+        {"name": "start_date", "label": "开始日期", "type": "date", "flag": "--start-date", "default": "", "optional": True},
+        {"name": "end_date", "label": "结束日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "max_symbols", "label": "最多股票数", "type": "integer", "flag": "--max-symbols", "default": 700, "min": 10, "max": 5000},
+    ]},
+    {"action": "rebalance_drift_probe", "label": "调仓漂移探针", "category": "advanced", "description": "快速比较不同调仓漂移阈值的效果。", "duration": "5–30 分钟", "script": "run_rebalance_drift_probe.py", "args": [], "parameters": [
+        {"name": "start_date", "label": "开始日期", "type": "date", "flag": "--start-date", "default": "2024-01-01"},
+        {"name": "end_date", "label": "结束日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "thresholds", "label": "漂移阈值", "type": "text", "flag": "--thresholds", "default": "0.0,0.02,0.05", "pattern": r"^\d+(?:\.\d+)?(?:,\d+(?:\.\d+)?)*$", "help": "英文逗号分隔的非负小数。"},
+        {"name": "max_symbols", "label": "最多股票数", "type": "integer", "flag": "--max-symbols", "default": 500, "min": 10, "max": 5000},
+    ]},
+    {"action": "annual_router_grid", "label": "年度状态路由网格", "category": "advanced", "description": "以可恢复缓存运行年度状态路由组合搜索。", "duration": "30–240 分钟", "script": "run_annual_state_router_grid.py", "args": [], "parameters": [
+        {"name": "end_date", "label": "结束日期", "type": "date", "flag": "--end-date", "default": "", "optional": True},
+        {"name": "max_combinations", "label": "最多组合数", "type": "integer", "flag": "--max-combinations", "default": 20, "min": 1, "max": 1000},
+        {"name": "force_rebuild_cache", "label": "强制重建分数缓存", "type": "boolean", "flag": "--force-rebuild-cache", "default": False},
+        {"name": "include_exposure_diagnostics", "label": "包含暴露诊断", "type": "boolean", "flag": "--include-exposure-diagnostics", "default": False},
+    ]},
+)
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PROCESS_LOCK = threading.Lock()
 _RUNNING_PROCESSES: dict[str, subprocess.Popen[bytes]] = {}
@@ -58,6 +127,19 @@ class DashboardJobStopError(RuntimeError):
     """Raised when a dashboard job cannot be stopped."""
 
 
+def list_dashboard_workflows() -> list[dict[str, Any]]:
+    """Return the fixed workflow catalog without exposing shell arguments."""
+    workflows: list[dict[str, Any]] = []
+    for workflow in WORKFLOW_CATALOG:
+        public = {key: value for key, value in workflow.items() if key not in {"script", "args"}}
+        public["parameters"] = [
+            {key: value for key, value in parameter.items() if key not in {"flag", "pattern"}}
+            for parameter in workflow.get("parameters", [])
+        ]
+        workflows.append(public)
+    return workflows
+
+
 def start_dashboard_job(action: str, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Start a whitelisted local dashboard action in the background."""
     payload = dict(payload or {})
@@ -74,6 +156,7 @@ def start_dashboard_job(action: str, payload: Mapping[str, Any] | None = None) -
         "id": job_id,
         "action": action,
         "mode": payload.get("mode"),
+        "parameters": payload.get("parameters"),
         "label": label,
         "status": "running",
         "message": "任务已启动。",
@@ -209,7 +292,90 @@ def build_dashboard_job_command(
         else:
             label = "重跑自动信号（正常门槛输出）"
         return command, label
+    workflow = next((item for item in WORKFLOW_CATALOG if item["action"] == action), None)
+    if workflow is not None:
+        command = [python, str(PROJECT_ROOT / "scripts" / str(workflow["script"]))]
+        command.extend(str(value) for value in workflow.get("args", []))
+        command.extend(_workflow_parameter_args(workflow, payload.get("parameters")))
+        return command, str(workflow["label"])
     raise ValueError(f"Unsupported dashboard action: {action}")
+
+
+def _workflow_parameter_args(workflow: Mapping[str, Any], raw_parameters: Any) -> list[str]:
+    schemas = [dict(item) for item in workflow.get("parameters", []) if isinstance(item, Mapping)]
+    if raw_parameters is None:
+        parameters: dict[str, Any] = {}
+    elif isinstance(raw_parameters, Mapping):
+        parameters = dict(raw_parameters)
+    else:
+        raise ValueError("parameters must be an object")
+    allowed = {str(schema.get("name")) for schema in schemas}
+    unknown = sorted(str(key) for key in parameters if str(key) not in allowed)
+    if unknown:
+        raise ValueError("Unsupported workflow parameters: " + ",".join(unknown))
+
+    args: list[str] = []
+    for schema in schemas:
+        name = str(schema.get("name") or "")
+        flag = str(schema.get("flag") or "")
+        value = parameters.get(name, schema.get("default"))
+        optional = bool(schema.get("optional"))
+        if optional and (value is None or value == ""):
+            continue
+        parameter_type = str(schema.get("type") or "text")
+        if parameter_type == "boolean":
+            if not isinstance(value, bool):
+                raise ValueError(f"Workflow parameter {name} must be a boolean")
+            if value:
+                args.append(flag)
+            continue
+        normalized = _normalize_workflow_parameter(name, value, schema)
+        args.extend([flag, normalized])
+    return args
+
+
+def _normalize_workflow_parameter(name: str, value: Any, schema: Mapping[str, Any]) -> str:
+    parameter_type = str(schema.get("type") or "text")
+    if isinstance(value, bool):
+        raise ValueError(f"Workflow parameter {name} has an invalid type")
+    if parameter_type == "integer":
+        try:
+            number = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Workflow parameter {name} must be an integer") from exc
+        if str(value).strip() not in {str(number), f"{number}.0"}:
+            raise ValueError(f"Workflow parameter {name} must be an integer")
+        _validate_workflow_range(name, float(number), schema)
+        return str(number)
+    if parameter_type == "number":
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Workflow parameter {name} must be a number") from exc
+        if not math.isfinite(number):
+            raise ValueError(f"Workflow parameter {name} must be finite")
+        _validate_workflow_range(name, number, schema)
+        return str(number)
+    text = str(value).strip()
+    if parameter_type == "date":
+        if not _DATE_RE.match(text):
+            raise ValueError(f"Workflow parameter {name} must use YYYY-MM-DD")
+        return text
+    pattern = schema.get("pattern")
+    if pattern and not re.fullmatch(str(pattern), text):
+        raise ValueError(f"Workflow parameter {name} has an invalid format")
+    if len(text) > 200:
+        raise ValueError(f"Workflow parameter {name} is too long")
+    return text
+
+
+def _validate_workflow_range(name: str, value: float, schema: Mapping[str, Any]) -> None:
+    minimum = schema.get("min")
+    maximum = schema.get("max")
+    if minimum is not None and value < float(minimum):
+        raise ValueError(f"Workflow parameter {name} must be >= {minimum}")
+    if maximum is not None and value > float(maximum):
+        raise ValueError(f"Workflow parameter {name} must be <= {maximum}")
 
 
 def _wait_for_job(job_dir: Path, job_id: str, process: subprocess.Popen[bytes], log_handle: Any) -> None:
@@ -333,8 +499,10 @@ def _job_progress(job: Mapping[str, Any], log_tail: list[str]) -> dict[str, Any]
     action = str(job.get("action") or "")
     if action == "run_auto_signal":
         return _auto_signal_progress(job)
-    if action == "repair_point_in_time":
+    if action in {"repair_point_in_time", "update_point_in_time_all"}:
         return _point_in_time_progress(job, log_tail)
+    if action == "build_historical_universe":
+        return _historical_universe_progress(job, log_tail)
     return _generic_progress(job)
 
 
@@ -361,7 +529,29 @@ def _auto_signal_progress(job: Mapping[str, Any]) -> dict[str, Any]:
                 "updated_at": stage.get("updated_at"),
             }
         )
-    return _progress_payload(job, steps)
+    data_fraction = _merge_data_update_progress(out_dir, job, steps)
+    payload = _progress_payload(job, steps)
+    if data_fraction is not None and payload.get("active_step") == "update_data":
+        completed = sum(1 for step in payload["steps"] if step["status"] in {"complete", "skipped"})
+        payload["percent"] = round(((completed + data_fraction) / len(payload["steps"])) * 100)
+    return payload
+
+
+def _merge_data_update_progress(out_dir: Path, job: Mapping[str, Any], steps: list[dict[str, Any]]) -> float | None:
+    progress = _read_json(out_dir / "data_update_progress.json")
+    if not _timestamp_is_not_before(progress.get("updated_at"), job.get("started_at")):
+        return None
+    target = _int_value(progress.get("target_symbols")) or _int_value(progress.get("pending_symbols"))
+    completed = _int_value(progress.get("fresh_or_confirmed_symbols"))
+    if completed is None:
+        completed = _int_value(progress.get("completed_symbols"))
+    if not target or completed is None:
+        return None
+    fraction = min(max(completed / target, 0.0), 1.0)
+    step = next((item for item in steps if item.get("id") == "update_data"), None)
+    if step is not None and step.get("status") == "running":
+        step["message"] = f"已确认 {completed}/{target} 只股票（{fraction:.0%}）"
+    return fraction
 
 
 def _point_in_time_progress(job: Mapping[str, Any], log_tail: list[str]) -> dict[str, Any]:
@@ -384,6 +574,44 @@ def _point_in_time_progress(job: Mapping[str, Any], log_tail: list[str]) -> dict
             "updated_at": None,
         },
     ]
+    return _progress_payload(job, steps)
+
+
+def _historical_universe_progress(job: Mapping[str, Any], log_tail: list[str]) -> dict[str, Any]:
+    log_text = "\n".join(log_tail).lower()
+    log_path = Path(str(job.get("log_path") or ""))
+    if log_path.exists():
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace").lower()
+        except OSError:
+            pass
+    codes = ["000300.sh", "000905.sh", "000852.sh"]
+    labels = ["更新沪深300成分", "更新中证500成分", "更新中证1000成分"]
+    steps: list[dict[str, Any]] = []
+    previous_complete = True
+    for code, label in zip(codes, labels):
+        complete = f"index_weight cache updated for {code}" in log_text
+        running = previous_complete and _is_job_running(job) and not complete
+        steps.append(
+            {
+                "id": code,
+                "label": label,
+                "status": "complete" if complete else ("running" if running else "pending"),
+                "message": "指数成分缓存已更新。" if complete else "正在增量补齐指数窗口。" if running else "",
+                "updated_at": None,
+            }
+        )
+        previous_complete = previous_complete and complete
+    universe_done = "historical universe snapshots written" in log_text
+    steps.append(
+        {
+            "id": "historical_universe",
+            "label": "生成历史股票池",
+            "status": "complete" if universe_done else ("running" if previous_complete and _is_job_running(job) else "pending"),
+            "message": "历史股票池已写入。" if universe_done else "",
+            "updated_at": None,
+        }
+    )
     return _progress_payload(job, steps)
 
 

@@ -125,6 +125,34 @@ class RunAnnualStateRouterBacktestTests(unittest.TestCase):
 
         self.assertEqual(result[pd.Timestamp("2024-12-31")], pd.Timestamp("2025-01-02"))
 
+    def test_score_router_uses_canonical_month_end_and_latest_prior_source_score(self) -> None:
+        source_date = pd.Timestamp("2024-02-15")
+        signal_date = pd.Timestamp("2024-02-29")
+        beta = pd.Series(
+            [1.0],
+            index=pd.MultiIndex.from_tuples([(source_date, "BETA")], names=["date", "instrument"]),
+            name="score",
+        )
+        sources = {name: beta for name in ["beta", "db_size", "quality", "selector", "industry"]}
+        definitions = {
+            name: ScoreSourceDefinition(name=name, kind="factor", top_n=5, max_turnover=1, rank_buffer=10)
+            for name in sources
+        }
+
+        routed = run_annual_state_score_router(
+            score_sources=sources,
+            source_definitions=definitions,
+            price_dates=pd.DatetimeIndex(pd.to_datetime(["2024-02-29", "2024-03-01"])),
+            benchmark=pd.Series([100.0], index=pd.to_datetime(["2024-02-01"])),
+            signal_dates=[signal_date],
+            initial_source="beta",
+            missing_ret252_exposure=0.5,
+            flat_negative_exposure=0.9,
+        )
+
+        self.assertEqual(routed.score_routes["date"].tolist(), ["2024-02-29"])
+        self.assertEqual(routed.scores.xs(signal_date, level=0).index.tolist(), ["BETA"])
+
     def test_score_router_raises_when_routed_source_has_no_scores(self) -> None:
         date = pd.Timestamp("2025-01-31")
         sources = {

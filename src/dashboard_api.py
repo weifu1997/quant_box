@@ -12,15 +12,18 @@ from fastapi.staticfiles import StaticFiles
 
 from src.config_loader import PROJECT_ROOT
 from src.dashboard import build_dashboard_precheck, build_dashboard_snapshot, resolve_dashboard_artifact
+from src.dashboard_account import apply_account_update, build_account_workspace, preview_account_update
 from src.dashboard_control import (
     DashboardJobConflictError,
     DashboardJobNotFoundError,
     DashboardJobStartError,
     DashboardJobStopError,
     list_dashboard_jobs,
+    list_dashboard_workflows,
     start_dashboard_job,
     stop_dashboard_job,
 )
+from src.dashboard_execution import apply_execution_feedback, build_execution_workspace, preview_execution_feedback
 
 
 def create_dashboard_app() -> FastAPI:
@@ -51,6 +54,50 @@ def create_dashboard_app() -> FastAPI:
         jobs = list_dashboard_jobs()
         active = next((job for job in jobs if job.get("status") in {"running", "stopping"}), None)
         return {"jobs": jobs, "active_job": active}
+
+    @app.get("/api/dashboard/workflows")
+    def dashboard_workflows() -> dict[str, Any]:
+        return {"workflows": list_dashboard_workflows()}
+
+    @app.get("/api/dashboard/account")
+    def dashboard_account() -> dict[str, Any]:
+        return build_account_workspace()
+
+    @app.post("/api/dashboard/account/preview")
+    def dashboard_account_preview(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        try:
+            return preview_account_update(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/dashboard/account/apply")
+    def dashboard_account_apply(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        try:
+            return apply_account_update(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/dashboard/execution")
+    def dashboard_execution() -> dict[str, Any]:
+        return build_execution_workspace()
+
+    @app.post("/api/dashboard/execution/preview")
+    def dashboard_execution_preview(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        try:
+            return preview_execution_feedback(payload)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/dashboard/execution/apply")
+    def dashboard_execution_apply(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        try:
+            return apply_execution_feedback(payload)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/dashboard/jobs")
     def start_dashboard_job_api(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:

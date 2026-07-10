@@ -8,10 +8,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 
 import src.factor_calculator as factor_calculator
-from src.factor_calculator import _ensure_qlib_initialized, load_or_compute_factors
+from src.factor_calculator import _ensure_qlib_initialized, _replace_infinite_factors_in_place, load_or_compute_factors
 from tests.fixtures.real_data import require_real_market_data
 
 
@@ -19,11 +20,11 @@ class FakeQlib:
     """类说明：提供 FakeQlib 测试替身实现。"""
     def __init__(self) -> None:
         """函数说明：初始化实例状态。"""
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str, int | None]] = []
 
-    def init(self, provider_uri: str, region: str) -> None:
+    def init(self, provider_uri: str, region: str, kernels: int | None = None) -> None:
         """函数说明：处理 init 主要逻辑。"""
-        self.calls.append((provider_uri, region))
+        self.calls.append((provider_uri, region, kernels))
 
 
 class FactorCalculatorTests(unittest.TestCase):
@@ -40,7 +41,36 @@ class FactorCalculatorTests(unittest.TestCase):
         _ensure_qlib_initialized(fake, provider, "cn")
         _ensure_qlib_initialized(fake, provider, "cn")
 
-        self.assertEqual(fake.calls, [(str(provider), "cn")])
+        self.assertEqual(fake.calls, [(str(provider), "cn", None)])
+
+    def test_ensure_qlib_initialized_passes_bounded_kernel_count(self) -> None:
+        fake = FakeQlib()
+        provider = Path("data/qlib_data")
+
+        _ensure_qlib_initialized(fake, provider, "cn", kernels=4)
+
+        self.assertEqual(fake.calls, [(str(provider), "cn", 4)])
+
+    def test_replace_infinite_factors_cleans_columns_in_place(self) -> None:
+        index = pd.MultiIndex.from_product(
+            [pd.to_datetime(["2024-01-02", "2024-01-03"]), ["A"]],
+            names=["datetime", "instrument"],
+        )
+        factors = pd.DataFrame(
+            {
+                "F1": np.array([np.inf, 1.0], dtype=np.float64),
+                "F2": np.array([-np.inf, 2.0], dtype=np.float32),
+                "label": ["x", "y"],
+            },
+            index=index,
+        )
+
+        cleaned = _replace_infinite_factors_in_place(factors)
+
+        self.assertIs(cleaned, factors)
+        self.assertTrue(pd.isna(cleaned.iloc[0]["F1"]))
+        self.assertTrue(pd.isna(cleaned.iloc[0]["F2"]))
+        self.assertEqual(cleaned["label"].tolist(), ["x", "y"])
 
     def test_load_or_compute_factors_recomputes_when_price_panel_has_new_symbol(self) -> None:
         """函数说明：验证 test_load_or_compute_factors_recomputes_when_price_panel_has_new_symbol 覆盖的行为场景。"""
@@ -595,6 +625,43 @@ class FactorCalculatorTests(unittest.TestCase):
 
             compute.assert_called_once()
             self.assertTrue(cache_path.exists())
+
+    def test_load_or_compute_factors_reuses_cache_from_first_available_price_date(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_path = root / "alpha158.parquet"
+            price_path = root / "ohlcv.parquet"
+            provider = root / "qlib"
+            dates = pd.to_datetime(["2015-01-05", "2015-01-06"])
+            index = pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"])
+            pd.DataFrame({"F1": [1.0, 2.0]}, index=index).to_parquet(cache_path)
+            pd.DataFrame({"A": [10.0, 10.1]}, index=dates).to_parquet(price_path)
+            cache_path.with_name(f"{cache_path.name}.meta.json").write_text(
+                json.dumps(
+                    {
+                        "provider_uri": str(provider),
+                        "region": "cn",
+                        "instruments": "mainboard_a",
+                        "start_date": "2015-01-05",
+                        "end_date": "2015-01-06",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "data": {"history_start_date": "2012-01-01", "end_date": "auto"},
+                "factors": {"cache_file": str(cache_path)},
+                "ic": {"price_file": str(price_path)},
+                "qlib": {"provider_uri": str(provider), "region": "cn", "instruments": "mainboard_a"},
+            }
+
+            with patch("src.factor_calculator.load_config", return_value=config), patch(
+                "src.factor_calculator.resolve_path", side_effect=lambda value: Path(value)
+            ), patch("src.factor_calculator.compute_alpha158_factors") as compute:
+                factors = load_or_compute_factors("2012-01-01", "2015-01-06", cache_file=cache_path)
+
+            compute.assert_not_called()
+            self.assertEqual(len(factors), 2)
 
     def test_load_or_compute_factors_recomputes_when_qlib_metadata_changes(self) -> None:
         """函数说明：验证 test_load_or_compute_factors_recomputes_when_qlib_metadata_changes 覆盖的行为场景。"""

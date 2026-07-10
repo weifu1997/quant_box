@@ -33,6 +33,9 @@ qlib:
   region: "cn"
   instruments: "mainboard_a"
   missing_value: null
+  # Limit Qlib parallel workers to control Alpha158 peak memory on Windows.
+  # Ubuntu servers with more RAM may raise this in settings.local.yaml.
+  kernels: 4
 
 factors:
   cache_file: "data/factors/alpha158.parquet"
@@ -264,7 +267,7 @@ validated_strategy:
 
 annual_state_router:
   enabled: true
-  factor_file: "data/factors/codex_goal_extended_factors_20260610.parquet"
+  factor_file: "data/factors/alpha158.parquet"
   industry_factor_file: "data/factors/codex_goal_industry_momentum_factors_20260611.parquet"
   selector_file: "outputs/selector_weight_lb63_top5_posprop_top5_formal_20260611_selector.csv"
   source_factor_files:

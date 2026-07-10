@@ -573,12 +573,19 @@ def _blocker_action(reason: str, source: str = "block_reason") -> dict[str, Any]
         action = {"label": "正常门槛重跑", "action": "run_auto_signal", "mode": "normal"}
     elif issue.startswith("st_calendar_"):
         title = "补齐 ST 日历"
-        detail = "ST 日历点时数据不完整；当前仪表盘只提供 daily_basic 一键修复，请按原始报告命令处理。"
+        detail = "运行完整点时治理更新，补齐 ST 日历、指数成分和 daily_basic；完成后需要重跑自动信号。"
         severity = "warning"
-    elif issue.startswith("index_constituents_") or issue.startswith("historical_universe_"):
+        action = {"label": "更新点时治理数据", "action": "update_point_in_time_all"}
+    elif issue.startswith("index_constituents_"):
         title = "补齐指数/股票池点时数据"
-        detail = "股票池或指数成分历史不完整；当前仪表盘暂不提供该类一键修复，请按原始报告命令处理。"
+        detail = "运行完整点时治理更新，补齐沪深300、中证500和中证1000指数成分窗口。"
         severity = "warning"
+        action = {"label": "更新指数成分", "action": "update_point_in_time_all"}
+    elif issue.startswith("historical_universe_"):
+        title = "重建历史股票池"
+        detail = "使用最新点时指数成分重建沪深300、中证500和中证1000历史股票池。"
+        severity = "warning"
+        action = {"label": "构建历史股票池", "action": "build_historical_universe"}
     elif issue.startswith("account_") or reason.startswith("account:"):
         title = "检查账户与持仓输入"
         detail = "账户或持仓输入未通过检查，需要先修正本地账户/持仓文件。"
