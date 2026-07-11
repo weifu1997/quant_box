@@ -829,7 +829,7 @@ function BlockerActionCenter({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const activeJob = jobs.find(isActiveJob) ?? null;
-  const runnableCount = items.filter((item) => item.action).length;
+  const availableEntryCount = items.filter((item) => item.action || item.report_artifact?.downloadable).length;
 
   const runBlockerAction = (item: BlockerAction) => {
     if (!item.action) {
@@ -851,7 +851,7 @@ function BlockerActionCenter({
       <SectionTitle
         icon={<AlertTriangle size={18} />}
         title="阻塞修复中心"
-        aside={items.length ? `${runnableCount}/${items.length} 可一键处理` : "无阻塞"}
+        aside={items.length ? `${availableEntryCount}/${items.length} 有可用入口` : "无阻塞"}
       />
       {items.length ? (
         <div className="blocker-stack">
@@ -869,8 +869,18 @@ function BlockerActionCenter({
                     {pendingId === item.id ? <Loader2 className="spin-icon" size={16} /> : <Wrench size={16} />}
                     <span>{pendingId === item.id ? "正在启动" : item.action.label}</span>
                   </button>
+                ) : item.report_artifact?.downloadable ? (
+                  <a
+                    className="blocker-action"
+                    href={artifactUrl(item.report_artifact.id)}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <ExternalLink size={16} />
+                    <span>查看报告</span>
+                  </a>
                 ) : (
-                  <span className="pill muted">查看报告</span>
+                  <span className="pill muted">报告不可用</span>
                 )}
               </article>
             );
@@ -1227,6 +1237,18 @@ function translateReason(reason: string) {
   if (unconfirmedFactors) {
     return `${prefix}仍有 ${unconfirmedFactors[1]} 只股票未确认是否存在目标日行情。`;
   }
+  const yearlyReturn = text.match(/^backtest_yearly_annual_return_below_threshold:(.+)<(-?\d+(?:\.\d+)?)$/);
+  if (yearlyReturn) {
+    const threshold = formatReasonPercent(yearlyReturn[2]);
+    const years = yearlyReturn[1]
+      .split(",")
+      .map((item) => {
+        const match = item.trim().match(/^(\d{4})=(-?\d+(?:\.\d+)?)$/);
+        return match ? `${match[1]} 年年化收益 ${formatReasonPercent(match[2])}` : item.trim();
+      })
+      .join("，");
+    return `${prefix}${years}，低于 ${threshold} 门槛。`;
+  }
   const stCalendar = text.match(/^st_calendar_end_before_factor_end:(.+)$/);
   if (stCalendar) {
     return `${prefix}ST 历史日历早于因子缓存截止日期：${stCalendar[1]}`;
@@ -1245,7 +1267,22 @@ function translateReason(reason: string) {
   if (text === "candidate_only_requested") {
     return `${prefix}已启用候选输出模式，本次不会生成或覆盖正式交易信号。`;
   }
+  if (text === "annual_state_router_evidence_engine_contract_mismatch") {
+    return `${prefix}正式年度路由证据由旧版或不兼容的回测引擎生成，无法证明当前策略。`;
+  }
+  if (text === "annual_state_router_evidence_source_definitions_missing") {
+    return `${prefix}正式年度路由证据缺少评分来源文件与参数溯源。`;
+  }
+  const sourceMismatch = text.match(/^annual_state_router_evidence_source_mismatch:(.+)$/);
+  if (sourceMismatch) {
+    return `${prefix}正式年度路由证据的评分来源与当前配置不一致：${sourceMismatch[1]}。`;
+  }
   return trimmed;
+}
+
+function formatReasonPercent(value: string) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${(numeric * 100).toFixed(2)}%` : value;
 }
 
 function issueTone(reason: string, fallback: "danger" | "warning") {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -10,6 +11,8 @@ import unittest
 import pandas as pd
 
 from scripts.run_annual_state_router_grid import (
+    ScoreSourceDefinition,
+    _score_cache_path,
     append_row,
     combo_key,
     completed_keys,
@@ -18,10 +21,45 @@ from scripts.run_annual_state_router_grid import (
     parse_bool_list,
     parse_reason_set,
     parse_reason_set_list,
+    write_candidate_detail,
 )
 
 
 class RunAnnualStateRouterGridTests(unittest.TestCase):
+    def test_write_candidate_detail_records_years_and_provenance(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            definition = ScoreSourceDefinition(name="beta", kind="factor", factor_group="factor:BETA60", factor_file="alpha.parquet")
+
+            write_candidate_detail(
+                detail_dir=root,
+                key="candidate-key",
+                metrics={"annual_return": 0.25},
+                yearly=pd.DataFrame([{"year": 2026, "annual_return": 0.21, "max_drawdown": -0.10}]),
+                audit_summary={"is_goal_met": True},
+                full_gate={"is_full_goal_met": True},
+                combo={"moderate_low_source": "beta"},
+                source_definitions={"beta": definition},
+            )
+
+            metrics_path = next(root.glob("*_metrics.json"))
+            years_path = next(root.glob("*_years.csv"))
+            payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["engine_contract"]["signal_calendar"], "canonical_month_end")
+            self.assertEqual(payload["source_definitions"]["beta"]["factor_file"], "alpha.parquet")
+            self.assertEqual(pd.read_csv(years_path).iloc[0]["year"], 2026)
+
+    def test_score_cache_path_changes_with_source_provenance(self) -> None:
+        root = Path("cache")
+        first = ScoreSourceDefinition(name="beta20", kind="factor", factor_group="factor:BETA20", factor_file="a.parquet")
+        second = ScoreSourceDefinition(name="beta20", kind="factor", factor_group="factor:BETA20", factor_file="b.parquet")
+
+        first_path = _score_cache_path(root, "beta20", first, "2015-01-01", "2026-07-10")
+        second_path = _score_cache_path(root, "beta20", second, "2015-01-01", "2026-07-10")
+
+        self.assertNotEqual(first_path, second_path)
+        self.assertIn("2026-07-10", first_path.name)
+
     def test_parse_reason_set_list_uses_semicolon_sets_and_plus_members(self) -> None:
         parsed = parse_reason_set_list("none; low_vol_moderate_uptrend+moderate_positive_roc60 ")
 

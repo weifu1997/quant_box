@@ -947,6 +947,14 @@ h3 {
   cursor: pointer;
   font-weight: 700;
   font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.blocker-action:hover,
+.blocker-action:focus-visible {
+  border-color: rgba(0, 122, 255, 0.5);
+  background: rgba(0, 122, 255, 0.12);
+  outline: none;
 }
 
 .blocker-action:disabled {

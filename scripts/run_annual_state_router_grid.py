@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
+from dataclasses import asdict, replace
+import hashlib
 from itertools import product
 import json
 from pathlib import Path
@@ -20,12 +21,13 @@ from scripts.run_annual_state_router_backtest import (
     DEFAULT_EXTENDED_FACTOR_FILE,
     DEFAULT_INDUSTRY_FACTOR_FILE,
     DEFAULT_SELECTOR_FILE,
+    ANNUAL_ROUTER_ENGINE_CONTRACT,
     ScoreSourceDefinition,
     RoutedScoreRun,
     apply_research_config_overrides,
     apply_source_top_n_overrides,
     build_score_sources,
-    default_source_definitions,
+    configured_source_definitions,
     full_gate_summary,
     routed_backtest_config,
     run_annual_state_score_router,
@@ -96,9 +98,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Resumable annual state-router grid search.")
     parser.add_argument("--start-date", default="")
     parser.add_argument("--end-date", default="2026-06-09")
-    parser.add_argument("--factor-file", default=DEFAULT_EXTENDED_FACTOR_FILE)
-    parser.add_argument("--industry-factor-file", default=DEFAULT_INDUSTRY_FACTOR_FILE)
-    parser.add_argument("--selector-file", default=DEFAULT_SELECTOR_FILE)
+    parser.add_argument("--factor-file", default="")
+    parser.add_argument("--industry-factor-file", default="")
+    parser.add_argument("--selector-file", default="")
     parser.add_argument("--cache-dir", default="outputs/router_score_cache")
     parser.add_argument("--force-rebuild-cache", action="store_true")
     parser.add_argument("--output", default=dated_output_path("annual_state_router_grid", suffix=".csv"))
@@ -132,6 +134,7 @@ def main() -> None:
     parser.add_argument("--include-exposure-diagnostics", action="store_true")
     parser.add_argument("--disable-equity-overlay", action="store_true")
     parser.add_argument("--write-hit-prefix", default="")
+    parser.add_argument("--detail-dir", default="")
     args = parser.parse_args()
 
     config = load_config()
@@ -142,10 +145,11 @@ def main() -> None:
 
     prices = pd.read_parquet(resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet")))
     signal_dates = month_end_signal_dates(prices.index, start_date=start_date, end_date=end_date)
-    base_definitions = default_source_definitions(
-        factor_file=args.factor_file,
-        industry_factor_file=args.industry_factor_file,
-        selector_file=args.selector_file,
+    base_definitions = configured_source_definitions(
+        config,
+        factor_file=args.factor_file or None,
+        industry_factor_file=args.industry_factor_file or None,
+        selector_file=args.selector_file or None,
         include_expanded_sources=True,
     )
     score_sources = load_or_build_score_sources(
@@ -179,6 +183,7 @@ def main() -> None:
             source_definitions=definitions,
             price_dates=pd.DatetimeIndex(pd.to_datetime(prices.index).normalize()),
             benchmark=benchmark,
+            signal_dates=signal_dates,
             initial_source="beta",
             missing_ret252_exposure=combo["missing_ret252_exposure"],
             flat_negative_exposure=0.90,
@@ -244,6 +249,17 @@ def main() -> None:
         if args.include_exposure_diagnostics:
             row.update(grid_exposure_fields(result.holdings, combo_config))
         append_row(output, row)
+        if args.detail_dir:
+            write_candidate_detail(
+                detail_dir=resolve_path(args.detail_dir),
+                key=key,
+                metrics=result.metrics,
+                yearly=audited_yearly,
+                audit_summary=audit_summary,
+                full_gate=full_gate,
+                combo=combo,
+                source_definitions=definitions,
+            )
         print(
             f"{count}: goal={row['full_goal']} years={row['year_return_pass_count']}/"
             f"{row['year_drawdown_pass_count']} annual={row['annual_return']:.4f} "
@@ -260,6 +276,7 @@ def main() -> None:
                 audit_summary=audit_summary,
                 full_gate=full_gate,
                 combo=combo,
+                source_definitions=definitions,
             )
             break
 
@@ -279,7 +296,7 @@ def load_or_build_score_sources(
     sources: dict[str, pd.Series] = {}
     missing: dict[str, ScoreSourceDefinition] = {}
     for name, definition in source_definitions.items():
-        path = cache_dir / f"{name}_{pd.Timestamp(end_date).date().isoformat()}.parquet"
+        path = _score_cache_path(cache_dir, name, definition, start_date, end_date)
         if path.exists() and not force:
             frame = pd.read_parquet(path)
             sources[name] = frame["score"].rename("score")
@@ -296,11 +313,28 @@ def load_or_build_score_sources(
             end_date=end_date,
             source_definitions={name: definition},
         )[name]
-        path = cache_dir / f"{name}_{pd.Timestamp(end_date).date().isoformat()}.parquet"
+        path = _score_cache_path(cache_dir, name, definition, start_date, end_date)
         built.to_frame("score").to_parquet(path)
         sources[name] = built
         print(f"wrote score cache: {path} rows={len(built)}", flush=True)
     return sources
+
+
+def _score_cache_path(
+    cache_dir: Path,
+    name: str,
+    definition: ScoreSourceDefinition,
+    start_date: str,
+    end_date: str,
+) -> Path:
+    payload = {
+        "engine_contract": ANNUAL_ROUTER_ENGINE_CONTRACT,
+        "source": asdict(definition),
+        "start_date": str(pd.Timestamp(start_date).date()),
+        "end_date": str(pd.Timestamp(end_date).date()),
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+    return cache_dir / f"{name}_{pd.Timestamp(end_date).date().isoformat()}_{digest}.parquet"
 
 
 def iter_grid(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -576,6 +610,7 @@ def write_hit_outputs(
     audit_summary: dict[str, Any],
     full_gate: dict[str, Any],
     combo: dict[str, Any],
+    source_definitions: dict[str, ScoreSourceDefinition],
 ) -> None:
     prefix.parent.mkdir(parents=True, exist_ok=True)
     result.equity_curve.to_csv(Path(str(prefix) + "_equity.csv"), encoding="utf-8-sig")
@@ -591,6 +626,41 @@ def write_hit_outputs(
                 "audit": audit_summary,
                 "full_gate": full_gate,
                 "combo": combo,
+                "engine_contract": ANNUAL_ROUTER_ENGINE_CONTRACT,
+                "source_definitions": {name: asdict(definition) for name, definition in source_definitions.items()},
+            },
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_candidate_detail(
+    *,
+    detail_dir: Path,
+    key: str,
+    metrics: dict[str, Any],
+    yearly: pd.DataFrame,
+    audit_summary: dict[str, Any],
+    full_gate: dict[str, Any],
+    combo: dict[str, Any],
+    source_definitions: dict[str, ScoreSourceDefinition],
+) -> None:
+    detail_dir.mkdir(parents=True, exist_ok=True)
+    slug = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+    yearly.to_csv(detail_dir / f"{slug}_years.csv", index=False, encoding="utf-8-sig")
+    (detail_dir / f"{slug}_metrics.json").write_text(
+        json.dumps(
+            {
+                "key": key,
+                "metrics": metrics,
+                "audit": audit_summary,
+                "full_gate": full_gate,
+                "combo": combo,
+                "engine_contract": ANNUAL_ROUTER_ENGINE_CONTRACT,
+                "source_definitions": {name: asdict(definition) for name, definition in source_definitions.items()},
             },
             indent=2,
             ensure_ascii=False,

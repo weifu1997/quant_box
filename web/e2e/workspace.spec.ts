@@ -57,6 +57,7 @@ test("manual order stock name and code open a refreshable modal", async ({ page 
   await expect(page.getByRole("heading", { name: "自动信号复核" })).toBeVisible();
   await expect(page.getByText("10.50", { exact: true })).toBeVisible();
   await expect(page.getByText("实时行情接口", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("接口未提供", { exact: true })).toBeVisible();
   const requestsBeforeRefresh = quoteRequests;
   await page.getByRole("button", { name: "刷新行情" }).click();
   await expect.poll(() => quoteRequests).toBeGreaterThan(requestsBeforeRefresh);
@@ -74,6 +75,92 @@ test("manual order stock name and code open a refreshable modal", async ({ page 
   await expect(page.getByRole("dialog", { name: "平安银行" })).toBeVisible();
   await page.locator(".stock-modal-backdrop").click({ position: { x: 5, y: 5 } });
   await expect(page.getByRole("dialog", { name: "平安银行" })).toBeHidden();
+});
+
+test("quality blocker explains the failing year and opens its report", async ({ page }) => {
+  const reason = "backtest:backtest_yearly_annual_return_below_threshold:2026=-0.0719<0.2000";
+  const reportArtifact = { id: "backtest_quality", label: "Backtest quality JSON", kind: "json", path: "outputs/auto_backtest_quality.json", exists: true, downloadable: true };
+  await page.unroute("**/api/dashboard/latest");
+  await page.route("**/api/dashboard/latest", (route) => route.fulfill({
+    json: {
+      ...snapshot,
+      readiness: { status: "blocked", label: "复核未通过", summary: "质量门槛阻止正式输出。", is_executable: false },
+      block_reasons: [reason],
+      blocker_actions: [{
+        id: `block_reason:${reason}`,
+        source: "block_reason",
+        reason,
+        issue: reason.replace("backtest:", ""),
+        title: "复核策略质量门槛",
+        detail: "全历史年化收益 24.73%、最大回撤 -17.69%；2026 年分段年化收益 -7.19%，低于 20.00% 门槛，因此只保留候选产物，不生成正式交易信号。",
+        severity: "danger",
+        action: null,
+        report_artifact: reportArtifact
+      }],
+      quality_warnings: [reason],
+      artifacts: [...snapshot.artifacts, reportArtifact]
+    }
+  }));
+  await page.route("**/api/dashboard/artifacts/backtest_quality", (route) => route.fulfill({ json: { is_acceptable: false } }));
+
+  await page.goto("/");
+  await expect(page.getByText("1/1 有可用入口", { exact: true })).toBeVisible();
+  await expect(page.getByText("2026 年分段年化收益 -7.19%", { exact: false })).toBeVisible();
+  await expect(page.locator(".blocker-card small").getByText("2026 年年化收益 -7.19%，低于 20.00% 门槛。", { exact: true })).toBeVisible();
+  const reportLink = page.getByRole("link", { name: "查看报告" });
+  await expect(reportLink).toHaveAttribute("href", "/api/dashboard/artifacts/backtest_quality");
+  await reportLink.evaluate((element) => element.removeAttribute("target"));
+  await reportLink.click();
+  await expect(page).toHaveURL(/\/api\/dashboard\/artifacts\/backtest_quality$/);
+});
+
+test("quality blocker shows an explicit unavailable state when its report is missing", async ({ page }) => {
+  const reason = "backtest:backtest_yearly_annual_return_below_threshold:2026=-0.0719<0.2000";
+  await page.unroute("**/api/dashboard/latest");
+  await page.route("**/api/dashboard/latest", (route) => route.fulfill({
+    json: {
+      ...snapshot,
+      blocker_actions: [{
+        id: `block_reason:${reason}`,
+        source: "block_reason",
+        reason,
+        issue: reason.replace("backtest:", ""),
+        title: "复核策略质量门槛",
+        detail: "回测质量未达到门槛。",
+        severity: "danger",
+        action: null,
+        report_artifact: { id: "backtest_quality", label: "Backtest quality JSON", kind: "json", exists: false, downloadable: false }
+      }]
+    }
+  }));
+
+  await page.goto("/");
+  await expect(page.getByText("报告不可用", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "查看报告" })).toHaveCount(0);
+});
+
+test("router evidence provenance blocker is translated for review", async ({ page }) => {
+  const reason = "params:annual_state_router_evidence_engine_contract_mismatch";
+  await page.unroute("**/api/dashboard/latest");
+  await page.route("**/api/dashboard/latest", (route) => route.fulfill({
+    json: {
+      ...snapshot,
+      blocker_actions: [{
+        id: `block_reason:${reason}`,
+        source: "block_reason",
+        reason,
+        issue: reason.replace("params:", ""),
+        title: "复核策略质量门槛",
+        detail: "正式年度路由证据由旧版或不兼容的回测引擎生成，无法证明当前策略。",
+        severity: "danger",
+        action: null,
+        report_artifact: { id: "parameter_quality", label: "Parameter quality JSON", kind: "json", exists: true, downloadable: true }
+      }]
+    }
+  }));
+
+  await page.goto("/");
+  await expect(page.locator(".blocker-card small")).toHaveText("正式年度路由证据由旧版或不兼容的回测引擎生成，无法证明当前策略。");
 });
 
 test("stock detail clearly labels local fallback data and stays mobile-safe", async ({ page }) => {

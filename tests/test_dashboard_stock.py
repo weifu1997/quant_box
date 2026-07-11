@@ -60,7 +60,9 @@ class DashboardStockTests(unittest.TestCase):
         self.assertEqual(result["name"], "平安银行")
         self.assertEqual(result["price"], 10.5)
         self.assertAlmostEqual(result["change_pct"], 5.0)
+        self.assertIsNone(result["market_date"])
         self.assertEqual(result["retrieved_at"], "2026-07-11T18:30:00+08:00")
+        self.assertIn("接口未提供行情日期", result["message"])
 
     def test_build_stock_detail_falls_back_to_latest_local_daily_row(self) -> None:
         with TemporaryDirectory() as tmp:

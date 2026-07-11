@@ -112,7 +112,7 @@ export default function StockDetailModal({ instrument, onClose }: { instrument: 
               <QuoteMetric label="最高" value={formatPrice(detail.high)} />
               <QuoteMetric label="最低" value={formatPrice(detail.low)} />
               <QuoteMetric label="成交量（手）" value={formatVolume(detail.volume)} />
-              <QuoteMetric label="行情日期" value={detail.market_date || (detail.is_live ? "当前交易时段" : "—")} />
+              <QuoteMetric label="行情日期" value={detail.market_date || (detail.is_live ? "接口未提供" : "—")} />
             </div>
 
             <div className={`stock-source-card stock-source-${detail.status}`}>

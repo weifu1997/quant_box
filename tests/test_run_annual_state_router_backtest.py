@@ -13,6 +13,7 @@ from scripts.run_annual_state_router_backtest import (
     adjust_route_decision,
     apply_research_config_overrides,
     apply_source_top_n_overrides,
+    configured_source_definitions,
     default_source_definitions,
     exposure_schedule_from_year_routes,
     full_gate_summary,
@@ -26,6 +27,25 @@ from scripts.run_annual_state_router_backtest import (
 
 
 class RunAnnualStateRouterBacktestTests(unittest.TestCase):
+    def test_configured_source_definitions_match_auto_signal_file_provenance(self) -> None:
+        definitions = configured_source_definitions(
+            {
+                "factors": {"cache_file": "fresh.parquet"},
+                "annual_state_router": {
+                    "factor_file": "alpha.parquet",
+                    "industry_factor_file": "industry.parquet",
+                    "selector_file": "selector.csv",
+                    "source_factor_files": {"db_size": "extended.parquet", "selector": "extended.parquet"},
+                    "include_expanded_sources": True,
+                },
+            }
+        )
+
+        self.assertEqual(definitions["beta20"].factor_file, "alpha.parquet")
+        self.assertEqual(definitions["db_size"].factor_file, "extended.parquet")
+        self.assertEqual(definitions["selector"].factor_file, "extended.parquet")
+        self.assertEqual(definitions["industry"].factor_file, "industry.parquet")
+
     def test_expanded_source_definitions_include_beta20_and_rsqr20(self) -> None:
         definitions = default_source_definitions(
             factor_file="factors.parquet",

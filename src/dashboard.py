@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any
 
 from src.common import normalize_instrument
@@ -61,7 +62,7 @@ def build_dashboard_snapshot(out_dir: str | Path | None = None, config: Mapping[
         "latest_run": _build_latest_run(report, status),
         "gates": _build_gates(report, status, output_dir, governance_artifact, governance_context),
         "block_reasons": block_reasons,
-        "blocker_actions": _build_blocker_actions(block_reasons, freshness_notes),
+        "blocker_actions": _build_blocker_actions(block_reasons, freshness_notes, report, artifacts),
         "quality_warnings": quality_warnings,
         "freshness_notes": freshness_notes,
         "signal_summary": _mapping_value((report or {}).get("signal_summary")),
@@ -608,19 +609,31 @@ def _freshness_notes(governance_context: Mapping[str, Any] | None) -> list[str]:
     return []
 
 
-def _build_blocker_actions(block_reasons: list[str], freshness_notes: list[str]) -> list[dict[str, Any]]:
-    items = [_blocker_action(reason) for reason in block_reasons]
+def _build_blocker_actions(
+    block_reasons: list[str],
+    freshness_notes: list[str],
+    report: Mapping[str, Any] | None = None,
+    artifacts: list[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    items = [_blocker_action(reason, report=report, artifacts=artifacts) for reason in block_reasons]
     for note in freshness_notes:
-        items.append(_blocker_action(note, source="freshness_note"))
+        items.append(_blocker_action(note, source="freshness_note", report=report, artifacts=artifacts))
     return items
 
 
-def _blocker_action(reason: str, source: str = "block_reason") -> dict[str, Any]:
+def _blocker_action(
+    reason: str,
+    source: str = "block_reason",
+    *,
+    report: Mapping[str, Any] | None = None,
+    artifacts: list[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     issue = _normalized_reason(reason)
     title = "需要人工处理"
     detail = "该阻塞项没有安全的一键修复动作，请查看原始报告和日志。"
     severity = "danger"
     action: dict[str, Any] | None = None
+    report_artifact: dict[str, Any] | None = None
 
     if issue.startswith("daily_basic_"):
         title = "补齐 daily_basic 点时数据"
@@ -661,7 +674,9 @@ def _blocker_action(reason: str, source: str = "block_reason") -> dict[str, Any]
         detail = "账户或持仓输入未通过检查，需要先修正本地账户/持仓文件。"
     elif reason.startswith("params:") or reason.startswith("backtest:"):
         title = "复核策略质量门槛"
-        detail = "参数或回测质量未达到门槛，需要查看质量报告后调整策略证据。"
+        detail = _quality_blocker_detail(reason, report)
+        artifact_id = "parameter_quality" if reason.startswith("params:") else "backtest_quality"
+        report_artifact = _blocker_report_artifact(artifacts, artifact_id)
 
     return {
         "id": f"{source}:{reason}",
@@ -672,6 +687,63 @@ def _blocker_action(reason: str, source: str = "block_reason") -> dict[str, Any]
         "detail": detail,
         "severity": severity,
         "action": action,
+        "report_artifact": report_artifact,
+    }
+
+
+def _quality_blocker_detail(reason: str, report: Mapping[str, Any] | None) -> str:
+    if reason.startswith("params:"):
+        issue = _normalized_reason(reason)
+        if issue == "annual_state_router_evidence_engine_contract_mismatch":
+            return (
+                "正式年度路由证据由旧版或不兼容的回测引擎生成，无法证明当前策略；"
+                "请使用当前规范日历和选择调度重新验证，全部通过后再更新正式证据。"
+            )
+        return "参数验证未达到门槛；请查看参数质量报告，修正证据或策略参数后重新验证。"
+
+    quality = _mapping_value((report or {}).get("backtest_quality"))
+    issue = _normalized_reason(reason)
+    yearly_match = re.fullmatch(
+        r"backtest_yearly_annual_return_below_threshold:(\d{4})=(-?\d+(?:\.\d+)?)<(-?\d+(?:\.\d+)?)",
+        issue,
+    )
+    if yearly_match:
+        year, observed_text, threshold_text = yearly_match.groups()
+        observed = float(observed_text)
+        threshold = float(threshold_text)
+        annual_return = _optional_float(quality.get("annual_return"))
+        drawdown = _optional_float(quality.get("max_drawdown"))
+        context: list[str] = []
+        if annual_return is not None:
+            context.append(f"全历史年化收益 {annual_return:.2%}")
+        if drawdown is not None:
+            context.append(f"最大回撤 {drawdown:.2%}")
+        prefix = "、".join(context)
+        if prefix:
+            prefix += "；"
+        return (
+            f"{prefix}{year} 年分段年化收益 {observed:.2%}，低于 {threshold:.2%} 门槛，"
+            "因此只保留候选产物，不生成正式交易信号。"
+        )
+    return "参数或回测质量未达到门槛；请查看质量报告和失败分析后调整策略证据。"
+
+
+def _blocker_report_artifact(
+    artifacts: list[Mapping[str, Any]] | None,
+    artifact_id: str,
+) -> dict[str, Any]:
+    artifact = next((item for item in artifacts or [] if item.get("id") == artifact_id), None)
+    if artifact is None:
+        return {
+            "id": artifact_id,
+            "label": "Backtest quality JSON" if artifact_id == "backtest_quality" else "Parameter quality JSON",
+            "kind": "json",
+            "exists": False,
+            "downloadable": False,
+        }
+    return {
+        key: artifact.get(key)
+        for key in ("id", "label", "kind", "exists", "downloadable")
     }
 
 
@@ -785,21 +857,23 @@ def _build_artifacts(output_dir: Path, report: Mapping[str, Any] | None) -> list
         ("auto_run_status", "Auto run status", "json", output_dir / "auto_run_status.json"),
         ("daily_report", "Daily Markdown report", "markdown", output_dir / "daily_signal_report.md"),
     ]
-    for artifact_id, label, kind in [
-        ("signal", "Signal CSV", "csv"),
-        ("holdings", "Holdings CSV", "csv"),
-        ("manual_orders", "Manual orders CSV", "csv"),
-        ("order_confirmation", "Order confirmation CSV", "csv"),
-        ("fill_feedback", "Fill feedback CSV", "csv"),
-        ("data_health", "Data health JSON", "json"),
-        ("data_governance", "Data governance JSON", "json"),
-        ("parameter_quality", "Parameter quality JSON", "json"),
-        ("backtest_quality", "Backtest quality JSON", "json"),
-        ("fundamental_screen_report", "Fundamental screen report", "markdown"),
+    for artifact_id, label, kind, default_name in [
+        ("signal", "Signal CSV", "csv", None),
+        ("holdings", "Holdings CSV", "csv", None),
+        ("manual_orders", "Manual orders CSV", "csv", None),
+        ("order_confirmation", "Order confirmation CSV", "csv", None),
+        ("fill_feedback", "Fill feedback CSV", "csv", None),
+        ("data_health", "Data health JSON", "json", None),
+        ("data_governance", "Data governance JSON", "json", None),
+        ("parameter_quality", "Parameter quality JSON", "json", "auto_parameter_quality.json"),
+        ("backtest_quality", "Backtest quality JSON", "json", "auto_backtest_quality.json"),
+        ("fundamental_screen_report", "Fundamental screen report", "markdown", None),
     ]:
         value = report_files.get(artifact_id)
         if value:
             candidates.append((artifact_id, label, kind, resolve_path(str(value))))
+        elif default_name:
+            candidates.append((artifact_id, label, kind, output_dir / default_name))
 
     seen: set[str] = set()
     artifacts: list[dict[str, Any]] = []

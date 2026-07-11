@@ -196,6 +196,13 @@ class RunAutoSignalTests(unittest.TestCase):
                     "evidence_years_file": str(years_path),
                 }
             }
+            payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+            payload["engine_contract"] = module.ANNUAL_ROUTER_ENGINE_CONTRACT
+            payload["source_definitions"] = {
+                name: definition.__dict__
+                for name, definition in module._annual_state_router_source_definitions(config).items()
+            }
+            metrics_path.write_text(json.dumps(payload), encoding="utf-8")
             quality = {
                 "min_validation_windows": 3,
                 "min_positive_return_rate": 0.5,
@@ -219,6 +226,36 @@ class RunAutoSignalTests(unittest.TestCase):
                 "annual_state_router_evidence_combo_mismatch:risk_exit_min_positions_reasons",
                 mismatched.issues,
             )
+
+    def test_annual_state_router_quality_rejects_stale_engine_provenance(self) -> None:
+        module = importlib.import_module("scripts.run_auto_signal")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics_path = root / "router_metrics.json"
+            metrics_path.write_text(
+                json.dumps(
+                    {
+                        "metrics": {"annual_return": 0.25, "max_drawdown": -0.12},
+                        "audit": {"year_count": 3, "min_yearly_annual_return": 0.21, "worst_yearly_drawdown": -0.12},
+                        "full_gate": {"is_full_goal_met": True},
+                        "combo": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "annual_state_router": {
+                    "enabled": True,
+                    "evidence_metrics_file": str(metrics_path),
+                    "turnover_boost_reasons": [],
+                    "risk_exit_min_positions_reasons": [],
+                }
+            }
+
+            report = module._annual_state_router_quality(config, {})
+
+            self.assertFalse(report.is_acceptable)
+            self.assertIn("annual_state_router_evidence_engine_contract_mismatch", report.issues)
 
     def test_backtest_stage_uses_annual_state_router_scores_when_enabled(self) -> None:
         module = importlib.import_module("scripts.run_auto_signal")

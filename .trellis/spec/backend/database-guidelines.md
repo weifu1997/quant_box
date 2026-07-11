@@ -531,13 +531,16 @@ route_year = trade_date.year
 - Single formal run:
   - `scripts/run_annual_state_router_backtest.py --include-expanded-sources --moderate-positive-source <source> --moderate-positive-exposure <float> --moderate-low-source <source> --moderate-low-exposure <float> --turnover-boost-reasons <comma-list>`
 - Resumable grid:
-  - `scripts/run_annual_state_router_grid.py --cache-dir outputs/router_score_cache --output outputs/<name>.csv --write-hit-prefix outputs/<prefix> [--max-industry-weights none,0.35] [--rebalance-after-risk-exit-options false,true] [--risk-exit-min-positions-options none,5] [--risk-exit-min-positions-reason-sets none;default_beta]`
+  - `scripts/run_annual_state_router_grid.py --cache-dir outputs/router_score_cache --output outputs/<name>.csv --detail-dir outputs/<candidate-details> --write-hit-prefix outputs/<prefix> [--max-industry-weights none,0.35] [--rebalance-after-risk-exit-options false,true] [--risk-exit-min-positions-options none,5] [--risk-exit-min-positions-reason-sets none;default_beta]`
 - Expanded source names currently include `roc60`, `db_total`, `beta20`, and `rsqr20`.
 
 #### 3. Contracts
 
-- Score caches are parquet files under `outputs/router_score_cache/<source>_<end-date>.parquet` with a `score` column and a two-level date/instrument index.
+- Every formal run uses one canonical month-end signal calendar derived from the configured price panel. Each source is evaluated on those dates and score lookup uses the latest available score on or before the canonical date; source-specific partial-month calendars must not be unioned into extra rebalance dates.
+- `ANNUAL_ROUTER_ENGINE_CONTRACT` records the engine version, canonical calendar, latest-on-or-before lookup, and selection-schedule requirement. Candidate/hit metrics JSON must persist this contract plus the complete configured `source_definitions`.
+- Score caches are parquet files under `outputs/router_score_cache/<source>_<end-date>_<fingerprint>.parquet` with a `score` column and a two-level date/instrument index. The fingerprint covers the engine contract, source definition, start date, and end date; changing any of them must produce a different cache path.
 - Grid output is append-only CSV keyed by the stable `combo_key`; reruns skip keys already present in the output CSV.
+- When `--detail-dir` is set, every evaluated candidate writes a stable hashed `<id>_metrics.json` and `<id>_years.csv`, including failed candidates. These files are research-only and must not overwrite formal evidence.
 - `turnover_boost_reason_sets` uses semicolon-separated reason sets; reasons inside one set use `+`, for example `low_vol_moderate_uptrend+moderate_positive_roc60`.
 - `moderate_positive_exposure` multiplies route exposure only when `moderate_positive_source` is selected for a `default_beta` route whose `ret252 >= moderate_positive_ret252_min`.
 - `moderate_low_exposure` multiplies route exposure only when `moderate_low_source` is selected for a `default_beta` route whose `ret252` is in `[moderate_low_ret252_min, moderate_low_ret252_max)`.
@@ -546,13 +549,16 @@ route_year = trade_date.year
 - `rebalance_after_risk_exit_options` enumerates research-only backtest behavior after stop-loss/take-profit exits. When true, the backtest may refill from the latest signal after a risk exit, while excluding the just-exited instruments from that same-day refill.
 - `risk_exit_min_positions` must be scoped by `risk_exit_min_positions_reasons` when promoted from router evidence. `routed_backtest_config()` converts the reason set into `risk_exit_min_positions_schedule` keyed by signal date and sets scalar `risk_exit_min_positions=0` so the guard is not applied globally.
 - A full-gate hit writes `_metrics.json`, `_years.csv`, `_year_routes.csv`, `_score_routes.csv`, `_holdings.csv`, `_trades.csv`, and `_equity.csv` beside the requested hit prefix.
+- Yearly diagnostics calculate `annual_trade_cost_ratio` against that year's starting equity, not the process-wide initial capital. This preserves the meaning of a yearly cost ratio after prior-year compounding.
 
 #### 4. Validation & Error Matrix
 
 | Condition | Behavior |
 | --- | --- |
 | Score cache exists and `--force-rebuild-cache` is absent | Load the cached parquet source. |
+| Cache was built with a different engine contract, source definition, or date range | Its fingerprint differs; rebuild instead of reusing stale scores. |
 | Score cache is missing | Build the source from configured factor/selector inputs and write the parquet cache. |
+| A source has no exact score row on a canonical signal date | Use its latest score on or before that date; do not introduce a source-specific signal date. |
 | `turnover_boost_reasons=none` | Do not boost route turnover; collapse boost max/rank combinations to a single grid row. |
 | `moderate_positive_exposure=0.8` with `moderate_positive_source=roc60` | Route the high ret252 band to `roc60` and scale only that route's exposure by 80%. |
 | `moderate_low_source=none` | Do not route the low ret252 band; collapse `moderate_low_exposure` to `1.0`. |
@@ -562,23 +568,29 @@ route_year = trade_date.year
 | `risk_exit_min_positions=5` with `risk_exit_min_positions_reasons=default_beta` | Build a signal-date schedule only for routes whose `reason` is `default_beta`; do not block exits for other route reasons. |
 | Routed source is missing from score sources | Raise `ValueError("Routed source is not in score sources: ...")`. |
 | Hit satisfies annual return, drawdown, turnover, cost, and yearly gates | Write hit artifacts and stop the grid early. |
+| Candidate fails one or more gates and `--detail-dir` is set | Write candidate detail evidence only; do not write hit/formal evidence. |
 
 #### 5. Good/Base/Bad Cases
 
 - Good: `moderate_low_source=beta20`, `moderate_low_exposure=0.4`, and `turnover_mode=rank10` produce a formal hit whose cost gate still passes.
+- Good: two sources with different available factor dates are both sampled on the same canonical month-end calendar with latest-on-or-before lookup.
 - Base: no expanded low-band source; route remains `default_beta`, scalar exposure remains `1.0`.
 - Bad: proving yearly returns from standalone candidate equity files only; path-dependent annual routing must be reconstructed through score panels, holdings, trades, costs, and gates.
+- Bad: reusing `<source>_<end-date>.parquet` after changing a factor file or engine semantics, or reporting yearly costs against the original 1M capital after equity has compounded above 10M.
 
 #### 6. Tests Required
 
 - `tests/test_run_annual_state_router_backtest.py` must assert expanded source definitions and route exposure scaling.
+- `tests/test_run_annual_state_router_backtest.py` must assert canonical signal dates and latest-on-or-before score lookup.
 - `tests/test_run_annual_state_router_grid.py` must assert reason-set parsing and `moderate_positive_exposure` / `moderate_low_exposure` enumeration/collapse.
+- `tests/test_run_annual_state_router_grid.py` must assert cache fingerprints change with engine/source/date inputs and candidate detail files contain engine/source provenance.
 - `tests/test_run_annual_state_router_grid.py` must assert `max_industry_weights` enumeration.
 - `tests/test_run_annual_state_router_grid.py` must assert `rebalance_after_risk_exit_options` parsing.
 - `tests/test_run_annual_state_router_grid.py` must assert `moderate_lower_*` and `risk_exit_min_positions_reasons` enumeration.
 - `tests/test_run_annual_state_router_backtest.py` must assert router reason-scoped `risk_exit_min_positions` becomes a schedule, not a global scalar guard.
 - `tests/test_backtest.py` must assert risk-exit refill uses the latest signal without immediately rebuying the just-exited instrument.
 - Backtest tests must continue to assert `selection_schedule` values affect realized holdings on matching signal dates.
+- `tests/test_failure_analysis.py` must assert yearly cost ratios use segment starting equity.
 
 #### 7. Wrong vs Correct
 
@@ -593,7 +605,7 @@ Using candidate equity curves can overstate a switcher's yearly result because e
 ##### Correct
 
 ```powershell
-python scripts/run_annual_state_router_grid.py --moderate-low-source beta20 --moderate-low-exposure 0.4 --write-hit-prefix outputs/router_hit
+python scripts/run_annual_state_router_grid.py --moderate-low-source beta20 --moderate-low-exposure 0.4 --detail-dir outputs/router_candidate_details --write-hit-prefix outputs/router_hit
 ```
 
 The grid reconstructs routed scores, scheduled holdings, executed trades, exposure, turnover, costs, and yearly gates in one formal path.
@@ -629,6 +641,7 @@ The grid reconstructs routed scores, scheduled holdings, executed trades, exposu
 
 - When `annual_state_router.enabled=true`, `run_auto_signal.py` skips the legacy optimizer with `selected_params_status=annual_state_router`.
 - Parameter quality is built from formal router evidence and must fail if the evidence file is missing, the full gate is not met, or the configured combo differs from the evidence combo.
+- Formal evidence is valid only when its `engine_contract` exactly matches `ANNUAL_ROUTER_ENGINE_CONTRACT` and its persisted `source_definitions` match the current configured definitions, including resolved factor/selector paths. Old evidence is not grandfathered across engine or source changes.
 - Historical backtest must rebuild routed score panels and call `run_backtest()` with the routed scores and `routed_backtest_config()` output. Evidence files alone are not enough to mark the run executable.
 - A promoted risk-exit minimum-position guard must stay route-reason scoped. Store it under `annual_state_router.risk_exit_min_positions` plus `annual_state_router.risk_exit_min_positions_reasons`; runtime must convert it into `risk_exit_min_positions_schedule` from the actual score routes.
 - Signal generation must use the same routed score panel and the latest route's `top_n`, `max_turnover`, and `rank_buffer`; it must not fall back to `build_latest_strategy_scores()` for the official/candidate signal.
@@ -641,6 +654,9 @@ The grid reconstructs routed scores, scheduled holdings, executed trades, exposu
 | --- | --- |
 | `annual_state_router.enabled=false` | Use the legacy optimizer/current-strategy path. |
 | Evidence metrics file is missing | Parameter quality is unacceptable with `annual_state_router_evidence_metrics_file_missing` or `_not_found`. |
+| Evidence engine contract is missing or stale | Parameter quality is unacceptable with `annual_state_router_evidence_engine_contract_mismatch`. |
+| Evidence source definitions are missing | Parameter quality is unacceptable with `annual_state_router_evidence_source_definitions_missing`. |
+| One source or field differs from current configured definitions | Parameter quality is unacceptable with `annual_state_router_evidence_source_missing:<source>` or `annual_state_router_evidence_source_mismatch:<source>.<field>`. |
 | Evidence combo differs from configured router fields | Parameter quality is unacceptable with `annual_state_router_evidence_combo_mismatch:<field>`. |
 | Evidence combo omits or changes `risk_exit_min_positions_reasons` while the config sets it | Parameter quality is unacceptable with `annual_state_router_evidence_combo_mismatch:risk_exit_min_positions_reasons`. |
 | Evidence passes but rebuilt auto backtest fails | Candidate outputs only; `block_reasons` records the backtest quality failures. |
@@ -652,10 +668,12 @@ The grid reconstructs routed scores, scheduled holdings, executed trades, exposu
 - Good: `turnover_mode=rank10`, `full_turnover_on_route_change=true`, and `use_defensive_timing=true` reproduce the formal router's score/trade path; the rebuilt backtest passes and official outputs are written.
 - Base: router disabled, so auto-signal runs the existing optimization/backtest/signal flow.
 - Bad: reading `outputs/*_hit_metrics.json` and marking the run executable without rebuilding routed scores, holdings, trades, and quality gates in the current workflow.
+- Bad: accepting a historically successful evidence file after canonical calendar, score lookup, selection scheduling, or configured source files have changed.
 
 #### 6. Tests Required
 
 - `tests/test_run_auto_signal.py` must assert annual-router evidence becomes parameter quality only when the combo matches.
+- `tests/test_run_auto_signal.py` must assert stale engine contracts and missing/mismatched source definitions block parameter quality and official output.
 - `tests/test_run_auto_signal.py` must assert reason-scoped risk-exit min-position evidence mismatches block parameter quality.
 - `tests/test_run_auto_signal.py` must assert `_run_backtest_stage()` uses routed scores instead of `build_strategy_scores()` when the router is enabled.
 - `tests/test_signal_generator.py` must assert `generate_signal(scores=...)` uses precomputed score panels and falls back to the latest score date on or before the requested date.
@@ -666,7 +684,7 @@ The grid reconstructs routed scores, scheduled holdings, executed trades, exposu
 ##### Wrong
 
 ```python
-parameter_quality = formal_hit_metrics
+parameter_quality = formal_hit_metrics  # no engine/source provenance validation
 signal_df, holdings = generate_signal("latest", config=selected_config, factors=factors)
 ```
 
@@ -675,6 +693,7 @@ This uses formal evidence for the gate but generates the actual signal from a di
 ##### Correct
 
 ```python
+assert not _annual_state_router_evidence_provenance_issues(current_config, formal_hit_metrics)
 routed = run_annual_state_score_router(...)
 bt_config = routed_backtest_config(...)
 result = run_backtest(routed.scores, prices, start_date, end_date, bt_config)

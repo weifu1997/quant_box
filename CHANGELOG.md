@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Made annual-state-router research reproducible with a canonical month-end signal calendar, latest-on-or-before score lookup, engine/source-fingerprinted caches, and per-candidate detail evidence.
+- Added engine and score-source provenance to router evidence and made auto-signal reject stale or incompatible formal evidence instead of promoting it under changed backtest semantics.
+- Corrected yearly diagnostic trade-cost ratios to use each yearly segment's starting equity rather than the process-wide initial capital.
+- Fixed the dashboard quality-blocker report entry so it downloads the bounded authoritative quality artifact, added clear current-year gate evidence, and corrected live quote dates when `rt_k` provides no market date.
 - Raised the latest-target factor coverage quality threshold from 95% to 99% and aligned the Web precheck with that authoritative gate.
 - Added an in-app stock detail view from manual-order names/codes with refreshable Tushare `rt_k` prices and explicitly labeled local daily-close fallback.
 - Reduced a current-cache Web auto-signal run to about six minutes by skipping unchanged conversion outputs and building annual-router sources only for reachable states/dates.

@@ -60,11 +60,12 @@ from src.signal_generator import generate_signal, read_signal_previous_holdings,
 from src.strategy import resample_signals
 from src.trading_calendar import next_business_day, next_trade_date, resolve_target_date
 from scripts.run_annual_state_router_backtest import (
+    ANNUAL_ROUTER_ENGINE_CONTRACT,
     RoutedScoreRun,
     ScoreSourceDefinition,
     annual_route_decisions,
     build_score_sources,
-    default_source_definitions,
+    configured_source_definitions,
     routed_backtest_config,
     run_annual_state_score_router,
     signal_trade_date_map,
@@ -257,18 +258,7 @@ def _annual_state_router_selected_params(config: dict[str, Any]) -> dict[str, An
 
 def _annual_state_router_source_definitions(config: dict[str, Any]) -> dict[str, ScoreSourceDefinition]:
     router_cfg = _annual_state_router_cfg(config)
-    base_factor_file = str(router_cfg.get("factor_file") or config.get("factors", {}).get("cache_file", "data/factors/alpha158.parquet"))
-    definitions = default_source_definitions(
-        factor_file=base_factor_file,
-        industry_factor_file=str(router_cfg.get("industry_factor_file") or base_factor_file),
-        selector_file=str(router_cfg.get("selector_file") or ""),
-        include_expanded_sources=bool(router_cfg.get("include_expanded_sources", True)),
-    )
-    source_factor_files = router_cfg.get("source_factor_files", {})
-    if isinstance(source_factor_files, dict):
-        for name, factor_file in source_factor_files.items():
-            if name in definitions and factor_file:
-                definitions[name] = replace(definitions[name], factor_file=str(factor_file))
+    definitions = configured_source_definitions(config)
     definitions = definitions_for_turnover_mode(definitions, str(router_cfg.get("turnover_mode", "default")))
     required_names = {
         "beta",
@@ -516,6 +506,7 @@ def _annual_state_router_quality(config: dict[str, Any], quality_config: dict) -
 
     combo = payload.get("combo", {}) if isinstance(payload, dict) else {}
     issues = _annual_state_router_combo_issues(router_cfg, combo)
+    issues.extend(_annual_state_router_evidence_provenance_issues(config, payload))
     if not bool(full_gate.get("is_full_goal_met", False)):
         issues.append("annual_state_router_evidence_full_gate_not_met")
     if windows < min_windows:
@@ -554,6 +545,37 @@ def _annual_state_router_quality(config: dict[str, Any], quality_config: dict) -
         max_annual_turnover=max_turnover,
         max_annual_trade_cost_ratio=max_cost,
     )
+
+
+def _annual_state_router_evidence_provenance_issues(config: dict[str, Any], payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return ["annual_state_router_evidence_provenance_missing"]
+    if payload.get("engine_contract") != ANNUAL_ROUTER_ENGINE_CONTRACT:
+        return ["annual_state_router_evidence_engine_contract_mismatch"]
+    observed = payload.get("source_definitions")
+    if not isinstance(observed, dict) or not observed:
+        return ["annual_state_router_evidence_source_definitions_missing"]
+    expected = {
+        name: definition.__dict__
+        for name, definition in _annual_state_router_source_definitions(config).items()
+    }
+    issues: list[str] = []
+    for name, definition in expected.items():
+        actual = observed.get(name)
+        if not isinstance(actual, dict):
+            issues.append(f"annual_state_router_evidence_source_missing:{name}")
+            continue
+        for key, value in definition.items():
+            actual_value = actual.get(key)
+            if key in {"factor_file", "selector_file"}:
+                expected_value = str(resolve_path(value)) if value else ""
+                observed_value = str(resolve_path(actual_value)) if actual_value else ""
+                matches = expected_value == observed_value
+            else:
+                matches = actual_value == value
+            if not matches:
+                issues.append(f"annual_state_router_evidence_source_mismatch:{name}.{key}")
+    return issues
 
 
 def _annual_state_router_evidence_yearly(router_cfg: dict[str, Any]) -> pd.DataFrame:

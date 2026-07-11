@@ -117,7 +117,7 @@ def _live_detail(instrument: str, frame: pd.DataFrame, fallback_name: str, retri
         "amount": _optional_non_negative_float(row.get("amount")),
         "market_date": None,
         "retrieved_at": retrieved_at,
-        "message": "实时行情接口返回的最新价格；非交易时段可能为最近一次收盘行情。",
+        "message": "实时行情接口返回最新价格，但接口未提供行情日期；非交易时段可能为最近一次收盘行情。",
     }
 
 

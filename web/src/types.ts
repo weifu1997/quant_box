@@ -140,6 +140,7 @@ export interface BlockerAction {
     action: DashboardJobAction;
     mode?: DashboardRunMode | null;
   } | null;
+  report_artifact?: Pick<Artifact, "id" | "label" | "kind" | "exists" | "downloadable"> | null;
 }
 
 export interface JobProgressStep {

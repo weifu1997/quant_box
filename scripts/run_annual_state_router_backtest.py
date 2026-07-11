@@ -34,6 +34,12 @@ from src.trading_calendar import resolve_target_date_value
 DEFAULT_EXTENDED_FACTOR_FILE = "data/factors/codex_goal_extended_factors_20260610.parquet"
 DEFAULT_INDUSTRY_FACTOR_FILE = "data/factors/codex_goal_industry_momentum_factors_20260611.parquet"
 DEFAULT_SELECTOR_FILE = "outputs/selector_weight_lb63_top5_posprop_top5_formal_20260611_selector.csv"
+ANNUAL_ROUTER_ENGINE_CONTRACT = {
+    "version": 2,
+    "signal_calendar": "canonical_month_end",
+    "score_lookup": "latest_on_or_before",
+    "selection_schedule": True,
+}
 
 
 @dataclass(frozen=True)
@@ -160,9 +166,9 @@ def main() -> None:
     )
     parser.add_argument("--start-date", default="")
     parser.add_argument("--end-date", default="")
-    parser.add_argument("--factor-file", default=DEFAULT_EXTENDED_FACTOR_FILE)
-    parser.add_argument("--industry-factor-file", default=DEFAULT_INDUSTRY_FACTOR_FILE)
-    parser.add_argument("--selector-file", default=DEFAULT_SELECTOR_FILE)
+    parser.add_argument("--factor-file", default="")
+    parser.add_argument("--industry-factor-file", default="")
+    parser.add_argument("--selector-file", default="")
     parser.add_argument("--initial-source", default="beta")
     parser.add_argument("--missing-ret252-exposure", type=float, default=0.65)
     parser.add_argument("--flat-negative-exposure", type=float, default=0.90)
@@ -197,6 +203,7 @@ def main() -> None:
     parser.add_argument("--turnover-boost-reasons", default="")
     parser.add_argument("--turnover-boost-max-turnover", type=int, default=2)
     parser.add_argument("--turnover-boost-rank-buffer", type=int, default=10)
+    parser.add_argument("--turnover-mode", default="")
     parser.add_argument("--output-prefix", default=dated_output_path("annual_state_router_backtest", suffix=""))
     args = parser.parse_args()
 
@@ -208,12 +215,17 @@ def main() -> None:
 
     prices = pd.read_parquet(resolve_path(config.get("ic", {}).get("price_file", "data/prices/ohlcv_adjusted.parquet")))
     signal_dates = month_end_signal_dates(prices.index, start_date=start_date, end_date=end_date)
-    source_definitions = default_source_definitions(
-        factor_file=args.factor_file,
-        industry_factor_file=args.industry_factor_file,
-        selector_file=args.selector_file,
+    source_definitions = configured_source_definitions(
+        config,
+        factor_file=args.factor_file or None,
+        industry_factor_file=args.industry_factor_file or None,
+        selector_file=args.selector_file or None,
         include_expanded_sources=bool(args.include_expanded_sources),
     )
+    from scripts.run_annual_state_router_grid import definitions_for_turnover_mode
+
+    turnover_mode = args.turnover_mode or str(config.get("annual_state_router", {}).get("turnover_mode", "default"))
+    source_definitions = definitions_for_turnover_mode(source_definitions, turnover_mode)
     source_definitions = apply_source_top_n_overrides(source_definitions, source_top_n_overrides_payload(args))
     score_sources = build_score_sources(
         config=config,
@@ -232,6 +244,7 @@ def main() -> None:
         source_definitions=source_definitions,
         price_dates=pd.DatetimeIndex(pd.to_datetime(prices.index).normalize()),
         benchmark=benchmark,
+        signal_dates=signal_dates,
         initial_source=args.initial_source,
         missing_ret252_exposure=args.missing_ret252_exposure,
         flat_negative_exposure=args.flat_negative_exposure,
@@ -291,6 +304,7 @@ def main() -> None:
         "audit": audit_summary,
         "full_gate": full_gate,
         "source_definitions": {name: asdict(definition) for name, definition in source_definitions.items()},
+        "engine_contract": ANNUAL_ROUTER_ENGINE_CONTRACT,
         "score_rows": int(len(routed.scores)),
         "score_route_counts": routed.score_routes["source"].value_counts().to_dict() if not routed.score_routes.empty else {},
         "full_turnover_on_route_change": bool(args.full_turnover_on_route_change),
@@ -314,6 +328,7 @@ def main() -> None:
         "turnover_boost_reasons": sorted(parse_reason_list(args.turnover_boost_reasons)),
         "turnover_boost_max_turnover": args.turnover_boost_max_turnover,
         "turnover_boost_rank_buffer": args.turnover_boost_rank_buffer,
+        "turnover_mode": turnover_mode,
         "note": (
             "Research backtest: annual routing uses benchmark data before the first trading day of each "
             "calendar year and builds holdings/trades from source score panels. Source set and route "
@@ -440,6 +455,40 @@ def default_source_definitions(
                 ),
             }
         )
+    return definitions
+
+
+def configured_source_definitions(
+    config: dict[str, Any],
+    *,
+    factor_file: str | None = None,
+    industry_factor_file: str | None = None,
+    selector_file: str | None = None,
+    include_expanded_sources: bool | None = None,
+) -> dict[str, ScoreSourceDefinition]:
+    """Build source definitions from the same file provenance used by auto signal."""
+    router_cfg = config.get("annual_state_router", {})
+    base_factor_file = str(
+        factor_file
+        or router_cfg.get("factor_file")
+        or config.get("factors", {}).get("cache_file")
+        or DEFAULT_EXTENDED_FACTOR_FILE
+    )
+    definitions = default_source_definitions(
+        factor_file=base_factor_file,
+        industry_factor_file=str(industry_factor_file or router_cfg.get("industry_factor_file") or DEFAULT_INDUSTRY_FACTOR_FILE),
+        selector_file=str(selector_file or router_cfg.get("selector_file") or DEFAULT_SELECTOR_FILE),
+        include_expanded_sources=(
+            bool(router_cfg.get("include_expanded_sources", True))
+            if include_expanded_sources is None
+            else bool(include_expanded_sources)
+        ),
+    )
+    source_factor_files = router_cfg.get("source_factor_files", {})
+    if isinstance(source_factor_files, dict):
+        for name, source_file in source_factor_files.items():
+            if name in definitions and source_file:
+                definitions[name] = replace(definitions[name], factor_file=str(source_file))
     return definitions
 
 

@@ -436,7 +436,9 @@ def _metrics_for_segment(
     segment = _equity_series(equity)
     if len(segment) < 2:
         return {key: None for key in METRIC_COLUMNS}
-    return calculate_metrics(segment, _trades_between(trades, start_date, end_date), backtest_config)
+    segment_config = dict(backtest_config)
+    segment_config["initial_capital"] = float(segment.iloc[0])
+    return calculate_metrics(segment, _trades_between(trades, start_date, end_date), segment_config)
 
 
 def _trades_between(trades: pd.DataFrame, start_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.DataFrame:

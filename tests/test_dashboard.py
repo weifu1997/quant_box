@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from src.dashboard import build_dashboard_precheck, build_dashboard_snapshot
+from src.dashboard import build_dashboard_precheck, build_dashboard_snapshot, resolve_dashboard_artifact
 
 
 class DashboardTests(unittest.TestCase):
@@ -173,6 +173,72 @@ class DashboardTests(unittest.TestCase):
 
             self.assertEqual(snapshot["blocker_actions"][0]["title"], "补齐 daily_basic 点时数据")
             self.assertEqual(snapshot["blocker_actions"][0]["action"]["action"], "repair_point_in_time")
+
+    def test_build_dashboard_snapshot_links_quality_blocker_to_authoritative_report(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            reason = "backtest:backtest_yearly_annual_return_below_threshold:2026=-0.0719<0.2000"
+            quality = {
+                "is_acceptable": False,
+                "issues": [reason.removeprefix("backtest:")],
+                "annual_return": 0.2473,
+                "max_drawdown": -0.1769,
+            }
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps(
+                    {
+                        "is_executable": False,
+                        "block_reasons": [reason],
+                        "quality_warnings": [reason],
+                        "backtest_quality": quality,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "auto_backtest_quality.json").write_text(json.dumps(quality), encoding="utf-8")
+
+            snapshot = build_dashboard_snapshot(out_dir)
+            blocker = snapshot["blocker_actions"][0]
+
+            self.assertIsNone(blocker["action"])
+            self.assertIn("全历史年化收益 24.73%", blocker["detail"])
+            self.assertIn("2026 年分段年化收益 -7.19%", blocker["detail"])
+            self.assertIn("只保留候选产物", blocker["detail"])
+            self.assertEqual(blocker["report_artifact"]["id"], "backtest_quality")
+            self.assertTrue(blocker["report_artifact"]["exists"])
+            self.assertTrue(blocker["report_artifact"]["downloadable"])
+            self.assertEqual(resolve_dashboard_artifact("backtest_quality", out_dir), out_dir / "auto_backtest_quality.json")
+
+    def test_build_dashboard_snapshot_marks_missing_quality_report_unavailable(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            reason = "backtest:backtest_yearly_annual_return_below_threshold:2026=-0.0719<0.2000"
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps({"is_executable": False, "block_reasons": [reason], "quality_warnings": [reason]}),
+                encoding="utf-8",
+            )
+
+            snapshot = build_dashboard_snapshot(out_dir)
+            artifact = snapshot["blocker_actions"][0]["report_artifact"]
+
+            self.assertEqual(artifact["id"], "backtest_quality")
+            self.assertFalse(artifact["exists"])
+            self.assertFalse(artifact["downloadable"])
+
+    def test_build_dashboard_snapshot_explains_stale_router_engine_evidence(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            reason = "params:annual_state_router_evidence_engine_contract_mismatch"
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps({"is_executable": False, "block_reasons": [reason], "quality_warnings": [reason]}),
+                encoding="utf-8",
+            )
+
+            blocker = build_dashboard_snapshot(out_dir)["blocker_actions"][0]
+
+            self.assertIn("旧版或不兼容的回测引擎", blocker["detail"])
+            self.assertIn("全部通过后再更新正式证据", blocker["detail"])
+            self.assertEqual(blocker["report_artifact"]["id"], "parameter_quality")
 
     def test_build_dashboard_snapshot_maps_universe_blockers_to_web_repairs(self) -> None:
         with TemporaryDirectory() as tmp:

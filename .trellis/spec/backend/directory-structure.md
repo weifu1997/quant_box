@@ -197,7 +197,8 @@ if looks_like_field_table(price_df.columns):
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
 - `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `blocker_actions`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
 - `DashboardSnapshot.orders.rows` may enrich manual-order CSV rows with `name` from the configured stock universe file. The backend owns this lookup; the frontend must not read `data/raw/mainboard_a_stocks.csv` directly.
-- `blocker_actions` is the structured repair center contract. It maps each current blocker or stale-report freshness note to a user-facing title/detail, severity, normalized issue id, and an optional whitelisted dashboard job action. The frontend must not derive shell commands or mark blockers fixed locally.
+- `blocker_actions` is the structured repair center contract. It maps each current blocker or stale-report freshness note to a user-facing title/detail, severity, normalized issue id, an optional whitelisted dashboard job action, and an optional bounded `report_artifact`. The frontend must not derive shell commands or mark blockers fixed locally.
+- Parameter/backtest quality blockers must preserve the configured gate and candidate-only outcome. Their detail should identify the actual failing evidence; when the authoritative quality JSON exists, `report_artifact.downloadable=true` and the UI renders a real `/api/dashboard/artifacts/{id}` link. When it is absent, the UI says `报告不可用` and must not render a fake clickable `查看报告` label.
 - `DashboardPrecheck` is a read-only pre-run evidence model with `status`, `summary`, `can_run_normal`, `target_date_resolution`, and compact `items`. It must not download data, recompute factors, write signals, promote candidate artifacts, or mutate account/holding files.
 - Precheck items cover target trading date, data health evidence, point-in-time governance evidence, factor freshness, and account/current holdings. Missing artifacts become `status="missing"` or `warn`, not fabricated passes. Failed daily-basic governance may expose only the existing `repair_point_in_time` job action; factor/data blockers may expose only the whitelisted `run_auto_signal` action.
 - If `data_governance_report.json` is newer than `auto_signal_report.json`, the dashboard governance gate must use the standalone governance report instead of the stale governance snapshot embedded in the auto-signal report. Resolved stale governance block reasons should be filtered from dashboard `block_reasons` / `quality_warnings`, and `freshness_notes` should tell the frontend that the auto-signal report still needs a rerun to refresh the final verdict.
@@ -462,6 +463,8 @@ The catalog owns the executable contract; the browser supplies bounded values on
 | A gate artifact is missing | Gate status is `missing`, not `pass` |
 | `data_governance_report.json` is newer and fixes an issue embedded in `auto_signal_report.json` | Governance gate reflects the newer report, stale governance reasons are filtered from dashboard blockers/warnings, and `freshness_notes` asks the UI to rerun auto signal |
 | Artifact id is unknown or outside `outputs.dir` | `GET /api/dashboard/artifacts/{artifact_id}` returns 404 |
+| A quality blocker has a downloadable quality artifact | Blocker center renders a real report link through the bounded artifact route |
+| A quality blocker has no quality artifact | Blocker center renders `报告不可用`; no broken link or inert `查看报告` control |
 | Dashboard job action is unknown | `POST /api/dashboard/jobs` returns 400 |
 | Dashboard job mode is not `candidate` or `normal` | `POST /api/dashboard/jobs` returns 400 |
 | A dashboard job is already running | `POST /api/dashboard/jobs` returns 409 |
@@ -476,6 +479,7 @@ The catalog owns the executable contract; the browser supplies bounded values on
 - Good: manual-order rows include `instrument` and backend-enriched `name`, so the UI can show stock code and stock name side by side.
 - Good: dashboard repair/rerun buttons start a whitelisted job, show a live log tail, and refresh the latest report when the job completes.
 - Good: dashboard shows structured job progress and blocker-specific repair actions instead of requiring users to interpret raw log text.
+- Good: a yearly backtest blocker states the failing year, observed annualized return, and threshold, while its `查看报告` link downloads the authoritative backtest-quality JSON.
 - Good: before starting auto-signal, dashboard shows a read-only precheck for target date, data health, point-in-time governance, factor freshness, and account/holdings.
 - Good: while a dashboard job is running, the UI shows a stop button that calls the backend stop route and then displays `cancelled`.
 - Good: after dashboard-triggered `daily_basic` repair, the governance gate stops showing the stale embedded `daily_basic_date_coverage_below_required` issue and instead shows a rerun-needed freshness note.
@@ -484,6 +488,7 @@ The catalog owns the executable contract; the browser supplies bounded values on
 - Bad: precheck downloads market data, recomputes factors, writes official/candidate signal artifacts, or edits holdings.
 - Bad: dashboard continues to show `daily_basic_date_coverage_below_required` from an older auto-signal report after a newer governance report proves the gap is fixed.
 - Bad: frontend reads raw files directly from the browser or the backend exposes an arbitrary file path download endpoint.
+- Bad: a static `<span>` is labeled `查看报告` even though it cannot open any report.
 - Bad: normal output mode uses `--force-official` or bypasses auto-signal gates.
 
 ### 6. Tests Required
@@ -493,6 +498,7 @@ The catalog owns the executable contract; the browser supplies bounded values on
 - Unit test malformed report JSON returns `readiness.status="error"`.
 - Unit test dashboard job command building for `repair_point_in_time`, candidate rerun, normal rerun, invalid mode, and unknown action.
 - Unit test dashboard blocker action mapping for `daily_basic` repair, candidate-only rerun, and stale-report rerun notes.
+- Unit and Playwright tests must cover available and missing quality-report artifacts, exact yearly-return translation, and a real report navigation/download interaction.
 - Unit test dashboard precheck pass/fail/missing behavior, including daily-basic repair action and factor rerun action mapping.
 - API test that `GET /api/dashboard/precheck` returns the precheck payload.
 - Unit test dashboard job progress from auto-signal status files and daily-basic repair logs.
@@ -621,6 +627,7 @@ The Web layer presents the authoritative coverage contract instead of inventing 
 
 - The browser supplies only the stock instrument from a dashboard-owned manual-order row. It cannot select the Tushare API name, fields, proxy URL, token, or fallback path.
 - A successful `rt_k` response uses `status="live"`, `is_live=true`, `source="tushare_rt_k"`, and records the local retrieval timestamp. Because `rt_k` can return the latest close outside trading hours, the response/UI must disclose that non-trading periods may show the most recent closing quote.
+- The configured `rt_k` response does not provide an authoritative quote date/time. Live responses therefore keep `market_date=null`; the UI displays `接口未提供` and must not infer `当前交易时段` or derive a market date from `retrieved_at`.
 - A remote error, empty response, or unusable live close automatically reads the latest valid positive close from the stock's local raw daily CSV.
 - Fallback responses use `status="fallback"`, `is_live=false`, `source="local_daily"`, include the effective `market_date`, and explicitly say the value is non-live.
 - The fallback path is derived only after strict instrument validation and must remain directly under the resolved `data.raw_dir`.
@@ -635,6 +642,7 @@ The Web layer presents the authoritative coverage contract instead of inventing 
 | --- | --- |
 | Instrument does not match `NNNNNN.SH/SZ/BJ` | HTTP 400; do not call Tushare or read a local file |
 | `rt_k` returns a positive close | HTTP 200 live response with quote metrics and retrieval time |
+| `rt_k` returns no quote date | Keep `market_date=null`; display `接口未提供` plus retrieval time and the non-trading-period disclosure |
 | `rt_k` fails, is empty, or has no usable close; local daily row exists | HTTP 200 fallback response with local market date and non-live label |
 | Live quote fails and local file is missing/malformed/has no positive close | HTTP 503 with no fabricated price |
 | Local CSV lacks `trade_date` or `close` | Treat fallback as unavailable; HTTP 503 |
@@ -643,13 +651,16 @@ The Web layer presents the authoritative coverage contract instead of inventing 
 ### 5. Good/Base/Bad Cases
 
 - Good: clicking `000001.SZ` or its displayed name opens the same compact modal over the dashboard, `rt_k` returns a quote, and refresh produces a new GET request without reloading the dashboard.
+- Good: a weekend live response shows `行情日期: 接口未提供` and a separate retrieval timestamp; it does not claim the quote belongs to the current trading session.
 - Base: the Tushare proxy is offline on a weekend; the page shows the latest local daily close, its market date, and `本地收盘价 · 非实时`.
 - Bad: the browser submits `api_name=realtime_quote`, a proxy URL, or `../../config/settings.local.yaml`; no API contract accepts these values.
 - Bad: an old local close is displayed under a live/real-time badge or without an effective date.
+- Bad: `market_date=null` is rendered as `当前交易时段`; retrieval time describes when the Web request ran, not when the market formed the quote.
 
 ### 6. Tests Required
 
 - `tests/test_dashboard_stock.py` must assert the exact fixed `rt_k` call and live response metrics.
+- Live quote tests must assert `market_date is None` and the disclosure says the source did not provide a quote date; Playwright must render `接口未提供`.
 - Backend tests must assert a Tushare error falls back to the latest valid local daily row and calculates change percentage from previous close.
 - Backend/API tests must assert invalid instruments map to HTTP 400 and total quote unavailability maps to HTTP 503.
 - Playwright must click both the stock name and stock code, assert the dashboard remains mounted, verify close-button/Escape/backdrop dismissal, assert refresh issues another quote request, assert fallback labeling/date, and check the modal has no page-level horizontal overflow at 390 px.
@@ -676,6 +687,18 @@ def dashboard_stock(instrument: str):
 ```
 
 `build_stock_detail()` validates one bounded symbol, owns the fixed `rt_k` request, and labels a constrained local fallback honestly.
+
+For quote time semantics, preserve source evidence:
+
+```python
+return {
+    "market_date": None,
+    "retrieved_at": retrieved_at,
+    "message": "...接口未提供行情日期...",
+}
+```
+
+`retrieved_at` is the Web retrieval time. It must never be substituted for an absent source market date.
 
 ---
 
