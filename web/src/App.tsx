@@ -36,6 +36,7 @@ import { artifactUrl, fetchDashboardJobs, fetchDashboardPrecheck, fetchLatestDas
 import ExecutionWorkspace from "./ExecutionWorkspace";
 import OperationsWorkspace from "./OperationsWorkspace";
 import AccountWorkspace from "./AccountWorkspace";
+import StockDetailWorkspace from "./StockDetailWorkspace";
 import type {
   Artifact,
   BlockerAction,
@@ -109,6 +110,7 @@ type WorkspaceView = "dashboard" | "operations" | "execution" | "account" | "ove
 
 export default function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("dashboard");
+  const [selectedStock, setSelectedStock] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [jobs, setJobs] = useState<DashboardJob[]>([]);
   const [precheck, setPrecheck] = useState<DashboardPrecheck | null>(null);
@@ -208,6 +210,10 @@ export default function App() {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     setJobsError(null);
   }, []);
+  const openStock = useCallback((instrument: string) => {
+    setSelectedStock(instrument);
+  }, []);
+  const closeStock = useCallback(() => setSelectedStock(null), []);
 
   return (
     <div className="app-shell">
@@ -296,6 +302,7 @@ export default function App() {
             jobsError={jobsError}
             onJobStarted={recordStartedJob}
             onJobsRefresh={refreshJobs}
+            onOpenStock={openStock}
             onPrecheckRefresh={refreshPrecheck}
             precheck={precheck}
             precheckError={precheckError}
@@ -303,6 +310,7 @@ export default function App() {
           />
         )}
       </main>
+      {selectedStock && <StockDetailWorkspace instrument={selectedStock} key={selectedStock} onClose={closeStock} />}
     </div>
   );
 }
@@ -468,6 +476,7 @@ function Dashboard({
   jobsError,
   onJobStarted,
   onJobsRefresh,
+  onOpenStock,
   onPrecheckRefresh,
   precheck,
   precheckError,
@@ -477,6 +486,7 @@ function Dashboard({
   jobsError: string | null;
   onJobStarted: (job: DashboardJob) => void;
   onJobsRefresh: () => void;
+  onOpenStock: (instrument: string) => void;
   onPrecheckRefresh: () => void;
   precheck: DashboardPrecheck | null;
   precheckError: string | null;
@@ -557,7 +567,7 @@ function Dashboard({
 
       <section className="panel table-panel" id="orders">
         <SectionTitle icon={<Table2 size={18} />} title="人工交易单" aside={snapshot.orders.exists ? snapshot.orders.path : "缺失"} />
-        {snapshot.orders.exists && snapshot.orders.valid ? <OrdersTable snapshot={snapshot} /> : <EmptyPanel message={snapshot.orders.error || "没有找到人工交易单产物。"} />}
+        {snapshot.orders.exists && snapshot.orders.valid ? <OrdersTable onOpenStock={onOpenStock} snapshot={snapshot} /> : <EmptyPanel message={snapshot.orders.error || "没有找到人工交易单产物。"} />}
       </section>
 
       <section className="panel artifacts-panel" id="artifacts">
@@ -976,7 +986,7 @@ function GateCard({ gate }: { gate: Gate }) {
   );
 }
 
-function OrdersTable({ snapshot }: { snapshot: DashboardSnapshot }) {
+function OrdersTable({ onOpenStock, snapshot }: { onOpenStock: (instrument: string) => void; snapshot: DashboardSnapshot }) {
   const columns = ORDER_COLUMNS.filter((column) => snapshot.orders.columns.includes(column));
   return (
     <div className="table-wrap">
@@ -991,9 +1001,21 @@ function OrdersTable({ snapshot }: { snapshot: DashboardSnapshot }) {
         <tbody>
           {snapshot.orders.rows.map((row, index) => (
             <tr key={`${row.instrument ?? "row"}-${index}`}>
-              {columns.map((column) => (
-                <td key={column}>{formatOrderCell(column, row[column])}</td>
-              ))}
+              {columns.map((column) => {
+                const instrument = String(row.instrument ?? "").trim();
+                const clickable = Boolean(
+                  (column === "instrument" || column === "name") && instrument && String(row[column] ?? "").trim()
+                );
+                return (
+                  <td key={column}>
+                    {clickable ? (
+                      <button className="stock-detail-link" onClick={() => onOpenStock(instrument)} type="button">
+                        {formatOrderCell(column, row[column])}
+                      </button>
+                    ) : formatOrderCell(column, row[column])}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -1200,6 +1222,10 @@ function translateReason(reason: string) {
   const factorDate = text.match(/^factor_latest_before_end:(.+)$/);
   if (factorDate) {
     return `${prefix}因子最新日期早于目标日期：${factorDate[1]}`;
+  }
+  const unconfirmedFactors = text.match(/^factor_symbols_unconfirmed:(\d+)$/);
+  if (unconfirmedFactors) {
+    return `${prefix}仍有 ${unconfirmedFactors[1]} 只股票未确认是否存在目标日行情。`;
   }
   const stCalendar = text.match(/^st_calendar_end_before_factor_end:(.+)$/);
   if (stCalendar) {

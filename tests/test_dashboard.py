@@ -253,6 +253,181 @@ class DashboardTests(unittest.TestCase):
             self.assertTrue(precheck["can_run_normal"])
             self.assertTrue(all(item["status"] == "pass" for item in precheck["items"]))
 
+    def test_build_dashboard_precheck_accepts_threshold_factor_coverage_with_confirmed_no_new_data(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "outputs"
+            out_dir.mkdir()
+            holdings = root / "current_holdings.csv"
+            holdings.write_text("instrument,shares\n", encoding="utf-8")
+            (out_dir / "data_health_report.json").write_text(
+                json.dumps(
+                    {
+                        "requested_end_date": "2026-07-10",
+                        "is_healthy": True,
+                        "issues": [],
+                        "raw_latest_date": "2026-06-29",
+                        "price_latest_date": "2026-06-29",
+                        "factor_latest_date": "2026-06-29",
+                        "target_symbols": 2708,
+                        "factor_latest_target_symbols": 2705,
+                        "factor_latest_target_coverage": 0.9988921713441654,
+                        "min_factor_coverage": 0.95,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "data_governance_report.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-11T09:34:47",
+                        "is_point_in_time_ready": True,
+                        "issues": [],
+                        "warnings": [],
+                        "daily_basic_end_date": "2026-07-10",
+                        "daily_basic_date_coverage": 1.0,
+                        "st_calendar_end_date": "2026-07-10",
+                        "factor_cache_meta_available": True,
+                        "factor_cache_meta_end_date": "2026-07-10",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "data_update_progress.json").write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "target_end_date": "2026-07-10",
+                        "target_symbols": 2708,
+                        "latest_symbols": 2705,
+                        "confirmed_no_new_data_symbols": 3,
+                        "remaining_unconfirmed_symbols": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "data": {"end_date": "2026-07-10"},
+                "quality": {"min_factor_coverage": 0.99},
+                "account": {"current_holdings_file": str(holdings), "total_asset": 1_000_000, "cash": 100_000},
+                "outputs": {"dir": str(out_dir)},
+            }
+
+            precheck = build_dashboard_precheck(out_dir=out_dir, config=config)
+            factor = {item["id"]: item for item in precheck["items"]}["factor_freshness"]
+
+            self.assertEqual(factor["status"], "pass")
+            self.assertEqual(factor["issues"], [])
+            self.assertIn("2705/2708", factor["summary"])
+            self.assertIn("99.89%", factor["summary"])
+            self.assertIn("99.00%", factor["summary"])
+            self.assertIn("其余 3 只已确认停牌或无新行情", factor["summary"])
+            self.assertEqual(factor["details"]["remaining_unconfirmed_symbols"], 0)
+            self.assertEqual(factor["details"]["min_factor_coverage"], 0.99)
+            self.assertEqual(factor["details"]["evidence_min_factor_coverage"], 0.95)
+
+    def test_build_dashboard_precheck_warns_for_unconfirmed_factor_symbols(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "outputs"
+            out_dir.mkdir()
+            holdings = root / "current_holdings.csv"
+            holdings.write_text("instrument,shares\n", encoding="utf-8")
+            health = {
+                "requested_end_date": "2026-07-10",
+                "is_healthy": True,
+                "issues": [],
+                "factor_latest_date": "2026-07-09",
+                "target_symbols": 100,
+                "factor_latest_target_symbols": 99,
+                "factor_latest_target_coverage": 0.99,
+                "min_factor_coverage": 0.99,
+            }
+            (out_dir / "data_health_report.json").write_text(json.dumps(health), encoding="utf-8")
+            (out_dir / "data_governance_report.json").write_text(
+                json.dumps(
+                    {
+                        "is_point_in_time_ready": True,
+                        "issues": [],
+                        "warnings": [],
+                        "factor_cache_meta_available": True,
+                        "factor_cache_meta_end_date": "2026-07-10",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "data_update_progress.json").write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "target_end_date": "2026-07-10",
+                        "confirmed_no_new_data_symbols": 0,
+                        "remaining_unconfirmed_symbols": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "data": {"end_date": "2026-07-10"},
+                "account": {"current_holdings_file": str(holdings), "total_asset": 1_000_000, "cash": 100_000},
+                "outputs": {"dir": str(out_dir)},
+            }
+
+            factor = {item["id"]: item for item in build_dashboard_precheck(out_dir=out_dir, config=config)["items"]}[
+                "factor_freshness"
+            ]
+
+            self.assertEqual(factor["status"], "warn")
+            self.assertEqual(factor["issues"], ["factor_symbols_unconfirmed:1"])
+            self.assertEqual(factor["action"]["action"], "run_auto_signal")
+
+    def test_build_dashboard_precheck_rejects_factor_coverage_below_threshold_without_issue_field(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out_dir = root / "outputs"
+            out_dir.mkdir()
+            holdings = root / "current_holdings.csv"
+            holdings.write_text("instrument,shares\n", encoding="utf-8")
+            (out_dir / "data_health_report.json").write_text(
+                json.dumps(
+                    {
+                        "requested_end_date": "2026-07-10",
+                        "is_healthy": True,
+                        "issues": [],
+                        "factor_latest_date": "2026-07-10",
+                        "target_symbols": 100,
+                        "factor_latest_target_symbols": 90,
+                        "factor_latest_target_coverage": 0.90,
+                        "min_factor_coverage": 0.99,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (out_dir / "data_governance_report.json").write_text(
+                json.dumps(
+                    {
+                        "is_point_in_time_ready": True,
+                        "issues": [],
+                        "warnings": [],
+                        "factor_cache_meta_available": True,
+                        "factor_cache_meta_end_date": "2026-07-10",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "data": {"end_date": "2026-07-10"},
+                "account": {"current_holdings_file": str(holdings), "total_asset": 1_000_000, "cash": 100_000},
+                "outputs": {"dir": str(out_dir)},
+            }
+
+            factor = {item["id"]: item for item in build_dashboard_precheck(out_dir=out_dir, config=config)["items"]}[
+                "factor_freshness"
+            ]
+
+            self.assertEqual(factor["status"], "fail")
+            self.assertEqual(factor["issues"], ["factor_latest_coverage_below_threshold:0.9000<0.9900"])
+
     def test_build_dashboard_precheck_maps_blockers_to_actions(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

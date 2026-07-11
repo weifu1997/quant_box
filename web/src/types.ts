@@ -79,6 +79,29 @@ export interface DashboardSnapshot {
   errors: string[];
 }
 
+export type StockQuoteStatus = "live" | "fallback";
+
+export interface StockDetail {
+  version: number;
+  instrument: string;
+  name: string;
+  status: StockQuoteStatus;
+  is_live: boolean;
+  source: "tushare_rt_k" | "local_daily";
+  price: number;
+  change?: number | null;
+  change_pct?: number | null;
+  pre_close?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  volume?: number | null;
+  amount?: number | null;
+  market_date?: string | null;
+  retrieved_at: string;
+  message: string;
+}
+
 export type DashboardJobAction =
   | "repair_point_in_time"
   | "run_auto_signal"

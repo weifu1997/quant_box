@@ -24,6 +24,7 @@ from src.dashboard_control import (
     stop_dashboard_job,
 )
 from src.dashboard_execution import apply_execution_feedback, build_execution_workspace, preview_execution_feedback
+from src.dashboard_stock import build_stock_detail
 
 
 def create_dashboard_app() -> FastAPI:
@@ -44,6 +45,15 @@ def create_dashboard_app() -> FastAPI:
     @app.get("/api/dashboard/latest")
     def latest_dashboard() -> dict:
         return build_dashboard_snapshot()
+
+    @app.get("/api/dashboard/stocks/{instrument}")
+    def dashboard_stock(instrument: str) -> dict[str, Any]:
+        try:
+            return build_stock_detail(instrument)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/dashboard/precheck")
     def dashboard_precheck() -> dict:

@@ -368,7 +368,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "quality": {
         "min_raw_coverage": 0.95,
         "min_price_coverage": 0.95,
-        "min_factor_coverage": 0.95,
+        "min_factor_coverage": 0.99,
         "require_latest_end_date": True,
         "min_validation_windows": 3,
         "min_positive_return_rate": 0.5,

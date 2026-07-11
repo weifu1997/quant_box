@@ -14,7 +14,8 @@ import type {
   ExecutionApplyResult,
   ExecutionFillRow,
   ExecutionPreview,
-  ExecutionWorkspaceData
+  ExecutionWorkspaceData,
+  StockDetail
 } from "./types";
 
 export async function fetchAccountWorkspace(signal?: AbortSignal): Promise<AccountWorkspaceData> {
@@ -51,6 +52,17 @@ export async function fetchLatestDashboard(signal?: AbortSignal): Promise<Dashbo
     throw new Error(`仪表盘 API 读取失败：${response.status}`);
   }
   return (await response.json()) as DashboardSnapshot;
+}
+
+export async function fetchStockDetail(instrument: string, signal?: AbortSignal): Promise<StockDetail> {
+  const response = await fetch(`/api/dashboard/stocks/${encodeURIComponent(instrument)}`, {
+    cache: "no-store",
+    signal
+  });
+  if (!response.ok) {
+    throw new Error(await responseError(response, "股票行情读取失败"));
+  }
+  return (await response.json()) as StockDetail;
 }
 
 export function artifactUrl(id: string): string {

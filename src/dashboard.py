@@ -6,11 +6,13 @@ from collections.abc import Mapping
 import csv
 from datetime import datetime
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from src.common import normalize_instrument
 from src.config_loader import load_config, resolve_path
+from src.dashboard_stock import load_instrument_name_map
 from src.manual_orders import load_account_state, load_current_holdings, validate_account_inputs
 from src.trading_calendar import resolve_target_date
 
@@ -90,11 +92,19 @@ def build_dashboard_precheck(out_dir: str | Path | None = None, config: Mapping[
     target_item, target_resolution = _precheck_target_date(cfg)
     health = _read_json_data(output_dir / "data_health_report.json")
     governance = _read_json_data(output_dir / "data_governance_report.json")
+    data_update_progress = _read_json_data(output_dir / "data_update_progress.json")
+    configured_min_factor_coverage = _optional_float(_mapping_value(cfg.get("quality")).get("min_factor_coverage"))
     items = [
         target_item,
         _precheck_data_health(health, target_resolution),
         _precheck_governance(governance, target_resolution),
-        _precheck_factor_freshness(health, governance, target_resolution),
+        _precheck_factor_freshness(
+            health,
+            governance,
+            target_resolution,
+            data_update_progress,
+            configured_min_factor_coverage=configured_min_factor_coverage,
+        ),
         _precheck_account(cfg),
     ]
     fail_count = sum(1 for item in items if item["status"] == "fail")
@@ -212,17 +222,74 @@ def _precheck_factor_freshness(
     health: Mapping[str, Any],
     governance: Mapping[str, Any],
     target_resolution: Mapping[str, Any],
+    data_update_progress: Mapping[str, Any] | None = None,
+    *,
+    configured_min_factor_coverage: float | None = None,
 ) -> dict[str, Any]:
     target_date = str(target_resolution.get("target_date") or "")
     if health:
         issues = [issue for issue in _string_list(health.get("issues")) if issue.startswith("factor_")]
+        coverage = _optional_float(health.get("factor_latest_target_coverage"))
+        evidence_threshold = _optional_float(health.get("min_factor_coverage"))
+        threshold = configured_min_factor_coverage
+        if threshold is None:
+            threshold = 1.0 if evidence_threshold is None else evidence_threshold
+        target_symbols = _optional_int(health.get("target_symbols"))
+        current_symbols = _optional_int(health.get("factor_latest_target_symbols"))
+        progress = _mapping_value(data_update_progress)
+        progress_is_current = bool(target_date) and str(progress.get("target_end_date") or "") == target_date
+        progress_status = str(progress.get("status") or "") if progress_is_current else ""
+        confirmed_symbols = (
+            _optional_int(progress.get("confirmed_no_new_data_symbols"))
+            if progress_is_current and progress_status == "complete"
+            else None
+        )
+        unconfirmed_symbols = _optional_int(progress.get("remaining_unconfirmed_symbols")) if progress_is_current else None
         details = {
             "factor_latest_date": health.get("factor_latest_date"),
-            "factor_latest_coverage": health.get("factor_latest_target_coverage"),
+            "factor_latest_coverage": coverage,
+            "factor_latest_target_symbols": current_symbols,
+            "target_symbols": target_symbols,
+            "min_factor_coverage": threshold,
+            "evidence_min_factor_coverage": evidence_threshold,
             "requested_end_date": health.get("requested_end_date"),
+            "data_update_progress_status": progress_status or None,
+            "data_update_progress_target_date": progress.get("target_end_date") if progress_is_current else None,
+            "confirmed_no_new_data_symbols": confirmed_symbols,
+            "remaining_unconfirmed_symbols": unconfirmed_symbols,
         }
         if issues:
             return _precheck_item("factor_freshness", "因子新鲜度", "fail", _issue_summary(issues, "因子新鲜度不足。"), issues, details)
+        if coverage is not None and coverage < threshold:
+            coverage_issue = f"factor_latest_coverage_below_threshold:{coverage:.4f}<{threshold:.4f}"
+            return _precheck_item(
+                "factor_freshness",
+                "因子新鲜度",
+                "fail",
+                f"因子目标日覆盖率 {coverage:.2%}，低于 {threshold:.2%} 门槛。",
+                [coverage_issue],
+                details,
+            )
+        if unconfirmed_symbols is not None and unconfirmed_symbols > 0:
+            unconfirmed_issue = f"factor_symbols_unconfirmed:{unconfirmed_symbols}"
+            return _precheck_item(
+                "factor_freshness",
+                "因子新鲜度",
+                "warn",
+                f"仍有 {unconfirmed_symbols} 只股票未确认是否存在目标日行情，建议先完成行情更新。",
+                [unconfirmed_issue],
+                details,
+            )
+        if coverage is not None:
+            summary = _factor_coverage_summary(
+                coverage,
+                threshold,
+                current_symbols=current_symbols,
+                target_symbols=target_symbols,
+                confirmed_symbols=confirmed_symbols,
+                unconfirmed_symbols=unconfirmed_symbols,
+            )
+            return _precheck_item("factor_freshness", "因子新鲜度", "pass", summary, [], details)
         stale = _artifact_target_stale(health.get("factor_latest_date"), target_date)
         if stale:
             return _precheck_item("factor_freshness", "因子新鲜度", "warn", "因子最新日期早于当前目标日期。", [stale], details)
@@ -309,6 +376,9 @@ def _data_health_details(health: Mapping[str, Any]) -> dict[str, Any]:
         "raw_latest_date": health.get("raw_latest_date"),
         "price_latest_date": health.get("price_latest_date"),
         "factor_latest_date": health.get("factor_latest_date"),
+        "factor_latest_target_symbols": health.get("factor_latest_target_symbols"),
+        "target_symbols": health.get("target_symbols"),
+        "min_factor_coverage": health.get("min_factor_coverage"),
         "raw_latest_coverage": health.get("raw_latest_target_coverage"),
         "price_latest_coverage": health.get("price_latest_target_coverage"),
         "factor_latest_coverage": health.get("factor_latest_target_coverage"),
@@ -690,7 +760,7 @@ def _build_orders(artifact: Mapping[str, Any] | None, config: Mapping[str, Any] 
 def _enrich_order_names(preview: dict[str, Any], config: Mapping[str, Any] | None = None) -> None:
     if not preview.get("valid") or "instrument" not in preview.get("columns", []):
         return
-    name_map = _instrument_name_map(config)
+    name_map = load_instrument_name_map(config)
     if not name_map:
         return
     columns = list(preview.get("columns", []))
@@ -706,31 +776,6 @@ def _enrich_order_names(preview: dict[str, Any], config: Mapping[str, Any] | Non
             continue
         instrument = normalize_instrument(row.get("instrument", ""))
         row["name"] = name_map.get(instrument, "")
-
-
-def _instrument_name_map(config: Mapping[str, Any] | None = None) -> dict[str, str]:
-    cfg = dict(config) if config is not None else load_config()
-    data_cfg = _mapping_value(cfg.get("data"))
-    path = resolve_path(data_cfg.get("constituents_file", "data/raw/mainboard_a_stocks.csv"))
-    if not path.exists():
-        return {}
-    try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle)
-            if "name" not in (reader.fieldnames or []):
-                return {}
-            code_column = next((column for column in ["ts_code", "instrument", "ticker", "symbol"] if column in (reader.fieldnames or [])), "")
-            if not code_column:
-                return {}
-            result: dict[str, str] = {}
-            for row in reader:
-                instrument = normalize_instrument(row.get(code_column, ""))
-                name = str(row.get("name", "")).strip()
-                if instrument and name:
-                    result[instrument] = name
-            return result
-    except (OSError, csv.Error, UnicodeDecodeError):
-        return {}
 
 
 def _build_artifacts(output_dir: Path, report: Mapping[str, Any] | None) -> list[dict[str, Any]]:
@@ -881,6 +926,41 @@ def _issue_summary(issues: list[str], fallback: str) -> str:
     first = issues[0]
     suffix = f" (+{len(issues) - 1} more)" if len(issues) > 1 else ""
     return first + suffix
+
+
+def _factor_coverage_summary(
+    coverage: float,
+    threshold: float,
+    *,
+    current_symbols: int | None,
+    target_symbols: int | None,
+    confirmed_symbols: int | None,
+    unconfirmed_symbols: int | None,
+) -> str:
+    if current_symbols is None or target_symbols is None or target_symbols <= 0:
+        return f"因子目标日覆盖率 {coverage:.2%}，达到 {threshold:.2%} 门槛。"
+    missing_symbols = max(target_symbols - current_symbols, 0)
+    summary = f"因子目标日覆盖 {current_symbols}/{target_symbols}（{coverage:.2%}），达到 {threshold:.2%} 门槛"
+    if missing_symbols <= 0:
+        return summary + "。"
+    if unconfirmed_symbols == 0 and confirmed_symbols is not None and confirmed_symbols >= missing_symbols:
+        return summary + f"；其余 {missing_symbols} 只已确认停牌或无新行情。"
+    return summary + f"；其余 {missing_symbols} 只未产生目标日因子行。"
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _optional_int(value: Any) -> int | None:
+    parsed = _optional_float(value)
+    if parsed is None or parsed < 0 or not parsed.is_integer():
+        return None
+    return int(parsed)
 
 
 def _mapping_value(value: Any) -> dict[str, Any]:

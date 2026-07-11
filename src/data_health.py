@@ -87,7 +87,7 @@ def build_data_health_report(
 
     min_raw = float(quality_cfg.get("min_raw_coverage", 0.95))
     min_price = float(quality_cfg.get("min_price_coverage", 0.95))
-    min_factor = float(quality_cfg.get("min_factor_coverage", 0.95))
+    min_factor = float(quality_cfg.get("min_factor_coverage", 0.99))
     require_latest = bool(quality_cfg.get("require_latest_end_date", True))
 
     raw_coverage = _ratio(len(raw_target), len(target_symbols))

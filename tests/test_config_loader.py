@@ -78,6 +78,7 @@ class ConfigLoaderTests(unittest.TestCase):
         self.assertIsNone(config["validated_strategy"]["summary_file"])
         self.assertTrue(config["validated_strategy"]["require_is_acceptable"])
         self.assertTrue(config["annual_state_router"]["enabled"])
+        self.assertEqual(config["quality"]["min_factor_coverage"], 0.99)
         self.assertEqual(config["annual_state_router"]["missing_ret252_exposure"], 0.70)
         self.assertEqual(config["annual_state_router"]["moderate_positive_exposure"], 1.0)
         self.assertEqual(config["annual_state_router"]["moderate_low_source"], "beta20")
@@ -253,6 +254,7 @@ quality:
         self.assertEqual(quality["min_backtest_annual_return"], 0.20)
         self.assertEqual(quality["max_backtest_drawdown_limit"], -0.20)
         self.assertEqual(quality["max_drawdown_limit"], -0.20)
+        self.assertEqual(quality["min_factor_coverage"], 0.99)
         self.assertIsNone(quality["optimizer_timeout_seconds"])
         self.assertIsNone(quality["max_optimizer_combinations"])
 

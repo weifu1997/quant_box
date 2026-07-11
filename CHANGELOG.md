@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Raised the latest-target factor coverage quality threshold from 95% to 99% and aligned the Web precheck with that authoritative gate.
+- Added an in-app stock detail view from manual-order names/codes with refreshable Tushare `rt_k` prices and explicitly labeled local daily-close fallback.
 - Reduced a current-cache Web auto-signal run to about six minutes by skipping unchanged conversion outputs and building annual-router sources only for reachable states/dates.
 - Prevented full-market Alpha158 memory failures by bounding Qlib workers, disabling unused learn processors, and avoiding full-frame infinity replacement.
 - Fixed factor-cache reuse when configured history predates the first available local price, avoiding unnecessary multi-gigabyte recomputation.

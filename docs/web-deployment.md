@@ -26,6 +26,8 @@ cd ..
 
 FastAPI serves `web/dist` at `http://127.0.0.1:8000`.
 
+The manual-order stock detail view uses the configured Tushare proxy for the fixed `rt_k` quote call. If that service is unreachable or rejects the request, the API falls back to the latest local `data/raw/<TS_CODE>.csv` daily close and labels it as non-live; deployments should therefore persist both the private Tushare configuration and local market-data cache.
+
 ## Ubuntu local or server use
 
 Install and build once:

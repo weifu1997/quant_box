@@ -21,6 +21,7 @@ const precheck = { version: 1, generated_at: "2026-07-11T09:00:00", status: "pas
 const workflows = [{ action: "update_market_data", label: "增量更新行情", category: "data", description: "补齐行情数据", duration: "5–60 分钟", parameters: [{ name: "chunk_size", label: "每批股票数", type: "integer", default: 300, min: 1, max: 2000 }, { name: "include_existing", label: "同时刷新已有股票", type: "boolean", default: false }] }, { action: "run_backtest", label: "运行真实化回测", category: "research", description: "运行当前策略回测", duration: "2–20 分钟", parameters: [] }];
 const execution = { version: 1, status: "needs_input", message: "请填写成交结果", source_id: "fill_feedback_2026-07-10.csv", source_path: "outputs/fill_feedback/fill_feedback_2026-07-10.csv", signal_date: "2026-07-10", intended_trade_date: "2026-07-11", rows: [{ row_id: 0, signal_date: "2026-07-10", instrument: "000001.SZ", side: "BUY", planned_order_shares: 200, fill_status: "PENDING", actual_trade_date: "2026-07-11", executed_shares: null, executed_price: null, commission_cost: 0, fill_note: "" }], holdings: [{ instrument: "000001.SZ", shares: 100 }], editable_fields: [], issues: ["pending_fill_status:000001.SZ"], pending_count: 1 };
 const account = { version: 1, status: "ready", message: "账户与持仓校验通过", account: { total_asset: 1_000_000, cash: 100_000, max_position_pct: 0.2, lot_size: 100, star_market_lot_size: 200 }, holdings: [{ instrument: "000001.SZ", shares: 100 }], issues: [], account_file: "config/account.yaml", holdings_file: "config/current_holdings.csv", account_file_exists: true, holdings_file_exists: true };
+const stockDetail = { version: 1, instrument: "000001.SZ", name: "平安银行", status: "live", is_live: true, source: "tushare_rt_k", price: 10.5, change: 0.5, change_pct: 5, pre_close: 10, open: 10.1, high: 10.8, low: 9.9, volume: 123456, amount: 9876543, market_date: null, retrieved_at: "2026-07-11T10:30:00+08:00", message: "实时行情接口返回的最新价格；非交易时段可能为最近一次收盘行情。" };
 
 test.beforeEach(async ({ page }) => {
   await installApiMocks(page);
@@ -39,6 +40,65 @@ test("daily review and project overview navigation remain usable", async ({ page
 
   await page.getByRole("button", { name: "进入复核台" }).click();
   await expect(page.getByRole("heading", { name: "自动信号复核" })).toBeVisible();
+});
+
+test("manual order stock name and code open a refreshable modal", async ({ page }) => {
+  await page.unroute("**/api/dashboard/stocks/*");
+  let quoteRequests = 0;
+  await page.route("**/api/dashboard/stocks/*", (route) => {
+    quoteRequests += 1;
+    return route.fulfill({ json: stockDetail });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "平安银行", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "平安银行" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole("heading", { name: "自动信号复核" })).toBeVisible();
+  await expect(page.getByText("10.50", { exact: true })).toBeVisible();
+  await expect(page.getByText("实时行情接口", { exact: true })).toBeVisible();
+  const requestsBeforeRefresh = quoteRequests;
+  await page.getByRole("button", { name: "刷新行情" }).click();
+  await expect.poll(() => quoteRequests).toBeGreaterThan(requestsBeforeRefresh);
+
+  await page.getByRole("button", { name: "关闭股票详情" }).click();
+  await expect(dialog).toBeHidden();
+  const requestsBeforeCodeClick = quoteRequests;
+  await page.getByRole("button", { name: "000001.SZ", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "平安银行" })).toBeVisible();
+  await expect.poll(() => quoteRequests).toBeGreaterThan(requestsBeforeCodeClick);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "平安银行" })).toBeHidden();
+
+  await page.getByRole("button", { name: "000001.SZ", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "平安银行" })).toBeVisible();
+  await page.locator(".stock-modal-backdrop").click({ position: { x: 5, y: 5 } });
+  await expect(page.getByRole("dialog", { name: "平安银行" })).toBeHidden();
+});
+
+test("stock detail clearly labels local fallback data and stays mobile-safe", async ({ page }) => {
+  await page.unroute("**/api/dashboard/stocks/*");
+  await page.route("**/api/dashboard/stocks/*", (route) => route.fulfill({
+    json: {
+      ...stockDetail,
+      status: "fallback",
+      is_live: false,
+      source: "local_daily",
+      market_date: "2026-07-10",
+      message: "实时行情暂不可用，当前显示本地最新日线收盘价（非实时）。"
+    }
+  }));
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "000001.SZ", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "平安银行" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("本地收盘价 · 非实时", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("2026-07-10", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/当前显示本地最新日线收盘价/)).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 });
 
 test("operations workflow run and stop buttons match backend payloads", async ({ page }) => {
@@ -150,6 +210,7 @@ async function installApiMocks(page: Page) {
   await page.route("**/api/dashboard/workflows", (route) => route.fulfill({ json: { workflows } }));
   await page.route("**/api/dashboard/execution", (route) => route.fulfill({ json: execution }));
   await page.route("**/api/dashboard/account", (route) => route.fulfill({ json: account }));
+  await page.route("**/api/dashboard/stocks/*", (route) => route.fulfill({ json: stockDetail }));
 }
 
 function runningJob(action: string) {

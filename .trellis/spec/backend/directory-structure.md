@@ -529,6 +529,154 @@ def dashboard_artifact(artifact_id: str):
 
 The resolver maps known artifact ids from the latest dashboard snapshot and constrains them to `outputs.dir`.
 
+## Scenario: Dashboard Factor Freshness Precheck
+
+### 1. Scope / Trigger
+
+- Trigger: the Web precheck summarizes factor freshness when a small number of suspended or no-new-data stocks do not have a row on the target trading date.
+- Owners: `src.data_health.build_data_health_report` owns the authoritative coverage gate; `src.dashboard._precheck_factor_freshness` presents that result and may add current data-update confirmation context.
+
+### 2. Signatures
+
+- Evidence: `outputs/data_health_report.json` fields `issues`, `factor_latest_target_coverage`, `min_factor_coverage`, `factor_latest_target_symbols`, `target_symbols`, and `factor_latest_date`.
+- Optional confirmation evidence: `outputs/data_update_progress.json` fields `status`, `target_end_date`, `confirmed_no_new_data_symbols`, and `remaining_unconfirmed_symbols`.
+- API surface: the `factor_freshness` item inside `GET /api/dashboard/precheck`.
+
+### 3. Contracts
+
+- `factor_*` issues emitted by data health are authoritative failures; the dashboard must not reinterpret them as passes.
+- The current configured `quality.min_factor_coverage` is the active precheck threshold. The threshold stored in an older data-health report remains diagnostic evidence only, so a config increase takes effect before the next auto-signal report is regenerated.
+- When `factor_latest_target_coverage >= min_factor_coverage` and there are no factor issues, the factor precheck passes even if the minimum per-symbol `factor_latest_date` is earlier than the target date.
+- `factor_latest_date` is diagnostic evidence: it is the minimum latest date across target symbols and may legitimately be old for a suspended stock. It is not a second global freshness gate when coverage evidence exists.
+- Data-update confirmation counts may be used only when `target_end_date` matches the current target. A completed progress record with `remaining_unconfirmed_symbols=0` may label the uncovered remainder as confirmed suspended/no-new-data symbols.
+- A current progress record with `remaining_unconfirmed_symbols > 0` produces a warning and the existing bounded `run_auto_signal` action.
+- Metadata date comparison remains the fallback only when a data-health report with coverage fields is unavailable.
+- This precheck never changes market data, factor caches, coverage thresholds, or backtest-quality decisions.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Any `factor_*` issue exists | `status=fail`; preserve issues and expose the normal rerun action |
+| Coverage is present but below `min_factor_coverage` | `status=fail` even if an inconsistent report omitted the issue string |
+| Coverage passes and current progress reports unconfirmed symbols | `status=warn` with `factor_symbols_unconfirmed:<count>` |
+| Coverage passes, no factor issues, no unconfirmed symbols | `status=pass`; do not emit `artifact_before_target` from the minimum symbol date |
+| Coverage passes but confirmation progress is absent/stale | `status=pass`; describe uncovered rows without claiming they were confirmed |
+| Health evidence is absent but governance factor metadata is current | Use the existing metadata-only pass path |
+
+### 5. Good/Base/Bad Cases
+
+- Good: 2705/2708 symbols cover 2026-07-10 (99.89%) against a 99% threshold, three are confirmed with no new data, and the minimum symbol date is 2026-06-29 -> pass with an honest confirmation summary.
+- Base: all target symbols have a target-date factor row -> pass with 100% coverage.
+- Bad: the dashboard compares `min(latest_date_by_symbol)` directly with the target and warns forever for a legitimately suspended stock.
+- Bad: the dashboard lowers the configured threshold or fabricates target-date factor rows to remove the warning.
+
+### 6. Tests Required
+
+- `tests/test_dashboard.py` must cover threshold-passing partial latest-date coverage with a confirmed-no-new-data remainder.
+- Tests must assert the pass summary reports covered/target counts, observed percentage, threshold, and confirmed remainder.
+- Tests must assert explicit factor issues remain failures and inconsistent below-threshold numeric evidence cannot pass.
+- Tests must assert current unconfirmed progress produces a warning plus the controlled rerun action.
+- Real API verification must confirm the current 2705/2708 evidence no longer emits `artifact_before_target:2026-06-29<2026-07-10`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+if factor_latest_date < target_date:
+    return warn("artifact_before_target")
+```
+
+This converts one suspended stock's last row into a false global freshness warning after data health already accepted the configured coverage.
+
+#### Correct
+
+```python
+if factor_issues:
+    return fail(factor_issues)
+if factor_latest_target_coverage < min_factor_coverage:
+    return fail("factor_latest_coverage_below_threshold")
+return pass_with_coverage_and_confirmation_context()
+```
+
+The Web layer presents the authoritative coverage contract instead of inventing a conflicting gate.
+
+## Scenario: Dashboard Stock Detail And Live-Quote Fallback
+
+### 1. Scope / Trigger
+
+- Trigger: a Web user clicks a stock name or code in the manual-order table and needs a compact current-price modal without granting the browser general Tushare or filesystem access.
+- Owners: `src/dashboard_stock.py` owns validation, the fixed quote call, and local fallback; `src/dashboard_api.py` exposes the read-only route; `web/src/StockDetailWorkspace.tsx` renders freshness and refresh behavior.
+
+### 2. Signatures
+
+- API: `GET /api/dashboard/stocks/{instrument} -> StockDetail`.
+- Instrument grammar: exactly six digits plus `.SH`, `.SZ`, or `.BJ`; backend normalization uppercases the value before validation.
+- Live source: `TushareHttpClient.call("rt_k", params={"ts_code": instrument}, fields=<fixed quote fields>)`.
+- Fallback source: configured `data.raw_dir/<TS_CODE>.csv`, normally `data/raw/<TS_CODE>.csv`.
+- Response fields: `instrument`, `name`, `status`, `is_live`, `source`, `price`, `change`, `change_pct`, `pre_close`, `open`, `high`, `low`, `volume`, `amount`, `market_date`, `retrieved_at`, and `message`.
+
+### 3. Contracts
+
+- The browser supplies only the stock instrument from a dashboard-owned manual-order row. It cannot select the Tushare API name, fields, proxy URL, token, or fallback path.
+- A successful `rt_k` response uses `status="live"`, `is_live=true`, `source="tushare_rt_k"`, and records the local retrieval timestamp. Because `rt_k` can return the latest close outside trading hours, the response/UI must disclose that non-trading periods may show the most recent closing quote.
+- A remote error, empty response, or unusable live close automatically reads the latest valid positive close from the stock's local raw daily CSV.
+- Fallback responses use `status="fallback"`, `is_live=false`, `source="local_daily"`, include the effective `market_date`, and explicitly say the value is non-live.
+- The fallback path is derived only after strict instrument validation and must remain directly under the resolved `data.raw_dir`.
+- Stock-name enrichment is shared through `load_instrument_name_map`; dashboard orders and stock details must not implement separate universe-file readers.
+- The frontend sends `cache: "no-store"` and the refresh button repeats only the same bounded GET request.
+- The frontend keeps the manual-order dashboard mounted behind an accessible modal dialog. The modal supports a visible close button, Escape-key dismissal, backdrop-click dismissal, focus containment/restoration, and body scroll locking while open.
+- Desktop uses a centered compact dialog; narrow mobile layouts may use a bottom sheet, but neither layout may introduce page-level horizontal overflow.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Instrument does not match `NNNNNN.SH/SZ/BJ` | HTTP 400; do not call Tushare or read a local file |
+| `rt_k` returns a positive close | HTTP 200 live response with quote metrics and retrieval time |
+| `rt_k` fails, is empty, or has no usable close; local daily row exists | HTTP 200 fallback response with local market date and non-live label |
+| Live quote fails and local file is missing/malformed/has no positive close | HTTP 503 with no fabricated price |
+| Local CSV lacks `trade_date` or `close` | Treat fallback as unavailable; HTTP 503 |
+| Stock name is missing | Keep the normalized instrument usable; name may be blank |
+
+### 5. Good/Base/Bad Cases
+
+- Good: clicking `000001.SZ` or its displayed name opens the same compact modal over the dashboard, `rt_k` returns a quote, and refresh produces a new GET request without reloading the dashboard.
+- Base: the Tushare proxy is offline on a weekend; the page shows the latest local daily close, its market date, and `本地收盘价 · 非实时`.
+- Bad: the browser submits `api_name=realtime_quote`, a proxy URL, or `../../config/settings.local.yaml`; no API contract accepts these values.
+- Bad: an old local close is displayed under a live/real-time badge or without an effective date.
+
+### 6. Tests Required
+
+- `tests/test_dashboard_stock.py` must assert the exact fixed `rt_k` call and live response metrics.
+- Backend tests must assert a Tushare error falls back to the latest valid local daily row and calculates change percentage from previous close.
+- Backend/API tests must assert invalid instruments map to HTTP 400 and total quote unavailability maps to HTTP 503.
+- Playwright must click both the stock name and stock code, assert the dashboard remains mounted, verify close-button/Escape/backdrop dismissal, assert refresh issues another quote request, assert fallback labeling/date, and check the modal has no page-level horizontal overflow at 390 px.
+- Production verification must build `web/dist`, call the real local API, click a real manual-order link, and confirm the refresh request completes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+@app.get("/api/quote")
+def quote(api_name: str, symbol: str, fallback_path: str):
+    return TushareHttpClient.from_config().call(api_name, {"ts_code": symbol})
+```
+
+This gives the browser control over the remote interface and suggests it may also choose a filesystem path.
+
+#### Correct
+
+```python
+@app.get("/api/dashboard/stocks/{instrument}")
+def dashboard_stock(instrument: str):
+    return build_stock_detail(instrument)
+```
+
+`build_stock_detail()` validates one bounded symbol, owns the fixed `rt_k` request, and labels a constrained local fallback honestly.
+
 ---
 
 ## Good Examples
