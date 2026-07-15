@@ -93,7 +93,7 @@ def resolve_target_date(
     cfg = config or load_config()
     data_cfg = cfg.get("data", {})
     requested = str(value if value is not None else data_cfg.get("end_date", "auto"))
-    now_dt = _normalize_now(now, data_cfg.get("timezone", DEFAULT_TIMEZONE))
+    now_dt = normalize_market_datetime(now, data_cfg.get("timezone", DEFAULT_TIMEZONE))
     cutoff = _parse_cutoff_time(str(data_cfg.get("target_date_cutoff_time", DEFAULT_CUTOFF_TIME)))
 
     if not _is_auto_date_value(requested):
@@ -214,8 +214,8 @@ def _is_auto_date_value(value: str) -> bool:
     return value.strip().lower() in AUTO_DATE_VALUES
 
 
-def _normalize_now(now: datetime | None, timezone_name: str) -> datetime:
-    """函数说明：规范化 normalize_now 的内部辅助逻辑。"""
+def normalize_market_datetime(now: datetime | None, timezone_name: str = DEFAULT_TIMEZONE) -> datetime:
+    """Normalize an optional timestamp into the configured market timezone."""
     tz = ZoneInfo(timezone_name or DEFAULT_TIMEZONE)
     if now is None:
         return datetime.now(tz)

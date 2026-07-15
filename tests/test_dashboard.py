@@ -207,7 +207,10 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(blocker["report_artifact"]["id"], "backtest_quality")
             self.assertTrue(blocker["report_artifact"]["exists"])
             self.assertTrue(blocker["report_artifact"]["downloadable"])
-            self.assertEqual(resolve_dashboard_artifact("backtest_quality", out_dir), out_dir / "auto_backtest_quality.json")
+            self.assertEqual(
+                resolve_dashboard_artifact("backtest_quality", out_dir),
+                (out_dir / "auto_backtest_quality.json").resolve(),
+            )
 
     def test_build_dashboard_snapshot_marks_missing_quality_report_unavailable(self) -> None:
         with TemporaryDirectory() as tmp:

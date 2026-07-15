@@ -14,6 +14,7 @@ import pandas as pd
 
 from src.common import normalize_instrument
 from src.config_loader import load_config, resolve_path
+from src.trading_calendar import DEFAULT_TIMEZONE, normalize_market_datetime
 from src.tushare_client import TushareHttpClient
 
 
@@ -36,7 +37,9 @@ def build_stock_detail(
         raise ValueError(f"Invalid stock instrument: {instrument}")
 
     cfg = dict(config) if config is not None else load_config()
-    retrieved_at = (now or datetime.now().astimezone()).astimezone().isoformat(timespec="seconds")
+    data_cfg = _mapping_value(cfg.get("data"))
+    timezone_name = str(data_cfg.get("timezone", DEFAULT_TIMEZONE))
+    retrieved_at = normalize_market_datetime(now, timezone_name).isoformat(timespec="seconds")
     names = load_instrument_name_map(cfg)
     quote_client = client or TushareHttpClient.from_config(cfg)
     try:

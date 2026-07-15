@@ -626,7 +626,7 @@ The Web layer presents the authoritative coverage contract instead of inventing 
 ### 3. Contracts
 
 - The browser supplies only the stock instrument from a dashboard-owned manual-order row. It cannot select the Tushare API name, fields, proxy URL, token, or fallback path.
-- A successful `rt_k` response uses `status="live"`, `is_live=true`, `source="tushare_rt_k"`, and records the local retrieval timestamp. Because `rt_k` can return the latest close outside trading hours, the response/UI must disclose that non-trading periods may show the most recent closing quote.
+- A successful `rt_k` response uses `status="live"`, `is_live=true`, `source="tushare_rt_k"`, and records the retrieval timestamp normalized to configured `data.timezone` (default `Asia/Shanghai`), independent of the server operating-system timezone. Because `rt_k` can return the latest close outside trading hours, the response/UI must disclose that non-trading periods may show the most recent closing quote.
 - The configured `rt_k` response does not provide an authoritative quote date/time. Live responses therefore keep `market_date=null`; the UI displays `接口未提供` and must not infer `当前交易时段` or derive a market date from `retrieved_at`.
 - A remote error, empty response, or unusable live close automatically reads the latest valid positive close from the stock's local raw daily CSV.
 - Fallback responses use `status="fallback"`, `is_live=false`, `source="local_daily"`, include the effective `market_date`, and explicitly say the value is non-live.
