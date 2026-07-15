@@ -40,8 +40,8 @@ Make a freshly cloned or freshly pulled checkout reproducibly runnable on Window
 
 ## Acceptance Criteria
 
-* [ ] A clean Windows checkout can run the shared sync command and pass strict doctor checks.
-* [ ] A clean Ubuntu checkout can run the same Python sync/doctor contract using POSIX virtual-environment paths.
+* [x] A clean Windows checkout can run the shared sync command and pass strict doctor checks.
+* [x] A clean Ubuntu checkout can run the same Python sync/doctor contract using POSIX virtual-environment paths.
 * [x] Re-running sync with unchanged lock files is safe and does not unnecessarily reinstall dependencies.
 * [x] Missing FastAPI/Uvicorn, missing npm dependencies, changed lock files, and stale/missing production builds produce actionable doctor failures.
 * [x] The Windows installer and dashboard launcher use the shared environment contract.
@@ -50,7 +50,7 @@ Make a freshly cloned or freshly pulled checkout reproducibly runnable on Window
 * [x] Python unit tests cover environment hashing/version/doctor decision logic without modifying the developer's real environment.
 * [x] The full Python suite passes after sync.
 * [x] `npm run build` passes.
-* [ ] `npm run test:e2e` passes with Chromium.
+* [x] `npm run test:e2e` passes with Chromium.
 * [x] README and deployment documentation describe sync, doctor, build, and start as separate steps.
 
 ## Definition of Done
@@ -92,3 +92,10 @@ CI remains explicit instead of calling a mutation-heavy sync command: it install
 * Project commands must continue to use Python 3.11.
 * The production dashboard serves `web/dist` through FastAPI.
 * Playwright API mutations are mocked, so E2E must not touch real market/account data.
+
+## Verification
+
+* Local strict doctor: 8 pass, 0 warn, 0 fail.
+* Local backend: 713 tests and 6 subtests passed.
+* Local frontend: production build and 10 Playwright Chrome tests passed.
+* GitHub Actions run `29412248561`: Windows backend, Ubuntu backend, Node 22 frontend build, and Playwright Chromium all passed.
