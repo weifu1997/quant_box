@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-07-11
+- **Total Sessions**: 6
+- **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~176 | Active |
+| `journal-1.md` | ~213 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-07-15 | Archive completed Trellis work | `f722950`, `8d81d48`, `b420694`, `189575a`, `4b2e83f` | `main` |
 | 5 | 2026-07-11 | Complete cross-platform Web quant workspace | `b420694` | `main` |
 | 4 | 2026-06-23 | Validate annual router candidate-only auto signal | `5585d15` | `main` |
 | 3 | 2026-06-21 | Route-specific annual router research controls | `cfaf7c0` | `main` |
