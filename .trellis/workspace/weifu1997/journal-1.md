@@ -211,3 +211,37 @@ Closed six completed but unarchived Trellis tasks after verifying their acceptan
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Harden development environment and CI
+
+**Date**: 2026-07-15
+**Task**: Harden development environment and CI
+**Branch**: `main`
+
+### Summary
+
+Added idempotent cross-platform sync and doctor commands, expanded CI to Windows Ubuntu frontend and Chromium, fixed pandas read-only factor cleanup and cross-platform dashboard test assumptions, and verified all local and GitHub gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `78d3829` | (see git log) |
+| `67a50d1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
