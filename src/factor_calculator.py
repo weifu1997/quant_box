@@ -73,7 +73,14 @@ def _replace_infinite_factors_in_place(factors: pd.DataFrame) -> pd.DataFrame:
             continue
         infinite = np.isinf(values)
         if infinite.any():
-            values[infinite] = np.nan
+            if values.flags.writeable:
+                values[infinite] = np.nan
+            else:
+                # pandas 3 may expose a read-only zero-copy Series view.
+                # Copy only the affected column to preserve the bounded-memory contract.
+                writable = values.copy()
+                writable[infinite] = np.nan
+                factors[column] = writable
     return factors
 
 

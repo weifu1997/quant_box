@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Entry point for project backend workflow and validation conventions."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Defines scripts, Web workspace, Windows wrappers, and deployment boundaries."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Required for actionable sync/doctor failures and external command handling."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines dependency, test, generated-file, and documentation requirements."}
+{"file":".trellis/tasks/07-15-dev-env-ci-hardening/research/environment-ci-audit.md","reason":"Records the observed environment drift and selected implementation boundary."}

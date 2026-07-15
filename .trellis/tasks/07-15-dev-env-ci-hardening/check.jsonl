@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Project quality-check entry point."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Validate cross-platform script and Web deployment contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Validate actionable failures and safe command execution."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Validate tests, dependency files, docs, and generated-file boundaries."}
+{"file":".trellis/tasks/07-15-dev-env-ci-hardening/research/environment-ci-audit.md","reason":"Check implementation against the audited gaps and chosen scope."}

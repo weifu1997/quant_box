@@ -780,3 +780,76 @@ daily = latest_score_on_or_before(score_sources[source], date)
 ```
 
 Memory stays bounded and the routing calendar remains point-in-time correct.
+
+## Scenario: Cross-Platform Environment Sync And CI
+
+### 1. Scope / Trigger
+
+- Trigger: a checkout is cloned or pulled on Windows/Ubuntu, frontend/Python lock files change, or production `web/dist` must be rebuilt before service restart.
+- Owner: `scripts/dev_env.py` owns environment synchronization, read-only diagnostics, dependency stamps, and frontend build fingerprints. Root batch files and `scripts/start_dashboard.sh` are adapters only.
+
+### 2. Signatures
+
+- Development sync: `python scripts/dev_env.py sync [--force] [--build-web] [--with-playwright]`.
+- Read-only diagnostics: `<venv-python> scripts/dev_env.py doctor --strict [--backend-only|--frontend-only|--runtime-only] [--require-web-dist]`.
+- Frontend post-build stamp: `python scripts/dev_env.py stamp-web-build` (normally called by `npm run build`).
+- Windows entry: `00_安装依赖环境.bat`; local dashboard entry: `15_启动Web仪表盘.bat`.
+- Ubuntu runtime entry: `bash scripts/start_dashboard.sh`.
+
+### 3. Contracts
+
+- Python runtime is 3.11. Sync installs `requirements-lock.txt`; it does not silently switch to `requirements.txt`.
+- Frontend install uses `npm ci` and the committed `web/package-lock.json`. Supported Node versions follow Vite 8 (`^20.19.0 || >=22.12.0`); CI uses Node 22.12.
+- Successful sync records ignored SHA-256 stamps under `.venv/` and `web/node_modules/`. Stamps are written only after the related command succeeds.
+- `npm run build` records an ignored fingerprint in `web/dist/` covering package files, Vite/TypeScript config, HTML, and every `web/src` file.
+- `doctor` never installs packages, builds assets, reads secrets, downloads data, or changes account/holding state.
+- Ubuntu service startup uses `doctor --strict --runtime-only`; it requires Python runtime dependencies and a current `web/dist` but does not require Node/npm at runtime.
+- GitHub Actions must cover the full Python suite on Windows and Ubuntu, frontend build on Node 22, and Playwright Chromium E2E.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Python is not 3.11 | Sync/doctor fails and names the expected version |
+| Locked direct package is missing or mismatched | Doctor fails and names the package; sync reinstalls the lock |
+| Python/npm lock stamp is missing | Doctor warns; sync establishes the stamp |
+| Lock stamp is stale or npm dependency tree is incomplete | Doctor fails; sync reinstalls dependencies |
+| Node is outside the Vite-supported range | Sync/doctor fails and recommends Node 22 LTS |
+| `web/dist/index.html` is missing | Runtime doctor fails with the `sync --build-web` repair command |
+| Frontend inputs changed after the last build | Runtime doctor reports a stale build and refuses production startup |
+| Optional Playwright download times out | Sync exits non-zero without marking the browser step complete; dependency/build stamps already completed remain valid |
+
+### 5. Good/Base/Bad Cases
+
+- Good: after `git pull`, sync sees a changed npm lock, runs `npm ci`, builds current assets, and runtime doctor passes before systemd restart.
+- Base: no lock/input changed; sync skips Python/npm reinstall in seconds and doctor passes.
+- Good: a production host removes Node after deployment; runtime doctor and FastAPI startup still work with the already-built current assets.
+- Bad: systemd startup performs `pip install`, `npm ci`, or `vite build` and fails during a network outage.
+- Bad: `web/dist` exists from an older commit and is served without comparing source fingerprints.
+
+### 6. Tests Required
+
+- `tests/test_dev_env.py` must cover requirement parsing/name normalization, version ranges, Windows/POSIX venv paths, input hashing, stamp states, and stale/missing build decisions in temporary directories.
+- `tests/test_scripts_docs.py` must assert Windows uses shared sync, Ubuntu start is validation-only, and CI contains Windows/Ubuntu/backend/frontend/browser gates.
+- Final verification must run strict doctor, full Python regression, `npm run build`, Playwright, shell syntax, batch CRLF, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```bash
+if [ ! -f web/dist/index.html ]; then npm ci && npm run build; fi
+exec .venv/bin/python scripts/run_dashboard.py
+```
+
+Existence does not prove freshness, and service startup now depends on package registries.
+
+#### Correct
+
+```bash
+python3.11 scripts/dev_env.py sync --build-web  # deploy phase
+.venv/bin/python scripts/dev_env.py doctor --strict --runtime-only
+bash scripts/start_dashboard.sh                 # runtime phase
+```
+
+Build and runtime are separate, and source fingerprints prevent stale frontend deployment.

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added a cross-platform idempotent environment sync/doctor workflow, separated Ubuntu build from service startup, and expanded CI to Windows/Ubuntu backend, frontend build, and Playwright Chromium gates.
 - Made annual-state-router research reproducible with a canonical month-end signal calendar, latest-on-or-before score lookup, engine/source-fingerprinted caches, and per-candidate detail evidence.
 - Added engine and score-source provenance to router evidence and made auto-signal reject stale or incompatible formal evidence instead of promoting it under changed backtest semantics.
 - Corrected yearly diagnostic trade-cost ratios to use each yearly segment's starting equity rather than the process-wide initial capital.

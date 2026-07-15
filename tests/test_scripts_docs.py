@@ -80,10 +80,29 @@ class ScriptsDocsTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("scripts\\run_dashboard.py", dashboard)
+        self.assertIn("00_安装依赖环境.bat", dashboard)
         self.assertIn("npm run dev", dashboard)
         self.assertIn("http://127.0.0.1:8000/api/health", dashboard)
         self.assertIn("http://127.0.0.1:5173", dashboard)
         self.assertIn("15_启动Web仪表盘.bat", readme)
+
+    def test_environment_sync_is_shared_across_windows_linux_and_ci(self) -> None:
+        """环境安装、生产启动和 CI 必须使用同一份 sync/doctor 契约。"""
+        installer = (ROOT / "00_安装依赖环境.bat").read_text(encoding="utf-8")
+        linux_start = (ROOT / "scripts" / "start_dashboard.sh").read_text(encoding="utf-8")
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("scripts\\dev_env.py sync", installer)
+        self.assertNotIn("requirements.txt", installer)
+        self.assertIn("doctor --strict --runtime-only", linux_start)
+        self.assertNotIn("npm ci", linux_start)
+        self.assertNotIn("npm run build", linux_start)
+        self.assertIn("windows-latest", ci)
+        self.assertIn("ubuntu-latest", ci)
+        self.assertIn("npm run build", ci)
+        self.assertIn("npm run test:e2e", ci)
+        self.assertIn("python scripts\\dev_env.py sync", readme)
 
     def test_convert_data_help_does_not_start_conversion(self) -> None:
         """函数说明：验证 test_convert_data_help_does_not_start_conversion 覆盖的行为场景。"""

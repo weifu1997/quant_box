@@ -2,14 +2,14 @@
 
 ## Local Setup
 
-Use the project virtual environment on Windows:
+Use the shared cross-platform synchronizer on Windows or Ubuntu:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+python scripts/dev_env.py sync --build-web
+.\.venv\Scripts\python.exe scripts/dev_env.py doctor --strict --require-web-dist
 ```
 
-If the lock file needs to be refreshed, update `requirements.txt`, reinstall the environment, then pin the direct dependencies in `requirements-lock.txt`.
+On Ubuntu, use `python3.11` for the first command and `.venv/bin/python` for doctor. Sync installs `requirements-lock.txt` and uses `npm ci`; it is safe to repeat after every pull. If the lock file needs to be refreshed, update `requirements.txt`, reinstall the environment, then pin the direct dependencies in `requirements-lock.txt`.
 
 ## Validation
 
@@ -23,6 +23,14 @@ For code touching the research scripts, also run the matching script tests:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_run_selector_weight_backtest.py tests/test_run_risk_refine.py tests/test_run_regime_blend_probe.py tests/test_run_quality_selector_gate_backtest.py tests/test_run_ml_experiments.py tests/test_run_goal_formal_candidates.py tests/test_run_fundamental_quality_backtest.py -q
+```
+
+Frontend changes must also pass:
+
+```powershell
+cd web
+npm run build
+npm run test:e2e
 ```
 
 ## Data And Secrets

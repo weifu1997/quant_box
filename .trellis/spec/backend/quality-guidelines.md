@@ -174,3 +174,22 @@ This project can operate on many symbols and years of history. Avoid unnecessary
 - Keep optimization grids bounded and expose timeout/max-combination settings.
 - Write progress files for resumable workflows.
 - Prefer vectorized pandas/numpy operations over row-wise loops on large panels.
+
+> **Warning: pandas 3 zero-copy arrays may be read-only.** `Series.to_numpy(copy=False)`
+> does not guarantee a writable view. Before assigning through the returned array,
+> check `values.flags.writeable`. If it is false, copy and replace only the affected
+> column; do not copy the full factor frame.
+
+```python
+values = factors[column].to_numpy(copy=False)
+if infinite.any():
+    if values.flags.writeable:
+        values[infinite] = np.nan
+    else:
+        writable = values.copy()
+        writable[infinite] = np.nan
+        factors[column] = writable
+```
+
+This preserves the full-market bounded-memory contract while supporting pandas 3's
+copy-on-write/read-only array behavior.

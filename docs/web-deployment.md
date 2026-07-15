@@ -17,10 +17,8 @@ This starts the FastAPI backend and Vite development server on `127.0.0.1`.
 For a production-like single-server check:
 
 ```powershell
-cd web
-npm ci
-npm run build
-cd ..
+python scripts\dev_env.py sync --build-web
+.\.venv\Scripts\python.exe scripts\dev_env.py doctor --strict --runtime-only
 .\.venv\Scripts\python.exe scripts\run_dashboard.py --host 127.0.0.1 --port 8000
 ```
 
@@ -30,17 +28,15 @@ The manual-order stock detail view uses the configured Tushare proxy for the fix
 
 ## Ubuntu local or server use
 
-Install and build once:
+Synchronize and build during deployment:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cd web
-npm ci
-npm run build
-cd ..
+python3.11 scripts/dev_env.py sync --build-web
+.venv/bin/python scripts/dev_env.py doctor --strict --runtime-only
 bash scripts/start_dashboard.sh
 ```
+
+After every `git pull`, rerun the sync command before restarting systemd. It compares the Python lock, npm lock, and frontend source fingerprint, so unchanged dependencies are skipped while a changed frontend is rebuilt. `scripts/start_dashboard.sh` is intentionally validation-only: it never installs packages or builds during service startup.
 
 The script defaults to `127.0.0.1:8000`. Override only when the network boundary is already protected:
 

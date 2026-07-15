@@ -4,39 +4,12 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
+set "QUANT_BOX_NO_PAUSE=1"
+call "%~dp000_安装依赖环境.bat"
+if errorlevel 1 exit /b 1
 set "PYTHON=%~dp0.venv\Scripts\python.exe"
-if not exist "%PYTHON%" set "PYTHON=python"
-
-where npm >nul 2>nul
-if errorlevel 1 (
-  echo 未找到 npm。请先安装 Node.js，或重新运行 00_安装依赖环境.bat。
-  echo.
-  pause
-  exit /b 1
-)
-
-if not exist "web\package.json" (
-  echo 未找到 web\package.json，无法启动前端。
-  echo.
-  pause
-  exit /b 1
-)
 
 if not exist "outputs\logs" mkdir "outputs\logs"
-
-if not exist "web\node_modules" (
-  echo 首次启动 Web 仪表盘，正在安装前端依赖...
-  pushd web
-  call npm install
-  set "NPM_EXIT=%errorlevel%"
-  popd
-  if not "%NPM_EXIT%"=="0" (
-    echo 前端依赖安装失败。
-    echo.
-    pause
-    exit /b %NPM_EXIT%
-  )
-)
 
 echo 启动 FastAPI 后端：http://127.0.0.1:8000
 echo 后端运行日志会显示在新打开的 backend 窗口中。
