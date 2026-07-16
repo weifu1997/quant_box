@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
+- **Total Sessions**: 9
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~280 | Active |
+| `journal-1.md` | ~313 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-07-16 | Split auto-signal stages | `9fe9914` | `main` |
 | 8 | 2026-07-16 | Extract annual router engine | `94496a3` | `main` |
 | 7 | 2026-07-15 | Harden development environment and CI | `78d3829`, `67a50d1` | `main` |
 | 6 | 2026-07-15 | Archive completed Trellis work | `f722950`, `8d81d48`, `b420694`, `189575a`, `4b2e83f` | `main` |

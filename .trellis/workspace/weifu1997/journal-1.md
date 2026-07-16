@@ -278,3 +278,36 @@ Moved annual market-state routing, score routing, turnover transforms, and route
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Split auto-signal stages
+
+**Date**: 2026-07-16
+**Task**: Split auto-signal stages
+**Branch**: `main`
+
+### Summary
+
+按推荐的显式 stage package + typed services 方案拆分 auto-signal；保留 CLI、状态/产物契约、年度路由和 candidate/official 安全边界；新增 stage 单测并更新后端规范。完整本地门禁及 GitHub CI（Windows、Ubuntu、前端、Playwright）均通过，任务已归档。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9fe9914` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
