@@ -33,6 +33,7 @@ quant_box/
     scoring.py                score construction and factor selection logic
     strategy.py               selection and rebalance logic
     annual_router.py          annual market-state routing and route-derived schedules
+    auto_signal/              importable auto-signal stages, models, status, router integration
     risk_policy.py            central adapter for selection/execution risk controls
     backtest*.py              backtest engine, costs, circuit breaker, exposure
     *_data.py                 fundamental, governance, health, diagnostics modules
@@ -164,6 +165,79 @@ if looks_like_field_table(price_df.columns):
 4. Keep generated files under `data/` or `outputs/`, not beside source files.
 5. Add focused tests under `tests/`, using `TemporaryDirectory` and patching `load_config`/`resolve_path` when filesystem isolation matters.
 6. Update `README.md`, `.bat` wrappers, and `tests/test_scripts_docs.py` for user-visible workflow changes.
+
+## Scenario: Importable Auto-Signal Stage Pipeline
+
+### 1. Scope / Trigger
+
+- Trigger: the automatic signal workflow needs reusable, independently testable stages without importing CLI implementation code.
+- Owners: `src/auto_signal/` owns stage behavior and run contracts; `scripts/run_auto_signal.py` owns argument parsing, dependency wiring, linear orchestration, top-level failure handling, and compatibility exports.
+
+### 2. Signatures
+
+- Stage entrypoints:
+  - `run_data_preparation_stage(...) -> DataPreparationStageResult`
+  - `run_optimization_stage(...) -> OptimizationStageResult`
+  - `run_backtest_stage(...) -> BacktestStageResult`
+  - `run_signal_stage(...) -> SignalStageResult`
+  - `write_auto_report_stage(...) -> ReportStageResult`
+- Shared status primitive: `src.auto_signal.status.stage(status, out_dir, name, state, message="")`.
+- CLI remains `scripts/run_auto_signal.py` with the existing flags and defaults.
+
+### 3. Contracts
+
+- Stage functions receive parsed arguments and typed result bundles; they never parse `sys.argv`.
+- Production modules under `src/auto_signal/` must not import `scripts.run_auto_signal`.
+- Script compatibility wrappers construct typed service bundles from script-level collaborators. This preserves established patch/injection seams while keeping production implementations independent from the CLI module.
+- Backtest and signal stages share the same `AnnualStateRouterRuntime`; the signal stage must not rebuild a second routed score panel.
+- `stage()` remains append-and-write: every transition appends one row and immediately rewrites `outputs/auto_run_status.json`.
+- Candidate/official output decisions remain owned by the signal stage and use all data, governance, parameter, backtest, and account gates.
+- Report/archive stages consume prior result bundles; they do not recompute gates or promote candidate outputs.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Stage input is invalid or a required artifact is missing | Preserve the existing precise `ValueError` / `FileNotFoundError` / `RuntimeError` contract |
+| Optimization exceeds its time budget | Persist partial validation artifacts, record `optimizer_timeout`, append a timeout stage, then re-raise `OptimizationTimeoutError` |
+| Annual router is enabled | Optimization is skipped; backtest builds one router runtime and signal reuses it |
+| A quality or account gate fails | Signal stage writes candidate artifacts and non-empty `block_reasons`; official state is not overwritten |
+| A stage raises unexpectedly | CLI orchestration records final `status=failed`, `last_error`, and a failed `run` stage before re-raising |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a test injects a fake `run_backtest` through `BacktestStageServices` and verifies routed scores and schedules without importing the CLI parser.
+- Base: `scripts/run_auto_signal.py` wires default services, calls stages in order, and produces byte/schema-compatible artifacts.
+- Bad: a production stage imports `scripts.run_auto_signal` to reach a helper, creating a circular CLI dependency.
+- Bad: signal/report stages independently recalculate quality gates and disagree about executable status.
+
+### 6. Tests Required
+
+- `tests/test_auto_signal_stages.py` must assert every stage entrypoint is importable and no `src.auto_signal` module imports the CLI script.
+- `tests/test_run_auto_signal.py` must continue to assert CLI flags, status transitions, annual-router behavior, candidate/official boundaries, timeout artifacts, and reports.
+- Full tests must cover both annual-router and legacy optimizer paths after any stage-boundary change.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+# src/auto_signal/backtest_stage.py
+from scripts.run_auto_signal import _build_annual_state_router_runtime
+```
+
+#### Correct
+
+```python
+services = BacktestStageServices(
+    annual_state_router_enabled=_annual_state_router_enabled,
+    build_annual_state_router_runtime=_build_annual_state_router_runtime,
+    run_backtest=run_backtest,
+)
+result = run_backtest_stage(..., services=services)
+```
+
+The CLI owns wiring; the importable stage owns behavior.
 
 ---
 

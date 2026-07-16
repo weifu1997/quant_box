@@ -163,7 +163,7 @@ Long-running data refreshes write progress and status files:
 - `outputs/auto_run_status.json`
 - `outputs/auto_signal_job.json`
 
-When adding long-running work, write a status artifact early and update it per stage, as `_stage()` does in `scripts/run_auto_signal.py`.
+When adding long-running work, write a status artifact early and update it per stage, as `src.auto_signal.status.stage()` does for `scripts/run_auto_signal.py`.
 
 ---
 
