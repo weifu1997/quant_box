@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Reusable annual-router behavior belongs in src while CLI orchestration remains in scripts."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Preserve annual-router engine, score lookup, selection schedule, evidence, and auto-signal contracts."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Preserve explicit pandas and routing contract errors during extraction."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Apply importable business-logic, pandas-contract, test, and review requirements."}
+{"file": ".trellis/tasks/07-15-extract-annual-router-engine/research/extraction-boundary.md", "reason": "Use the agreed implementation boundary and compatibility strategy."}

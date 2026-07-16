@@ -32,6 +32,7 @@ quant_box/
     factor_*.py               Alpha158, IC, rolling IC, factor cache helpers
     scoring.py                score construction and factor selection logic
     strategy.py               selection and rebalance logic
+    annual_router.py          annual market-state routing and route-derived schedules
     risk_policy.py            central adapter for selection/execution risk controls
     backtest*.py              backtest engine, costs, circuit breaker, exposure
     *_data.py                 fundamental, governance, health, diagnostics modules
@@ -93,6 +94,8 @@ logger = logging.getLogger(__name__)
 Examples: `scripts/run_auto_signal.py`, `scripts/run_backtest.py`, `scripts/run_update_data.py`, `scripts/run_convert_data.py`.
 
 Use `scripts/_shared.py` for helpers that are needed by multiple scripts, such as dated output paths, yearly summaries, requested factor column resolution, and parquet subsets.
+
+Annual-router entrypoints follow the same boundary: `src/annual_router.py` owns the engine contract, market-state decisions, routed score panels, turnover transforms, and route-derived schedules. The backtest, grid, and probe scripts own CLI parsing, file loading, score-source construction, grid iteration, and report writing. Existing script modules may re-export engine names for compatibility, but production callers should import reusable behavior from `src.annual_router`.
 
 ### Root `.bat` files are user shortcuts
 

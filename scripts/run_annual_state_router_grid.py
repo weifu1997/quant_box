@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, replace
+from dataclasses import asdict
 import hashlib
 from itertools import product
 import json
@@ -21,20 +21,23 @@ from scripts.run_annual_state_router_backtest import (
     DEFAULT_EXTENDED_FACTOR_FILE,
     DEFAULT_INDUSTRY_FACTOR_FILE,
     DEFAULT_SELECTOR_FILE,
-    ANNUAL_ROUTER_ENGINE_CONTRACT,
-    ScoreSourceDefinition,
-    RoutedScoreRun,
     apply_research_config_overrides,
     apply_source_top_n_overrides,
     build_score_sources,
     configured_source_definitions,
     full_gate_summary,
-    routed_backtest_config,
-    run_annual_state_score_router,
     source_top_n_overrides_payload,
 )
 from scripts.run_fundamental_quality_backtest import month_end_signal_dates
 from scripts.run_goal_audit import audit_yearly_goal, goal_thresholds
+from src.annual_router import (
+    ANNUAL_ROUTER_ENGINE_CONTRACT,
+    RoutedScoreRun,
+    ScoreSourceDefinition,
+    definitions_for_turnover_mode,
+    routed_backtest_config,
+    run_annual_state_score_router,
+)
 from src.backtest import run_backtest
 from src.config_loader import load_config, resolve_path
 from src.market_regime import _benchmark_close
@@ -433,33 +436,6 @@ def iter_grid(args: argparse.Namespace) -> list[dict[str, Any]]:
                 }
             )
     return combos
-
-
-def definitions_for_turnover_mode(
-    definitions: dict[str, ScoreSourceDefinition],
-    mode: str,
-) -> dict[str, ScoreSourceDefinition]:
-    mode = str(mode or "default").strip().lower()
-    if mode == "default":
-        return dict(definitions)
-    result = dict(definitions)
-    if mode == "turnover2":
-        for name, definition in list(result.items()):
-            result[name] = replace(
-                definition,
-                max_turnover=min(int(definition.top_n), max(2, int(definition.max_turnover))),
-                rank_buffer=min(int(definition.rank_buffer), 10),
-            )
-        return result
-    if mode == "rank10":
-        for name, definition in list(result.items()):
-            result[name] = replace(definition, rank_buffer=min(int(definition.rank_buffer), 10))
-        return result
-    if mode == "full":
-        for name, definition in list(result.items()):
-            result[name] = replace(definition, max_turnover=int(definition.top_n), rank_buffer=0)
-        return result
-    raise ValueError(f"Unsupported turnover mode: {mode}")
 
 
 def namespace_for_combo(combo: dict[str, Any]) -> argparse.Namespace:

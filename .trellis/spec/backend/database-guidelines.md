@@ -466,7 +466,7 @@ expected_index_months = _month_range_texts(point_in_time_start, point_in_time_en
 #### 1. Scope / Trigger
 
 - Trigger: research workflows may route among score sources whose target holding count and turnover policy differ by signal date.
-- Owner: `src/backtest.py` consumes the schedule; research scripts such as `scripts/run_annual_state_router_backtest.py` may produce it.
+- Owners: `src/annual_router.py` produces route-derived schedules and `src/backtest.py` consumes them; research scripts only orchestrate inputs and outputs.
 
 #### 2. Signatures
 
@@ -524,7 +524,7 @@ route_year = trade_date.year
 #### 1. Scope / Trigger
 
 - Trigger: research workflows need resumable formal score/trade grid searches over annual market-state routes.
-- Owners: `scripts/run_annual_state_router_backtest.py` defines score sources and route contracts; `scripts/run_annual_state_router_grid.py` caches sources, appends grid rows, and writes hit artifacts.
+- Owners: `src/annual_router.py` owns route contracts, decisions, score routing, turnover transforms, and schedules; `scripts/run_annual_state_router_backtest.py` defines/builds score sources and orchestrates one run; `scripts/run_annual_state_router_grid.py` caches sources, appends grid rows, and writes hit artifacts.
 
 #### 2. Signatures
 
@@ -615,7 +615,7 @@ The grid reconstructs routed scores, scheduled holdings, executed trades, exposu
 #### 1. Scope / Trigger
 
 - Trigger: the main `scripts/run_auto_signal.py` workflow can use a formally validated annual-state score router instead of the legacy walk-forward optimizer strategy family.
-- Owners: `config/settings.yaml`, `src/config_loader.py`, `scripts/run_auto_signal.py`, `src/signal_generator.py`, and `scripts/run_annual_state_router_backtest.py`.
+- Owners: `config/settings.yaml`, `src/config_loader.py`, `src/annual_router.py`, `scripts/run_auto_signal.py`, `src/signal_generator.py`, and `scripts/run_annual_state_router_backtest.py` for score-source construction.
 
 #### 2. Signatures
 

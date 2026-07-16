@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify one-way src-to-scripts module ownership and compatibility exports."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify engine contract, canonical dates, point-in-time lookup, schedules, and evidence behavior are unchanged."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify errors remain precise and behaviorally compatible."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify focused/full tests, pandas contracts, and no generated data or dependencies were added."}
+{"file": ".trellis/tasks/07-15-extract-annual-router-engine/prd.md", "reason": "Check every acceptance criterion and out-of-scope boundary."}

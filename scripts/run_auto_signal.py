@@ -27,6 +27,16 @@ from src.auto_tuning import (
     summarize_parameter_validation,
 )
 from src.adj_factor_metadata import build_adj_factor_metadata, write_adj_factor_metadata
+from src.annual_router import (
+    ANNUAL_ROUTER_ENGINE_CONTRACT,
+    RoutedScoreRun,
+    ScoreSourceDefinition,
+    annual_route_decisions,
+    definitions_for_turnover_mode,
+    routed_backtest_config,
+    run_annual_state_score_router,
+    signal_trade_date_map,
+)
 from src.backtest import BacktestResult, run_backtest
 from src.config_loader import load_config, resolve_path
 from src.data_converter import convert_to_qlib_format
@@ -60,17 +70,9 @@ from src.signal_generator import generate_signal, read_signal_previous_holdings,
 from src.strategy import resample_signals
 from src.trading_calendar import next_business_day, next_trade_date, resolve_target_date
 from scripts.run_annual_state_router_backtest import (
-    ANNUAL_ROUTER_ENGINE_CONTRACT,
-    RoutedScoreRun,
-    ScoreSourceDefinition,
-    annual_route_decisions,
     build_score_sources,
     configured_source_definitions,
-    routed_backtest_config,
-    run_annual_state_score_router,
-    signal_trade_date_map,
 )
-from scripts.run_annual_state_router_grid import definitions_for_turnover_mode
 from scripts.run_fundamental_quality_backtest import month_end_signal_dates
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
