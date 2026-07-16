@@ -245,3 +245,36 @@ Added idempotent cross-platform sync and doctor commands, expanded CI to Windows
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Extract annual router engine
+
+**Date**: 2026-07-16
+**Task**: Extract annual router engine
+**Branch**: `main`
+
+### Summary
+
+Moved annual market-state routing, score routing, turnover transforms, and route-derived schedules into src.annual_router; preserved legacy script exports; added import-boundary characterization tests; updated backend ownership specs. Verified strict doctor, 717 Python tests, frontend build, and 10 Playwright tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `94496a3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
