@@ -268,8 +268,9 @@ The CLI owns wiring; the importable stage owns behavior.
   - `run_auto_signal` with `mode="candidate"`: runs `scripts/run_auto_signal.py --no-archive --candidate-only`.
   - `run_auto_signal` with `mode="normal"`: runs `scripts/run_auto_signal.py --no-archive` and must not add `--candidate-only` or `--force-official`.
 - Dashboard actions must not expose arbitrary command execution, edit configs, promote candidate signals, apply fills, or directly update holdings.
-- Only one dashboard background job may run at a time. Job status JSON lives under `outputs/dashboard_jobs/`; logs live under `outputs/logs/dashboard_job_*.log`.
-- Dashboard job stop is a controlled action, not arbitrary process management. It may only target a recorded dashboard job whose status is `running` or `stopping`; successful user stops end as `status="cancelled"`.
+- Only one dashboard background job may run at a time. The persisted running-job check, initial status write, process spawn, and in-memory process registration must be serialized as one start reservation so concurrent POST requests cannot both pass the check. Job status JSON lives under `outputs/dashboard_jobs/`; logs live under `outputs/logs/dashboard_job_*.log`.
+- Dashboard job status writes must use a same-directory temporary file plus atomic replacement. Terminal updates must re-read the latest persisted status before deciding between `succeeded` / `failed` and `cancelled`, so a concurrent stop request cannot be overwritten by a stale in-memory `running` snapshot.
+- Dashboard job stop is a controlled action, not arbitrary process management. It may only target a recorded dashboard job whose status is `running` or `stopping`; successful user stops end as `status="cancelled"`. After a service restart, a live PID counts as the recorded job only when its command line can be read and matched to the stored command. Missing command-line evidence must fail closed: mark the job `stale` and never terminate that PID.
 - The backend reads only the latest/current artifacts from `outputs.dir`, especially `auto_signal_report.json`, `auto_run_status.json`, `daily_signal_report.md`, and CSV/JSON paths referenced by the latest report.
 - Missing or malformed artifacts become explicit dashboard statuses (`missing` / `error`) instead of uncaught exceptions.
 - `DashboardSnapshot` must keep the frontend decoupled from large raw report JSON by returning compact sections: `readiness`, `latest_run`, `gates`, `block_reasons`, `blocker_actions`, `quality_warnings`, `signal_summary`, `orders`, `artifacts`, and `report`.
@@ -545,9 +546,12 @@ The catalog owns the executable contract; the browser supplies bounded values on
 | Dashboard job action is unknown | `POST /api/dashboard/jobs` returns 400 |
 | Dashboard job mode is not `candidate` or `normal` | `POST /api/dashboard/jobs` returns 400 |
 | A dashboard job is already running | `POST /api/dashboard/jobs` returns 409 |
+| Two dashboard job start requests arrive concurrently | Exactly one process is spawned; the other request returns 409 after observing the reserved running job |
 | A dashboard job is stopped by the user | The process tree is terminated, the job becomes `cancelled`, and logs remain visible |
 | A dashboard job stop targets a completed job | `POST /api/dashboard/jobs/{job_id}/stop` returns 409 |
 | A prior `running` job has no live process after service restart | The job is marked `stale`, the UI unlocks controls, and the log remains visible |
+| A prior job PID is live but its command line is unavailable or does not match | Mark the job `stale`; do not send a termination signal to the unverified process |
+| Process exit races with a persisted `stopping` update | Re-read the status file and finalize the job as `cancelled`, never overwrite it as `succeeded` or `failed` from an older snapshot |
 | Vite dev dependencies have known moderate-or-higher advisories | Upgrade the frontend toolchain or document why the advisory is not applicable before finishing |
 
 ### 5. Good/Base/Bad Cases
@@ -583,6 +587,7 @@ The catalog owns the executable contract; the browser supplies bounded values on
 - API test that `GET /api/dashboard/jobs` reports a running active job.
 - API test that invalid dashboard jobs return 400 and already-running jobs return 409 when covered.
 - API/control test that a running dashboard job can be stopped and is reported as `cancelled`.
+- Control tests must prove concurrent starts spawn one process, PID matching rejects missing command-line evidence, job JSON uses atomic replacement, and finalization preserves a newer persisted `stopping` state.
 - Script/docs test asserts `15_启动Web仪表盘.bat` is documented and starts the documented backend and frontend commands.
 - Run `npm run build` for React/Vite type-check and production build validation.
 - Run `npm audit --audit-level=moderate` after adding or changing frontend dependencies.

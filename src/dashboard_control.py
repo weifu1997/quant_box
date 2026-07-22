@@ -13,6 +13,7 @@ import re
 import signal
 import subprocess
 import sys
+from tempfile import NamedTemporaryFile
 import threading
 import time
 from typing import Any
@@ -108,6 +109,7 @@ WORKFLOW_CATALOG: tuple[dict[str, Any], ...] = (
 )
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PROCESS_LOCK = threading.Lock()
+_START_LOCK = threading.Lock()
 _RUNNING_PROCESSES: dict[str, subprocess.Popen[bytes]] = {}
 
 
@@ -144,59 +146,63 @@ def start_dashboard_job(action: str, payload: Mapping[str, Any] | None = None) -
     """Start a whitelisted local dashboard action in the background."""
     payload = dict(payload or {})
     command, label = build_dashboard_job_command(action, payload)
-    _ensure_no_running_job()
-    out_dir = _output_dir()
-    job_dir = _job_dir(out_dir)
-    log_dir = out_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    job_id = _new_job_id(action)
-    log_path = log_dir / f"dashboard_job_{job_id}.log"
-    job = {
-        "version": JOB_VERSION,
-        "id": job_id,
-        "action": action,
-        "mode": payload.get("mode"),
-        "parameters": payload.get("parameters"),
-        "label": label,
-        "status": "running",
-        "message": "任务已启动。",
-        "command": command,
-        "started_at": _now_text(),
-        "completed_at": None,
-        "return_code": None,
-        "log_path": str(log_path.resolve()),
-    }
-    _write_job(job_dir, job)
-
-    log_handle = log_path.open("ab", buffering=0)
-    creationflags = 0
-    popen_kwargs: dict[str, Any] = {}
-    if os.name == "nt":
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        popen_kwargs["start_new_session"] = True
-    try:
-        process = subprocess.Popen(
-            command,
-            cwd=PROJECT_ROOT,
-            stdin=subprocess.DEVNULL,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            creationflags=creationflags,
-            **popen_kwargs,
-        )
-    except OSError as exc:
-        log_handle.write(f"Failed to start dashboard job: {exc}\n".encode("utf-8", errors="replace"))
-        log_handle.close()
-        job["status"] = "failed"
-        job["message"] = f"任务启动失败：{exc}"
-        job["completed_at"] = _now_text()
+    # Keep the persisted single-job check and process reservation together. A
+    # request can otherwise pass the check just before another request writes
+    # its running job record.
+    with _START_LOCK:
+        _ensure_no_running_job()
+        out_dir = _output_dir()
+        job_dir = _job_dir(out_dir)
+        log_dir = out_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        job_id = _new_job_id(action)
+        log_path = log_dir / f"dashboard_job_{job_id}.log"
+        job = {
+            "version": JOB_VERSION,
+            "id": job_id,
+            "action": action,
+            "mode": payload.get("mode"),
+            "parameters": payload.get("parameters"),
+            "label": label,
+            "status": "running",
+            "message": "任务已启动。",
+            "command": command,
+            "started_at": _now_text(),
+            "completed_at": None,
+            "return_code": None,
+            "log_path": str(log_path.resolve()),
+        }
         _write_job(job_dir, job)
-        raise DashboardJobStartError(f"Dashboard job failed to start: {exc}") from exc
-    job["pid"] = process.pid
-    _write_job(job_dir, job)
-    with _PROCESS_LOCK:
-        _RUNNING_PROCESSES[job_id] = process
+
+        log_handle = log_path.open("ab", buffering=0)
+        creationflags = 0
+        popen_kwargs: dict[str, Any] = {}
+        if os.name == "nt":
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=PROJECT_ROOT,
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+                **popen_kwargs,
+            )
+        except OSError as exc:
+            log_handle.write(f"Failed to start dashboard job: {exc}\n".encode("utf-8", errors="replace"))
+            log_handle.close()
+            job["status"] = "failed"
+            job["message"] = f"任务启动失败：{exc}"
+            job["completed_at"] = _now_text()
+            _write_job(job_dir, job)
+            raise DashboardJobStartError(f"Dashboard job failed to start: {exc}") from exc
+        job["pid"] = process.pid
+        _write_job(job_dir, job)
+        with _PROCESS_LOCK:
+            _RUNNING_PROCESSES[job_id] = process
     thread = threading.Thread(target=_wait_for_job, args=(job_dir, job_id, process, log_handle), daemon=True)
     thread.start()
     return _decorate_job(job)
@@ -476,7 +482,24 @@ def _job_dir(out_dir: Path) -> Path:
 
 def _write_job(job_dir: Path, job: Mapping[str, Any]) -> None:
     path = job_dir / f"{job['id']}.json"
-    path.write_text(json.dumps(dict(job), indent=2, ensure_ascii=False), encoding="utf-8")
+    content = json.dumps(dict(job), indent=2, ensure_ascii=False)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            "w",
+            suffix=path.suffix,
+            prefix=f".{path.stem}-",
+            dir=path.parent,
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            handle.write(content)
+            temp_path = Path(handle.name)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 
 def _read_job(path: Path) -> dict[str, Any]:
@@ -756,7 +779,8 @@ def _now_text() -> str:
 
 
 def _finalize_job(job_dir: Path, job: Mapping[str, Any], return_code: int | None) -> dict[str, Any]:
-    updated = dict(job)
+    persisted = _read_job(job_dir / f"{job['id']}.json")
+    updated = persisted or dict(job)
     if updated.get("status") in {"stopping", "cancelled"}:
         updated["status"] = "cancelled"
         updated["message"] = "任务已停止。"
@@ -849,7 +873,10 @@ def _pid_is_running(pid: int) -> bool:
 def _pid_matches_job(pid: int, command: list[Any]) -> bool:
     command_line = _pid_command_line(pid)
     if not command_line:
-        return True
+        # An unreadable command line is not evidence that the PID belongs to
+        # this job. Treat it as unverified so stop/recovery cannot target an
+        # unrelated process after PID reuse or a permission failure.
+        return False
     normalized_command_line = _normalize_command_text(command_line)
     script_parts = [str(part) for part in command if str(part).lower().endswith(".py")]
     if script_parts:

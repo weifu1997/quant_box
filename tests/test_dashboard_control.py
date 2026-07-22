@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -16,14 +20,93 @@ from src.dashboard_control import (
     DashboardJobNotFoundError,
     DashboardJobStartError,
     DashboardJobStopError,
+    _finalize_job,
+    _pid_matches_job,
+    _write_job,
     build_dashboard_job_command,
     list_dashboard_jobs,
     list_dashboard_workflows,
+    start_dashboard_job,
     stop_dashboard_job,
 )
 
 
 class DashboardControlTests(unittest.TestCase):
+    def test_start_dashboard_job_serializes_the_single_job_reservation(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            start_barrier = threading.Barrier(2)
+            release_process = threading.Event()
+
+            class FakeProcess:
+                pid = 101
+                returncode = 0
+
+                def wait(self) -> int:
+                    release_process.wait(timeout=2)
+                    return 0
+
+                def poll(self) -> int | None:
+                    return 0 if release_process.is_set() else None
+
+            def start_one() -> dict:
+                start_barrier.wait()
+                return start_dashboard_job("check_tushare_config")
+
+            with (
+                patch("src.dashboard_control._output_dir", return_value=out_dir),
+                patch("src.dashboard_control.subprocess.Popen", return_value=FakeProcess()) as popen,
+                patch.dict("src.dashboard_control._RUNNING_PROCESSES", {}, clear=True),
+            ):
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = [executor.submit(start_one) for _index in range(2)]
+                    jobs = []
+                    conflicts = []
+                    for future in futures:
+                        try:
+                            jobs.append(future.result(timeout=2))
+                        except DashboardJobConflictError as exc:
+                            conflicts.append(exc)
+                self.assertEqual(len(jobs), 1)
+                self.assertEqual(len(conflicts), 1)
+                popen.assert_called_once()
+                release_process.set()
+                status_path = next((out_dir / "dashboard_jobs").glob("*.json"))
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    status = json.loads(status_path.read_text(encoding="utf-8"))
+                    if status.get("status") == "succeeded":
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(status.get("status"), "succeeded")
+
+    def test_finalize_job_uses_latest_persisted_stop_state(self) -> None:
+        with TemporaryDirectory() as tmp:
+            job_dir = Path(tmp)
+            stale = {"id": "job-1", "status": "running", "message": "任务已启动。"}
+            _write_job(job_dir, {**stale, "status": "stopping", "message": "正在停止任务。"})
+
+            finalized = _finalize_job(job_dir, stale, -15)
+
+            self.assertEqual(finalized["status"], "cancelled")
+            self.assertEqual(finalized["message"], "任务已停止。")
+            persisted = json.loads((job_dir / "job-1.json").read_text(encoding="utf-8"))
+            self.assertEqual(persisted["status"], "cancelled")
+            self.assertEqual(list(job_dir.glob(".job-1-*.json")), [])
+
+    def test_write_job_replaces_status_file_atomically(self) -> None:
+        with TemporaryDirectory() as tmp:
+            job_dir = Path(tmp)
+            with patch("src.dashboard_control.os.replace", wraps=os.replace) as replace:
+                _write_job(job_dir, {"id": "job-1", "status": "running"})
+
+            replace.assert_called_once()
+            self.assertEqual(json.loads((job_dir / "job-1.json").read_text(encoding="utf-8"))["status"], "running")
+
+    def test_pid_match_requires_command_line_evidence(self) -> None:
+        with patch("src.dashboard_control._pid_command_line", return_value=""):
+            self.assertFalse(_pid_matches_job(123, ["python", "scripts/run_auto_signal.py"]))
+
     def test_repair_command_uses_daily_basic_repair_action(self) -> None:
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp)
@@ -463,6 +546,42 @@ class DashboardControlTests(unittest.TestCase):
             self.assertEqual(job["status"], "cancelled")
             self.assertEqual(job["message"], "任务已停止。")
             self.assertEqual(job["return_code"], -15)
+
+    def test_stop_dashboard_job_does_not_terminate_an_unverified_pid(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            job_dir = out_dir / "dashboard_jobs"
+            job_dir.mkdir()
+            (job_dir / "job-1.json").write_text(
+                json.dumps(
+                    {
+                        "id": "job-1",
+                        "label": "重跑自动信号（正常门槛输出）",
+                        "status": "running",
+                        "message": "任务已启动。",
+                        "command": ["python", "scripts/run_auto_signal.py"],
+                        "started_at": "2026-06-24T01:07:39",
+                        "completed_at": None,
+                        "return_code": None,
+                        "log_path": str(out_dir / "job.log"),
+                        "pid": 123,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                patch("src.dashboard_control._output_dir", return_value=out_dir),
+                patch("src.dashboard_control._pid_is_running", return_value=True),
+                patch("src.dashboard_control._pid_command_line", return_value=""),
+                patch("src.dashboard_control._terminate_job_process") as terminate,
+            ):
+                with self.assertRaisesRegex(DashboardJobStopError, "not running"):
+                    stop_dashboard_job("job-1")
+
+            persisted = json.loads((job_dir / "job-1.json").read_text(encoding="utf-8"))
+            self.assertEqual(persisted["status"], "stale")
+            terminate.assert_not_called()
 
     def test_stop_dashboard_job_rejects_completed_job(self) -> None:
         with TemporaryDirectory() as tmp:
