@@ -524,9 +524,15 @@ def _quality_gate(gate_id: str, label: str, payload: Mapping[str, Any]) -> dict[
         return _gate(gate_id, label, "missing", "No artifact found.", [])
     issues = _string_list(payload.get("issues"))
     status = "pass" if bool(payload.get("is_acceptable")) else "fail"
+    annual_return = payload.get("annual_return")
+    if annual_return is None:
+        annual_return = payload.get("annual_return_mean")
+    max_drawdown = payload.get("max_drawdown")
+    if max_drawdown is None:
+        max_drawdown = payload.get("max_drawdown_worst")
     details = {
-        "annual_return": payload.get("annual_return") or payload.get("annual_return_mean"),
-        "max_drawdown": payload.get("max_drawdown") or payload.get("max_drawdown_worst"),
+        "annual_return": annual_return,
+        "max_drawdown": max_drawdown,
         "windows": payload.get("windows"),
     }
     return _gate(gate_id, label, status, "Acceptable." if status == "pass" else _issue_summary(issues, "Not acceptable."), issues, details)

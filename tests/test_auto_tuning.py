@@ -83,6 +83,49 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(selected["top_n"], 7)
         self.assertEqual(selected["rank_buffer"], 20)
 
+    def test_summarize_parameter_validation_rejects_missing_required_metrics(self) -> None:
+        validation = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 5,
+                    "max_turnover": 1,
+                    "rank_buffer": 10,
+                    "rebalance_freq": "monthly",
+                    "optimization_score": 1.0,
+                    "annual_return": 0.25,
+                    "sharpe": 1.0,
+                    "annual_turnover": 2.0,
+                    "annual_trade_cost_ratio": 0.01,
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "missing metric columns:.*max_drawdown"):
+            summarize_parameter_validation(validation)
+
+    def test_summarize_parameter_validation_rejects_nonnumeric_required_metrics(self) -> None:
+        validation = pd.DataFrame(
+            [
+                {
+                    "factor_group": "momentum",
+                    "top_n": 5,
+                    "max_turnover": 1,
+                    "rank_buffer": 10,
+                    "rebalance_freq": "monthly",
+                    "optimization_score": 1.0,
+                    "annual_return": "not-a-number",
+                    "sharpe": 1.0,
+                    "max_drawdown": -0.10,
+                    "annual_turnover": 2.0,
+                    "annual_trade_cost_ratio": 0.01,
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "missing or nonnumeric metrics:.*annual_return"):
+            summarize_parameter_validation(validation)
+
     def test_select_stable_params_prefers_rows_that_meet_target_profile(self) -> None:
         """函数说明：验证 test_select_stable_params_prefers_rows_that_meet_target_profile 覆盖的行为场景。"""
         summary = pd.DataFrame(
@@ -448,6 +491,33 @@ class AutoTuningTests(unittest.TestCase):
         self.assertEqual(quality.years_breaching_drawdown_limit, [2023])
         self.assertTrue(any(issue.startswith("backtest_yearly_annual_return_below_threshold") for issue in quality.issues))
         self.assertTrue(any(issue.startswith("backtest_yearly_max_drawdown_worse_than_limit") for issue in quality.issues))
+
+    def test_assess_backtest_quality_rejects_incomplete_yearly_evidence(self) -> None:
+        yearly = pd.DataFrame(
+            [
+                {"year": 2022, "annual_return": None, "max_drawdown": -0.10},
+                {"year": 2023, "annual_return": 0.25, "max_drawdown": "not-a-number"},
+            ]
+        )
+
+        quality = assess_backtest_quality(
+            {"annual_return": 0.25, "max_drawdown": -0.15, "calmar": 1.66},
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},
+            yearly=yearly,
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertIn("backtest_yearly_annual_return_missing_or_invalid:2022", quality.issues)
+        self.assertIn("backtest_yearly_max_drawdown_missing_or_invalid:2023", quality.issues)
+
+    def test_assess_backtest_quality_rejects_missing_top_level_evidence(self) -> None:
+        quality = assess_backtest_quality(
+            {"annual_return": 0.25, "calmar": 1.66},
+            {"min_backtest_annual_return": 0.20, "max_backtest_drawdown_limit": -0.20},
+        )
+
+        self.assertFalse(quality.is_acceptable)
+        self.assertIn("backtest_max_drawdown_missing_or_invalid", quality.issues)
 
     def test_assess_backtest_quality_accepts_target_profile(self) -> None:
         """函数说明：验证 test_assess_backtest_quality_accepts_target_profile 覆盖的行为场景。"""

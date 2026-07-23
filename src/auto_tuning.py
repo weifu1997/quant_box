@@ -32,6 +32,14 @@ METRIC_DEFAULTS = {
     "annual_trade_cost_ratio": 0.0,
     "win_rate": 0.0,
 }
+REQUIRED_VALIDATION_METRICS = (
+    "optimization_score",
+    "annual_return",
+    "sharpe",
+    "max_drawdown",
+    "annual_turnover",
+    "annual_trade_cost_ratio",
+)
 
 
 @dataclass
@@ -96,10 +104,23 @@ def summarize_parameter_validation(
     if missing_params:
         raise ValueError(f"Validation results missing parameter columns: {missing_params}")
 
+    missing_metrics = [column for column in REQUIRED_VALIDATION_METRICS if column not in frame.columns]
+    if missing_metrics:
+        raise ValueError(f"Validation results missing metric columns: {missing_metrics}")
+
+    invalid_metrics: list[str] = []
     for column, default in METRIC_DEFAULTS.items():
         if column not in frame.columns:
             frame[column] = default
-        frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(default)
+        parsed = pd.to_numeric(frame[column], errors="coerce")
+        if column in REQUIRED_VALIDATION_METRICS:
+            invalid = parsed.isna() | parsed.abs().eq(float("inf"))
+            if invalid.any():
+                rows = ",".join(str(index) for index in frame.index[invalid][:5])
+                invalid_metrics.append(f"{column} rows [{rows}]")
+        frame[column] = parsed.fillna(default)
+    if invalid_metrics:
+        raise ValueError(f"Validation results contain missing or nonnumeric metrics: {'; '.join(invalid_metrics)}")
 
     grouped = frame.groupby(param_columns, dropna=False)
     summary = grouped.agg(
@@ -276,8 +297,16 @@ def assess_backtest_quality(
             years_breaching_drawdown_limit=[],
         )
 
-    annual_return = _number(metrics.get("annual_return"), 0.0)
-    observed_drawdown = _number(metrics.get("max_drawdown"), 0.0)
+    annual_return = _required_quality_number(
+        metrics.get("annual_return"),
+        "backtest_annual_return_missing_or_invalid",
+        issues,
+    )
+    observed_drawdown = _required_quality_number(
+        metrics.get("max_drawdown"),
+        "backtest_max_drawdown_missing_or_invalid",
+        issues,
+    )
     calmar = _number(metrics.get("calmar"), 0.0)
     yearly_quality = _assess_yearly_backtest_quality(yearly, min_yearly_return, max_yearly_drawdown)
 
@@ -331,7 +360,24 @@ def _assess_yearly_backtest_quality(
     frame["year"] = pd.to_numeric(frame["year"], errors="coerce").astype("Int64")
     frame["annual_return"] = pd.to_numeric(frame["annual_return"], errors="coerce")
     frame["max_drawdown"] = pd.to_numeric(frame["max_drawdown"], errors="coerce")
+    issues: list[str] = []
+    invalid_year = frame["year"].isna()
+    if invalid_year.any():
+        rows = ",".join(str(position) for position, invalid in enumerate(invalid_year.to_list()) if invalid)
+        issues.append(f"backtest_yearly_year_missing_or_invalid:rows={rows}")
     frame = frame.dropna(subset=["year"])
+
+    invalid_annual = frame["annual_return"].isna() | frame["annual_return"].abs().eq(float("inf"))
+    if invalid_annual.any():
+        years = ",".join(str(int(year)) for year in dict.fromkeys(frame.loc[invalid_annual, "year"].to_list()))
+        issues.append(f"backtest_yearly_annual_return_missing_or_invalid:{years}")
+        frame.loc[invalid_annual, "annual_return"] = float("nan")
+    invalid_drawdown = frame["max_drawdown"].isna() | frame["max_drawdown"].abs().eq(float("inf"))
+    if invalid_drawdown.any():
+        years = ",".join(str(int(year)) for year in dict.fromkeys(frame.loc[invalid_drawdown, "year"].to_list()))
+        issues.append(f"backtest_yearly_max_drawdown_missing_or_invalid:{years}")
+        frame.loc[invalid_drawdown, "max_drawdown"] = float("nan")
+
     annual = frame["annual_return"].dropna()
     drawdown = frame["max_drawdown"].dropna()
     result["yearly_min_annual_return"] = float(annual.min()) if not annual.empty else 0.0
@@ -342,7 +388,6 @@ def _assess_yearly_backtest_quality(
     result["years_below_return_target"] = [int(year) for year in below_return["year"].dropna().to_list()]
     result["years_breaching_drawdown_limit"] = [int(year) for year in drawdown_breach["year"].dropna().to_list()]
 
-    issues: list[str] = []
     if not below_return.empty:
         issues.append(
             "backtest_yearly_annual_return_below_threshold:"
@@ -429,4 +474,13 @@ def _number(value: Any, default: float) -> float:
     parsed = pd.to_numeric(value, errors="coerce")
     if pd.isna(parsed):
         return default
+    return float(parsed)
+
+
+def _required_quality_number(value: Any, issue: str, issues: list[str]) -> float:
+    """Parse required quality evidence and record a fail-closed issue when unavailable."""
+    parsed = pd.to_numeric(value, errors="coerce")
+    if pd.isna(parsed) or abs(float(parsed)) == float("inf"):
+        issues.append(issue)
+        return 0.0
     return float(parsed)

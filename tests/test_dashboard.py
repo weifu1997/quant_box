@@ -79,6 +79,31 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(snapshot["orders"]["exists"], False)
             self.assertTrue(any(item["id"] == "auto_signal_report" and not item["exists"] for item in snapshot["artifacts"]))
 
+    def test_build_dashboard_snapshot_preserves_explicit_zero_quality_metrics(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            (out_dir / "auto_signal_report.json").write_text(
+                json.dumps(
+                    {
+                        "parameter_quality": {
+                            "is_acceptable": False,
+                            "issues": ["annual_return_mean_below_threshold"],
+                            "annual_return": 0.0,
+                            "annual_return_mean": 0.25,
+                            "max_drawdown": 0.0,
+                            "max_drawdown_worst": -0.18,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = build_dashboard_snapshot(out_dir)
+            gate = next(item for item in snapshot["gates"] if item["id"] == "parameter_quality")
+
+            self.assertEqual(gate["details"]["annual_return"], 0.0)
+            self.assertEqual(gate["details"]["max_drawdown"], 0.0)
+
     def test_build_dashboard_snapshot_reports_malformed_json(self) -> None:
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp)

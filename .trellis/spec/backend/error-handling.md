@@ -153,6 +153,76 @@ Long workflows should write status artifacts before raising when possible:
 
 ---
 
+## Scenario: Quality Evidence Integrity
+
+### 1. Scope / Trigger
+
+- Trigger: parameter validation, backtest quality, or dashboard quality-gate code consumes financial evidence that can be missing, nonnumeric, non-finite, or explicitly zero.
+- Owners: `src/auto_tuning.py` validates quality evidence; `src/dashboard.py` preserves the validated values in the compact dashboard view model.
+
+### 2. Signatures
+
+- `summarize_parameter_validation(validation, param_columns=None) -> pd.DataFrame`
+- `assess_backtest_quality(metrics, quality_config=None, yearly=None) -> BacktestQualityReport`
+- `DashboardSnapshot.gates[].details -> {annual_return, max_drawdown, windows}`
+
+### 3. Contracts
+
+- Non-empty parameter validation requires numeric, finite `optimization_score`, `annual_return`, `sharpe`, `max_drawdown`, `annual_turnover`, and `annual_trade_cost_ratio` values for every row. `win_rate` remains optional for compatibility because it is not used by selection or quality gates.
+- Missing required validation columns raise `ValueError`; missing, nonnumeric, or non-finite required row values also raise `ValueError` with a short row preview.
+- Top-level backtest `annual_return` and `max_drawdown` are required evidence. Unavailable values make the report unacceptable and add `backtest_annual_return_missing_or_invalid` or `backtest_max_drawdown_missing_or_invalid`.
+- `yearly=None` keeps yearly checks optional for compatibility. Once a yearly DataFrame is provided, empty data, missing columns, invalid years, and unavailable return/drawdown values are explicit failures.
+- Yearly metric issues use `backtest_yearly_annual_return_missing_or_invalid:<years>` and `backtest_yearly_max_drawdown_missing_or_invalid:<years>` so reports identify incomplete periods.
+- Dashboard fallback fields are selected by presence, not truthiness. An explicit `0.0` `annual_return` or `max_drawdown` must not be replaced by `annual_return_mean` or `max_drawdown_worst`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Required validation metric column absent | Raise `ValueError("Validation results missing metric columns: ...")` |
+| Required validation cell unavailable or non-finite | Raise `ValueError("Validation results contain missing or nonnumeric metrics: ...")` |
+| Top-level return or drawdown unavailable | Return an unacceptable report with the matching stable issue id |
+| Yearly DataFrame supplied with unavailable metric | Return an unacceptable report with the metric and affected years |
+| Yearly DataFrame not supplied | Skip yearly checks; keep top-level quality checks |
+| Dashboard primary metric is `0.0` | Preserve `0.0` in `gates[].details` |
+| Dashboard primary metric is `None` or absent | Fall back to the corresponding summary metric |
+
+### 5. Good/Base/Bad Cases
+
+- Good: every validation window and yearly row has finite evidence; selection and quality thresholds evaluate the complete sample.
+- Base: legacy callers omit `yearly`; top-level backtest gates still run without fabricating yearly failures.
+- Bad: coercing `NaN` to `0.0`, dropping the affected year, or using `primary or fallback` can make incomplete or zero evidence appear valid.
+
+### 6. Tests Required
+
+- `tests/test_auto_tuning.py` must assert missing validation columns and nonnumeric cells raise precise `ValueError` messages.
+- `tests/test_auto_tuning.py` must assert missing top-level and provided-but-incomplete yearly evidence produces an unacceptable report with stable issue ids.
+- `tests/test_dashboard.py` must assert explicit zero primary metrics survive snapshot construction even when nonzero fallback fields exist.
+- Auto-signal stage and CLI tests must remain green so issue ids continue through quality JSON, block reasons, and candidate-only output gating.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+frame["annual_return"] = pd.to_numeric(frame["annual_return"], errors="coerce").fillna(0.0)
+details["annual_return"] = payload.get("annual_return") or payload.get("annual_return_mean")
+```
+
+#### Correct
+
+```python
+invalid = pd.to_numeric(frame["annual_return"], errors="coerce").isna()
+if invalid.any():
+    raise ValueError("Validation results contain missing or nonnumeric metrics: annual_return")
+
+annual_return = payload.get("annual_return")
+if annual_return is None:
+    annual_return = payload.get("annual_return_mean")
+```
+
+---
+
 ## Common Mistakes
 
 ### Catching `Exception` without preserving diagnostics
